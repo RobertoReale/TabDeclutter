@@ -74,11 +74,26 @@ is the most expensive thing you can do here.
 - **Why:** the reason, with a link to the official doc when an API was involved.
 ```
 
-`docs/MANUAL-CHECKS.md`, one unticked line per check, under the heading of the task that added it:
+`docs/MANUAL-CHECKS.md`: the owner is not a developer of this code, and a script shows him these
+entries word for word when the phase ends. So write each one **in Italian, as instructions he can
+follow without asking anything**: a one-line title, then numbered steps indented by two spaces,
+then the expected result. Use the test build he is given (`%USERPROFILE%\TabDeclutter-prova\chrome`
+and `...\firefox`, loaded as the page he sees explains); never ask him to build, run a command or
+open the repository. Say how long it takes if it is more than a few minutes. Before writing a step,
+make sure it is actually possible: for example, a Firefox *temporary* add-on disappears when
+Firefox closes, so a check that needs a restart must say how to do it. Add new entries at the end of
+the file, after the existing ones and outside the "Prima della pubblicazione" section unless that is
+where they belong.
 
 ```markdown
-- [ ] (<task id>) <what to do> → <what should happen>
+- [ ] (M1.8) L'età delle schede sopravvive al riavvio di Chrome
+  1. Con la build di prova installata, apri 3 schede qualsiasi e lasciale aperte almeno 10 minuti.
+  2. Chiudi Chrome del tutto e riaprilo (con "Continua da dove eri rimasto" attivo).
+  3. Apri il pannello di TabDeclutter.
+  Risultato atteso: le 3 schede non risultano "appena aperte"; l'età è quella di prima.
 ```
+
+A check whose phase id has no dot (for example `setup`) is shown only at release time.
 
 ## Committing
 

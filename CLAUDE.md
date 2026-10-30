@@ -9,12 +9,48 @@ This repository is built by unattended agent sessions driven by
 `plan/phase-<id>` branch and one commit.
 
 - `PLAN.md`: the product spec (Italian). Binding.
-- `TASKS.md`: the execution plan, the invariants (§2) and the progress ledger (§12).
-- `AGENT-RULES.md`: how to behave while working here. **Read it before changing anything**,
-  including in an interactive session.
+- `TASKS.md`: the execution plan, the invariants (§2), the ledger (§12) and the fix tasks (§13).
+- `AGENT-RULES.md`: how to behave while working here. Unattended sessions must read it first.
 - `PROMPTS.md`: the prompt each unattended session receives.
 - `phasekit.json`: the gates (the only definition of "green") and the task sequence.
-- `RUNNING.md`: how the owner starts, watches and answers the unattended sequence.
+- `tools/assistant.ps1`: the owner's assistant (see below).
+- `RUNNING.md`: the owner's short guide.
 
-While `phasekit auto` is running, do not edit files in this working tree from an interactive
-session. The runner needs a clean tree and the right branch checked out.
+## If you are an interactive session talking to the owner
+
+The owner (Roberto) does not drive the build and does not want to remember commands or checks.
+The build runs on its own; a scheduled task (`tabdeclutter-assistant`, every 10 min) watches it,
+and when something needs him it plays a sound, shows a notification and opens
+`Desktop\TabDeclutter - cosa fare.html`. That page sends him to you with a sentence to type. Your
+job is to turn that sentence into the right action, so he only ever does the part a person must
+do: answer a product question, or try the extension by hand.
+
+Speak to him in **Italian, plainly, briefly**. He is not reading the code. Run every tool from the
+repository root with `pwsh -NoProfile -File tools/assistant.ps1 <mode>`.
+
+**Always start with `-Report`.** It prints the state (`status=` running / answering / stopped /
+paused / dead / idle / not-started / finished), the current task, what he has to do and, for a stop,
+phasekit's note and the agent's last message. Then act on what he asked:
+
+| He says something like | You do |
+|---|---|
+| "cosa devo fare?", "a che punto siamo?" | `-Report`, then explain in two or three sentences what is happening and what, if anything, is his to do. |
+| "avvia", "fai ripartire", "riprendi" | If `status=stopped`, handle the stop first (next row): restarting would only reach the same question again. Otherwise `-Start`. If the assistant task does not exist (`Get-ScheduledTask tabdeclutter-assistant`), run `-Install` first. |
+| "si è fermata, cosa devo fare?" | Read the stop in `-Report`. If you need more, look at the branch (`git log --oneline main..plan/phase-<task>`, `git status`, `git diff --stat`) and the tail of the newest `.phasekit/logs/phase-<task>-*.log`. Explain the question in plain words. **If the answer is technical and PLAN.md or TASKS.md decides it, propose the answer yourself.** Only a real product choice goes to him as a question, with your recommendation. Once he agrees, write the answer (English, precise, actionable) to a file in your scratchpad and run `-Answer <task> -File <file>`. That hands it to the same conversation and then restarts the sequence. Tell him it is done and that he will be called again if needed. |
+| "ho fatto le verifiche della fase X", "X non funziona" | Record the outcome on main with the edit procedure below. Tick (`- [x]`) every check of that phase he confirmed. For each problem: add a fix task `F.<n>` (TASKS.md §13 format, his words included) and its ledger row at the end of §12. Insert `F.<n>` in `autoSequence` right after `current=` (or after the stopped/next target if nothing is running). Change the failed check's line to `- [x] (…) … → problema, vedi F.<n>`. If a check could not be done because the instructions were wrong or impossible, that is a problem too: a fix task that rewrites the check. |
+| "voglio provare l'estensione" | `-Build` (a stable build of main in `%USERPROFILE%\TabDeclutter-prova`), then tell him how to load it (the page explains it too: `-Open`). |
+| "metti in pausa" | `pwsh -NoProfile -File ../phasekit/bin/phasekit.ps1 pause`. To resume later: `-Start`. |
+| a change of plans ("aggiungi…", "togli…") | Edit TASKS.md (and `autoSequence`) with the edit procedure. Respect PLAN.md §2.2 (out of scope) and point out any conflict before doing it. |
+
+**Editing anything in this repository while a sequence exists.** The working tree belongs to the
+runner: it is on a task branch, possibly mid-task. Never edit, commit, build or run gates there
+directly. Use:
+
+1. `-BeginEdit`: pauses the runner and prints `EDIT_DIR=…`, a checkout of `main` (the repo itself if
+   main is checked out, otherwise a separate worktree).
+2. Edit the files **in EDIT_DIR**.
+3. `-EndEdit -Message "<conventional commit message>"`: commits to main and resumes the runner if
+   it was running.
+
+Never add `Co-authored-by` or any attribution to Claude in commits. Never push, create a GitHub
+repository or publish to a store unless he asks.

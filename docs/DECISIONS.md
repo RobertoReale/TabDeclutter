@@ -19,3 +19,15 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Decision:** `tabdeclutter@robertoreale`, provisional.
 - **Why:** the build needs an id from M0.1. The owner confirms or changes it before the first AMO
   submission (an entry in MANUAL-CHECKS.md).
+
+## setup — The owner is called, not polled
+- **Context:** the owner does not want to watch the run or remember which manual checks are due.
+- **Decision:** `tools/assistant.ps1` runs every 10 minutes as a scheduled task. When the sequence
+  stops, a phase with manual checks finishes, the runner dies or everything is done, it plays a
+  sound, shows a notification and opens `Desktop\TabDeclutter - cosa fare.html` with step-by-step
+  instructions. Manual checks run on a stable build of `main` copied to
+  `%USERPROFILE%\TabDeclutter-prova`, never on the runner's working tree. Answers, check results
+  and fix tasks go through an interactive Claude session (CLAUDE.md), which edits `main` only via
+  `-BeginEdit`/`-EndEdit` so the runner's tree is never touched.
+- **Why:** a stop that nobody notices costs hours, and checks done long after their phase find
+  problems that later work has already been built on.

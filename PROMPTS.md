@@ -21,8 +21,10 @@ CHECK FIRST, and report each item as pass or fail:
   2. Every command in the `gates` array of phasekit.json exits 0, run in order and in the
      foreground. Exception: if package.json does not exist yet, this is the first task and it
      creates the gates. Say so and skip this item.
-  3. The ledger row immediately before {{TASK}} in TASKS.md §12 is ticked AND has a matching
-     commit in `git log`. (Skip this item for the first row.)
+  3. The target immediately before {{TASK}} in the `autoSequence` array of phasekit.json is
+     ticked in the TASKS.md ledger AND has a matching commit in `git log`. (Skip this item if
+     {{TASK}} is the first entry.) Use autoSequence, not ledger order: fix tasks (F.n) are
+     inserted into the sequence where they must run.
 If any item fails, STOP and report. Do not repair it silently and do not continue.
 
 THEN: carry out task {{TASK}} and nothing else. Respect the invariants in TASKS.md §2 and the

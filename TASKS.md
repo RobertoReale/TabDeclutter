@@ -24,8 +24,11 @@ M0.1 è l'unico task che parte senza gates (li crea lui).
 - `docs/DECISIONS.md`: ogni scelta non scritta in PLAN.md (versioni, librerie, API che si comportano
   diversamente dalla specifica, tarature). Una voce per decisione, con il task che l'ha presa.
 - `docs/MANUAL-CHECKS.md`: tutto ciò che non si può verificare in automatico (un riavvio vero del
-  browser, uno screen reader, il modello AI sul PC reale). L'agente aggiunge le voci; le spunta
-  l'utente. Non blocca la sequenza.
+  browser, uno screen reader, il modello AI sul PC reale). L'agente aggiunge le voci, scritte come
+  istruzioni passo-passo per l'utente. A fine fase `tools/assistant.ps1` le mostra all'utente
+  insieme a una build di prova. Non bloccano la sequenza.
+- I problemi trovati nelle verifiche diventano task di correzione `F.n` (sezione 13), inseriti in
+  `autoSequence` subito dopo il task in corso.
 
 ### 1.3 Ordine
 
@@ -1072,3 +1075,13 @@ Spuntato **nello stesso commit** del task, mai prima. `phasekit status` lo mostr
 - [ ] M7.4 Screenshot per gli store
 - [ ] M7.5 Pacchetti e build riproducibile
 - [ ] M7.6 Checklist di rilascio e audit finale
+
+## 13. PHASE F — Correzioni dalle verifiche manuali
+
+Task aggiunti durante il lavoro, quando una verifica manuale trova un problema. Ognuno ha la
+stessa forma degli altri: titolo `### F.<n> — …`, la verifica che l'ha fatto nascere, cosa
+succede e cosa dovrebbe succedere (con le parole dell'utente), **Spec**, **Cosa fare**,
+**Perimetro**, **Fatto quando**. Il "Fatto quando" include sempre un test automatico che
+riproduce il problema, quando si può, e una nuova voce in MANUAL-CHECKS per riprovarlo a mano.
+La riga del ledger va in fondo alla sezione 12 e il target in `autoSequence` subito dopo il task
+in corso.
