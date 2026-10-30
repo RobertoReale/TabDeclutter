@@ -13,7 +13,7 @@ for a person to paste into an interactive session.
 Read AGENT-RULES.md in full before anything else. It is short, and every rule in it applies.
 
 Your task is quoted at the end of this prompt. Do not read TASKS.md or PLAN.md whole: PLAN.md is
-the binding product spec (Italian, ~76 KB). Run `grep -n '^#' PLAN.md` once and read only the
+the binding product spec (~74 KB). Run `grep -n '^#' PLAN.md` once and read only the
 sections your task lists under **Spec**. Grep TASKS.md for the ledger and the invariants (§2).
 
 CHECK FIRST, and report each item as pass or fail:

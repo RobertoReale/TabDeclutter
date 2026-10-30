@@ -1,63 +1,63 @@
-# Come funziona, per te
+# How it works, for you
 
-L'estensione la costruisce un agente da solo, un task alla volta. Tu non devi ricordarti niente:
-**quando serve qualcosa da te, è il sistema a chiamarti.**
+The extension is built by an agent on its own, one task at a time. You do not have to remember
+anything: **when something is needed from you, the system calls you.**
 
-## Come vieni chiamato
+## How you are called
 
-Ogni 10 minuti un'attività pianificata (`tabdeclutter-assistant`) controlla il lavoro. Quando c'è
-qualcosa per te:
+Every 10 minutes a scheduled task (`tabdeclutter-assistant`) checks on the work. When there is
+something for you:
 
-1. senti un suono e vedi una notifica di Windows;
-2. ti si apre nel browser la pagina **"TabDeclutter – cosa fare"** (è anche sul Desktop);
-3. la pagina ti dice cosa fare, passo per passo. Quasi sempre: aprire Claude Code nella cartella
-   TabDeclutter e scrivere una frase, già scritta lì per te.
+1. you hear a sound and see a Windows notification;
+2. the page **"TabDeclutter – cosa fare"** opens in your browser (it is also on the Desktop);
+3. the page tells you what to do, step by step. Almost always: open Claude Code in the
+   TabDeclutter folder and type a sentence, already written there for you.
 
-Ti chiama quando:
+It calls you when:
 
-- **si è fermato e aspetta una risposta.** Te lo spiega Claude, ti propone la risposta, la invia
-  lui e fa ripartire tutto;
-- **finisce una fase** (M0, M1…) che ha verifiche manuali. Trovi una build di prova pronta in
-  `C:\Users\Admin\TabDeclutter-prova` e le istruzioni per ogni prova. Poi dici a Claude com'è
-  andata, a parole tue: lui spunta le verifiche e, se qualcosa non va, aggiunge un task di
-  correzione che l'agente fa subito;
-- **il processo si è interrotto** e non è ripartito da solo;
-- **è tutto finito.** Restano i passi della pubblicazione, che fai con Claude.
+- **it has stopped and is waiting for an answer.** Claude explains the question to you, proposes
+  the answer, sends it and restarts everything;
+- **a phase finishes** (M0, M1…) that has manual checks. You find a test build ready in
+  `C:\Users\Admin\TabDeclutter-prova` and instructions for each check. Then you tell Claude how it
+  went, in your own words: Claude ticks the checks and, if something is wrong, adds a fix task that
+  the agent does straight away;
+- **the process has died** and has not restarted on its own;
+- **everything is finished.** What remains are the publishing steps, which you do with Claude.
 
-Se lasci qualcosa in sospeso te lo ricorda: uno stop ogni 3 ore, le verifiche una volta al giorno,
-solo tra le 9 e le 22.
+If you leave something pending it reminds you: a stop every 3 hours, the checks once a day, only
+between 9:00 and 22:00.
 
-## Le frasi da scrivere a Claude
+## The sentences to type to Claude
 
-Apri Claude Code (in VS Code) nella cartella TabDeclutter:
+Open Claude Code (in VS Code) in the TabDeclutter folder:
 
-| Vuoi… | Scrivi |
+| You want to… | Type |
 |---|---|
-| far partire tutto la prima volta | «Avvia la sequenza» |
-| sapere a che punto è e se devi fare qualcosa | «Cosa devo fare?» |
-| rispondere a uno stop | «La sequenza si è fermata, cosa devo fare?» |
-| dire com'è andata una verifica | «Ho fatto le verifiche della fase M1: …» |
-| provare l'estensione quando vuoi | «Voglio provare l'estensione» |
-| fermare tutto per un po' | «Metti in pausa» / «Riprendi la sequenza» |
-| cambiare qualcosa nel piano | descrivilo a parole tue |
+| start everything the first time | «Avvia la sequenza» |
+| know where things stand and whether you have to do something | «Cosa devo fare?» |
+| answer a stop | «La sequenza si è fermata, cosa devo fare?» |
+| say how a check went | «Ho fatto le verifiche della fase M1: …» |
+| try the extension whenever you like | «Voglio provare l'estensione» |
+| stop everything for a while | «Metti in pausa» / «Riprendi la sequenza» |
+| change something in the plan | describe it in your own words |
 
-## Le uniche regole
+## The only rules
 
-- **Non modificare file nella cartella TabDeclutter** mentre l'agente lavora. Se vuoi cambiare
-  qualcosa, chiedilo a Claude: lo fa in modo sicuro.
-- Il PC deve restare acceso. Lo standby è bloccato finché la sequenza lavora; dopo un riavvio
-  riparte da solo.
-- La pubblicazione sugli store la fai tu: l'agente prepara pacchetti e testi, ma non invia niente.
+- **Do not edit files in the TabDeclutter folder** while the agent is working. If you want to
+  change something, ask Claude: it does it safely.
+- The PC must stay on. Standby is blocked while the sequence is working; after a reboot it starts
+  again on its own.
+- Publishing to the stores is up to you: the agent prepares packages and texts, but sends nothing.
 
-## Per curiosità (non serve)
+## If you are curious (not needed)
 
-In PowerShell, dalla cartella TabDeclutter:
+In PowerShell, from the TabDeclutter folder:
 
-| Comando | Cosa mostra |
+| Command | What it shows |
 |---|---|
-| `phasekit dashboard -Watch` | avanzamento e stima del tempo rimanente |
-| `phasekit logs -Follow` | cosa sta facendo l'agente in questo momento |
-| `phasekit steps` | l'elenco dei task |
-| `pwsh tools/assistant.ps1 -Open` | riapre la pagina "cosa fare" aggiornata |
+| `phasekit dashboard -Watch` | progress and an estimate of the time left |
+| `phasekit logs -Follow` | what the agent is doing right now |
+| `phasekit steps` | the list of tasks |
+| `pwsh tools/assistant.ps1 -Open` | reopens the up-to-date "cosa fare" page |
 
-A lavoro finito, per togliere le attività pianificate: `pwsh tools/assistant.ps1 -Uninstall`.
+When the work is finished, to remove the scheduled tasks: `pwsh tools/assistant.ps1 -Uninstall`.

@@ -14,7 +14,7 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   gates are re-run before every merge.
 
 ## setup — Firefox add-on id (provisional)
-- **Context:** PLAN.md §5.4 leaves `gecko.id` as `tabdeclutter@<dominio-o-nome-utente>`, and the id
+- **Context:** PLAN.md §5.4 leaves `gecko.id` as `tabdeclutter@<domain-or-username>`, and the id
   can never change after the first AMO submission.
 - **Decision:** `tabdeclutter@robertoreale`, provisional.
 - **Why:** the build needs an id from M0.1. The owner confirms or changes it before the first AMO

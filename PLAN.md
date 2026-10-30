@@ -1,103 +1,105 @@
-# TabDeclutter: piano di progettazione e implementazione
+# TabDeclutter: design and implementation plan
 
-> Documento da consegnare a Claude (o a un altro sviluppatore) per costruire l'estensione da zero.
-> Descrive **cosa** costruire, **perché** e **come**, con criteri di accettazione per ogni fase.
-> Identificatori, codice e nomi di file sono in inglese; la UI è bilingue (IT/EN).
-
----
-
-## 0. Come usare questo documento (istruzioni per chi implementa)
-
-1. Leggi tutto il documento prima di scrivere codice. Le sezioni 3 (principi) e 6 (algoritmo) sono vincolanti.
-2. Implementa **una milestone alla volta** (sezione 13), nell'ordine. Ogni milestone deve chiudersi con test verdi e con i suoi criteri di accettazione soddisfatti, prima di passare alla successiva.
-3. Se una API del browser si comporta diversamente da come è descritta qui (le API Chrome cambiano), verifica sulla documentazione ufficiale (developer.chrome.com), scegli la soluzione più semplice coerente con i principi e annota la decisione in `docs/DECISIONS.md`.
-4. Non aggiungere funzionalità non elencate. L'estensione deve fare **poche cose, fatte bene**.
+> A document to hand to Claude (or another developer) to build the extension from scratch.
+> It describes **what** to build, **why** and **how**, with acceptance criteria for every phase.
+> Identifiers, code and file names are in English; the UI is bilingual (IT/EN).
+> UI strings quoted in Italian (labels, reasons, messages) are the text of the `it` locale; the
+> `en` locale carries their English equivalents.
 
 ---
 
-## 1. Problema e obiettivo
+## 0. How to use this document (instructions for the implementer)
 
-Chi lavora molto nel browser accumula decine (o centinaia) di schede. Molte diventano inutili: ricerche già concluse, duplicati, pagine aperte "per dopo" e mai rilette, pagine di login o di errore. Chiuderle a mano è noioso e si ha paura di perdere qualcosa.
+1. Read the whole document before writing code. Sections 3 (principles) and 6 (algorithm) are binding.
+2. Implement **one milestone at a time** (section 13), in order. Every milestone must end with green tests and its acceptance criteria met before moving on to the next.
+3. If a browser API behaves differently from how it is described here (Chrome APIs change), check the official documentation (developer.chrome.com), choose the simplest solution consistent with the principles and record the decision in `docs/DECISIONS.md`.
+4. Do not add features that are not listed. The extension must do **few things, done well**.
 
-**TabDeclutter** fa tre cose:
+---
 
-1. **Declutter (Riordina)**: individua in modo spiegabile le schede probabilmente inutili e le **suggerisce** visivamente, raggruppate per motivo ("Duplicati", "Non aperte da 9 giorni", "Pagine di ricerca"…). L'utente le chiude con un clic, e ogni chiusura è **reversibile** (archivio + annulla).
-2. **Organize (Organizza)**: propone un'organizzazione delle schede rimaste in **gruppi di schede nativi di Chrome** (per sito o per argomento). Mostra un'anteprima modificabile e la applica solo dopo conferma.
-3. **Duplicate Guard (Protezione duplicati)**: **impedisce in tempo reale** di aprire una scheda già aperta. Quando apri una URL già presente, la nuova scheda viene chiusa e si torna a quella esistente, salvo che la URL sia in whitelist. Sostituisce del tutto l'estensione *Duplicate Tabs Closer*, che l'utente oggi usa insieme alle altre: **una sola estensione al posto di due** (sezione 8).
+## 1. Problem and goal
 
-### 1.1 Cosa esiste già e perché ha senso farla
+People who work a lot in the browser pile up dozens (or hundreds) of tabs. Many become useless: searches already finished, duplicates, pages opened "for later" and never read again, login or error pages. Closing them by hand is tedious, and people are afraid of losing something.
 
-| Strumento | Cosa fa | Limite |
+**TabDeclutter** does three things:
+
+1. **Declutter (Riordina)**: identifies, in an explainable way, the tabs that are probably useless and **suggests** them visually, grouped by reason ("Duplicati", "Non aperte da 9 giorni", "Pagine di ricerca"…). The user closes them with one click, and every close is **reversible** (archive + undo).
+2. **Organize (Organizza)**: proposes an organization of the remaining tabs into **native Chrome tab groups** (by site or by topic). It shows an editable preview and applies it only after confirmation.
+3. **Duplicate Guard (Protezione duplicati)**: **prevents, in real time,** opening a tab that is already open. When you open a URL that is already present, the new tab is closed and you go back to the existing one, unless the URL is whitelisted. It fully replaces the *Duplicate Tabs Closer* extension, which the user currently runs alongside the others: **one extension instead of two** (section 8).
+
+### 1.1 What already exists and why this one makes sense
+
+| Tool | What it does | Limit |
 |---|---|---|
-| **Tab Wrangler** (open source, GPLv3) | Chiude automaticamente le schede inattive dopo N minuti e le mette in un "Tab Corral" ripristinabile | Agisce **alla cieca e da solo**: usa solo il tempo di inattività e non suggerisce né spiega niente |
-| **Duplicate Tabs Closer** (open source) | Chiude automaticamente i duplicati, con priorità configurabili e whitelist (wildcard/regex) | Gestisce solo i duplicati: serve una seconda estensione per tutto il resto |
-| **Chrome "Organizza schede simili"** (nativo, dal 2024) | Propone gruppi con nome ed emoji | Solo raggruppamento: non individua le schede inutili. Funziona bene per dominio e peggio per argomento |
-| **Estensioni "AI tab manager"** (TabAutopilot, Tabnxt, ecc.) | Raggruppamento AI, snooze, sessioni, workspace | Spesso pesanti e piene di funzioni. Molte usano server/LLM remoti, quindi le URL lasciano il dispositivo. Le recensioni indipendenti le giudicano "sperimentali o poco affidabili" |
+| **Tab Wrangler** (open source, GPLv3) | Automatically closes tabs inactive for N minutes and puts them in a restorable "Tab Corral" | Acts **blindly and on its own**: uses only inactivity time and neither suggests nor explains anything |
+| **Duplicate Tabs Closer** (open source) | Automatically closes duplicates, with configurable priorities and a whitelist (wildcard/regex) | Handles only duplicates: a second extension is needed for everything else |
+| **Chrome "Organize similar tabs"** (native, since 2024) | Proposes groups with a name and an emoji | Grouping only: does not identify useless tabs. Works well by domain and worse by topic |
+| **"AI tab manager" extensions** (TabAutopilot, Tabnxt, etc.) | AI grouping, snooze, sessions, workspaces | Often heavy and full of features. Many use remote servers/LLMs, so URLs leave the device. Independent reviews call them "experimental or unreliable" |
 
-**Spazio libero**: uno strumento leggero e locale che **suggerisce e spiega** (senza agire in automatico), mette tutto in revisione con una sola schermata, rende ogni azione annullabile e poi aiuta a organizzare quello che resta. Nessun server, nessun account.
-
----
-
-## 2. Ambito
-
-### 2.1 In ambito (v1)
-- **Due target di prima classe, pubblicati entrambi**:
-  - **Chrome Web Store**: Chrome ≥ 121 (funziona anche su Edge/Brave/Vivaldi con lo stesso pacchetto);
-  - **Firefox Add-ons (AMO)**: Firefox desktop ≥ 140, Manifest V3.
-  Un'unica codebase, due build generate da WXT (sezione 5.5). Ogni funzionalità va implementata e testata su **entrambi** i browser. Le uniche differenze ammesse sono quelle elencate nella tabella della sezione 5.5.
-- Pannello laterale (Side Panel) come interfaccia principale.
-- Tracciamento locale dell'attività delle schede.
-- Punteggio di "inutilità" spiegabile con regole deterministiche.
-- Chiusura singola o di massa, "Mantieni", "Sospendi" (discard), archivio con ripristino, annulla.
-- Organizzazione in gruppi: per dominio (deterministica), per argomento (euristica locale), con AI on-device opzionale (Gemini Nano tramite Prompt API).
-- **Protezione duplicati in tempo reale** con le funzioni di Duplicate Tabs Closer usate davvero: modalità (solo segnala / chiudi automaticamente), comportamento sulla scheda rimasta, priorità (più vecchia / più recente / più vecchia + ricarica, HTTPS, fissate, scheda attiva, finestra attiva), ambito (finestra / tutte le finestre), regole di confronto URL, salta schede vuote, whitelist con `*` e `/regex/` (sezione 8).
-- Badge sull'icona con il numero di schede suggerite.
-- Impostazioni essenziali, i18n IT/EN, tema chiaro/scuro, accessibilità da tastiera.
-
-### 2.2 Fuori ambito (v1), da NON implementare
-- Chiusura automatica senza conferma, **tranne** la protezione duplicati quando l'utente la imposta su "Chiudi automaticamente".
-- Funzioni avanzate di Duplicate Tabs Closer poco usate: duplicati per somiglianza del titolo, regole URL "Group/Normalize/Path depth", container Firefox, integrazione Tree Style Tab, temi multipli, layout a due colonne.
-- Sincronizzazione cloud, account, backend, LLM remoti (OpenAI/Gemini API ecc.).
-- Content script / lettura del contenuto delle pagine (niente `<all_urls>`).
-- Sessioni/workspace salvati, snooze con sveglia, ricerca nella cronologia.
-- Embedding con modelli scaricati (transformers.js): valutabile in v2 (sezione 15).
-- Firefox per Android (niente tab groups né sidebar, `favIconUrl` non supportato) e Safari.
+**The open space**: a lightweight, local tool that **suggests and explains** (without acting automatically), puts everything up for review on a single screen, makes every action undoable and then helps organize what remains. No server, no account.
 
 ---
 
-## 3. Principi di design (vincolanti)
+## 2. Scope
 
-1. **Suggerisci, non agire.** Nessuna scheda viene chiusa senza un gesto esplicito dell'utente. **Unica eccezione**: la protezione duplicati in modalità "Chiudi automaticamente", che è una regola scelta esplicitamente dall'utente e chiude solo duplicati esatti secondo le regole configurate. Anche queste chiusure finiscono in archivio e sono ripristinabili.
-2. **Ogni suggerimento ha un motivo leggibile.** Niente punteggi opachi: l'utente vede "Duplicato di una scheda aperta", "Non la apri da 12 giorni", "Risultati di ricerca".
-3. **Tutto è reversibile.** Ogni chiusura finisce in archivio. Le chiusure di massa hanno un "Annulla" immediato.
-4. **Privacy totale.** Zero richieste di rete, zero analytics, nessun dato fuori dal dispositivo. L'AI, se presente, è solo on-device.
-5. **Il core funziona senza AI.** L'AI migliora solo nomi e raggruppamenti per argomento ed è un'aggiunta opzionale. Gemini Nano richiede hardware alto (16 GB RAM o più di 4 GB VRAM, 22 GB liberi) e non supporta ufficialmente l'italiano, quindi non può essere un requisito.
-6. **Leggerezza.** Service worker guidato da eventi (nessun polling), UI piccola, nessuna dipendenza pesante.
-7. **Permessi minimi.** Ogni permesso deve essere giustificato in `docs/PERMISSIONS.md`.
+### 2.1 In scope (v1)
+- **Two first-class targets, both published**:
+  - **Chrome Web Store**: Chrome ≥ 121 (also works on Edge/Brave/Vivaldi with the same package);
+  - **Firefox Add-ons (AMO)**: desktop Firefox ≥ 140, Manifest V3.
+  One codebase, two builds generated by WXT (section 5.5). Every feature must be implemented and tested on **both** browsers. The only differences allowed are those listed in the table in section 5.5.
+- Side Panel as the main interface.
+- Local tracking of tab activity.
+- An explainable "uselessness" score based on deterministic rules.
+- Single or bulk close, "Mantieni" (Keep), "Sospendi" (Discard), archive with restore, undo.
+- Organizing into groups: by domain (deterministic), by topic (local heuristic), with optional on-device AI (Gemini Nano via the Prompt API).
+- **Real-time duplicate protection** with the Duplicate Tabs Closer features that are actually used: mode (warn only / close automatically), behaviour on the remaining tab, priority (oldest / newest / oldest + reload, HTTPS, pinned, active tab, active window), scope (window / all windows), URL comparison rules, skip empty tabs, whitelist with `*` and `/regex/` (section 8).
+- Badge on the icon with the number of suggested tabs.
+- Essential settings, IT/EN i18n, light/dark theme, keyboard accessibility.
+
+### 2.2 Out of scope (v1), NOT to be implemented
+- Automatic closing without confirmation, **except** duplicate protection when the user sets it to "Chiudi automaticamente" (Close automatically).
+- Little-used advanced Duplicate Tabs Closer features: duplicates by title similarity, "Group/Normalize/Path depth" URL rules, Firefox containers, Tree Style Tab integration, multiple themes, two-column layout.
+- Cloud sync, accounts, backend, remote LLMs (OpenAI/Gemini API etc.).
+- Content scripts / reading page content (no `<all_urls>`).
+- Saved sessions/workspaces, snooze with an alarm, history search.
+- Embeddings with downloaded models (transformers.js): to be evaluated in v2 (section 15).
+- Firefox for Android (no tab groups or sidebar, `favIconUrl` not supported) and Safari.
 
 ---
 
-## 4. Esperienza utente
+## 3. Design principles (binding)
 
-### 4.1 Punti di ingresso
-- **Clic sull'icona dell'estensione**: apre il pannello laterale. Nessun popup separato: un'unica superficie, meno codice.
+1. **Suggest, don't act.** No tab is closed without an explicit gesture from the user. **The only exception**: duplicate protection in "Chiudi automaticamente" mode, which is a rule the user chose explicitly and closes only exact duplicates according to the configured rules. These closes also go to the archive and can be restored.
+2. **Every suggestion has a readable reason.** No opaque scores: the user sees "Duplicato di una scheda aperta", "Non la apri da 12 giorni", "Risultati di ricerca".
+3. **Everything is reversible.** Every close goes to the archive. Bulk closes have an immediate "Annulla" (Undo).
+4. **Total privacy.** Zero network requests, zero analytics, no data leaves the device. AI, if present, is on-device only.
+5. **The core works without AI.** AI only improves names and topical grouping, and is an optional addition. Gemini Nano needs high-end hardware (16 GB RAM or more than 4 GB VRAM, 22 GB free) and does not officially support Italian, so it cannot be a requirement.
+6. **Lightness.** An event-driven service worker (no polling), a small UI, no heavy dependencies.
+7. **Minimal permissions.** Every permission must be justified in `docs/PERMISSIONS.md`.
+
+---
+
+## 4. User experience
+
+### 4.1 Entry points
+- **Click on the extension icon**: opens the side panel. No separate popup: a single surface, less code.
   - Chrome: `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`;
-  - Firefox: `browser.action.onClicked` → `browser.sidebarAction.toggle()`, chiamato **in modo sincrono** nel listener (Firefox lo permette solo dentro un gesto utente, prima di qualsiasi `await`).
-- **Scorciatoia da tastiera**: `Alt+Shift+D` apre il pannello (`_execute_action` su Chrome, `_execute_sidebar_action` su Firefox).
-- **Altre scorciatoie** (senza tasto predefinito, assegnabili da `chrome://extensions/shortcuts`): "Chiudi tutti i duplicati", "Pausa/riprendi protezione duplicati".
-- **Menu contestuale sulla pagina/scheda**: "Mantieni sempre questa scheda", "Proteggi sempre questo sito", "Consenti duplicati per questo sito" (aggiunge `*://dominio/*` alla whitelist duplicati).
-- **Menu contestuale sull'icona** (`contexts: ['action']`): "Riapri l'ultimo duplicato chiuso", "Pausa protezione duplicati (15 min / 1 h / fino al riavvio)".
-- **Badge**: numero di schede nel bucket "Da chiudere" (es. `14`), colore neutro. Si può disattivare. Se il numero è 0 il badge non compare.
+  - Firefox: `browser.action.onClicked` → `browser.sidebarAction.toggle()`, called **synchronously** in the listener (Firefox allows it only inside a user gesture, before any `await`).
+- **Keyboard shortcut**: `Alt+Shift+D` opens the panel (`_execute_action` on Chrome, `_execute_sidebar_action` on Firefox).
+- **Other shortcuts** (no default key, assignable from `chrome://extensions/shortcuts`): "Chiudi tutti i duplicati", "Pausa/riprendi protezione duplicati".
+- **Context menu on the page/tab**: "Mantieni sempre questa scheda", "Proteggi sempre questo sito", "Consenti duplicati per questo sito" (adds `*://domain/*` to the duplicate whitelist).
+- **Context menu on the icon** (`contexts: ['action']`): "Riapri l'ultimo duplicato chiuso", "Pausa protezione duplicati (15 min / 1 h / fino al riavvio)".
+- **Badge**: number of tabs in the "Da chiudere" (To close) bucket (e.g. `14`), neutral colour. It can be turned off. When the number is 0 the badge does not appear.
 
-### 4.2 Struttura del pannello
+### 4.2 Panel layout
 
 ```
 ┌─────────────────────────────────────────┐
 │ TabDeclutter                       ⚙    │  header
-│ 87 schede · 4 finestre   🛡 Duplicati: ON ▾│  chip stato protezione
+│ 87 schede · 4 finestre   🛡 Duplicati: ON ▾│  protection status chip
 │ ███████████░░░░░  23 da rivedere         │  "health bar"
 ├─────────────────────────────────────────┤
-│ [ Riordina ]  [ Organizza ]  [ Archivio ]│  tab di navigazione
+│ [ Riordina ]  [ Organizza ]  [ Archivio ]│  navigation tabs
 ├─────────────────────────────────────────┤
 │ ▾ Duplicati (4)            [Chiudi tutti]│
 │   ☐ 🟦 GitHub – PR #812     github.com   │
@@ -108,111 +110,111 @@ Chi lavora molto nel browser accumula decine (o centinaia) di schede. Molte dive
 │ ▸ Pagine di ricerca (5)                  │
 │ ▸ Da valutare (9)                        │
 ├─────────────────────────────────────────┤
-│ 17 selezionate   [Mantieni] [Chiudi 17] │  barra di selezione (sticky)
+│ 17 selezionate   [Mantieni] [Chiudi 17] │  selection bar (sticky)
 └─────────────────────────────────────────┘
 ```
 
-**Chip "🛡 Duplicati"** nell'header: mostra lo stato (ON = chiusura automatica, Solo avvisi, In pausa fino alle 15:40, OFF). Il clic apre un menu con: cambio modalità, pausa (15 min / 1 h / fino al riavvio), "Chiudi tutti i duplicati ora (N)", "Impostazioni duplicati…". Sotto il chip compare per 5 s un contatore discreto "1 duplicato chiuso oggi · Vedi" quando ne viene chiuso uno.
+**"🛡 Duplicati" chip** in the header: shows the state (ON = automatic close, Solo avvisi, In pausa fino alle 15:40, OFF). Clicking it opens a menu with: mode change, pause (15 min / 1 h / until restart), "Chiudi tutti i duplicati ora (N)", "Impostazioni duplicati…". Under the chip a discreet counter "1 duplicato chiuso oggi · Vedi" appears for 5 s when one is closed.
 
-### 4.3 Vista "Riordina" (Declutter)
-- Le schede suggerite sono raggruppate per **motivo principale** (sezione 6.4), in sezioni comprimibili ordinate per "confidenza" (Duplicati, poi Pagine transitorie, poi Vecchie e mai rilette, poi Inattive, poi Da valutare).
-- **Riga scheda** (densa, una o due righe):
-  - checkbox, favicon 16 px (sezione 5.5: `_favicon` su Chrome, `favIconUrl` o avatar con iniziale su Firefox), titolo su una riga con ellissi, dominio in grigio;
-  - chip con età ("12 g") e motivi secondari ("aperta 1 volta", "già nei preferiti");
-  - azioni che compaiono su hover/focus: **Vai** (attiva scheda e finestra), **Mantieni** (escludi per 7 giorni), **Chiudi**.
-- **Header di sezione**: conteggio, "Seleziona tutti", "Chiudi tutti (N)".
-- **Suggerimento a livello di finestra**: se tutte le schede di una finestra sono "Da chiudere", mostra una card "Finestra con 12 schede non toccata da 3 settimane, [Chiudi finestra]".
-- **Barra di selezione sticky** in basso, visibile solo se c'è una selezione: "Chiudi N", "Mantieni", "Sospendi" (libera memoria senza chiudere), "Raggruppa".
-- **Toast di annullamento** dopo ogni chiusura: "17 schede chiuse · Annulla" (8 s, focusabile, non sparisce durante l'hover).
-- **Stato vuoto**: illustrazione semplice + "Tutto in ordine. Nessuna scheda da rivedere."
-- Il bucket "Da valutare" è chiuso di default; "Da chiudere" è aperto.
+### 4.3 "Riordina" view (Declutter)
+- Suggested tabs are grouped by **primary reason** (section 6.4), in collapsible sections ordered by "confidence" (Duplicates, then Transient pages, then Old and never re-read, then Inactive, then To review).
+- **Tab row** (dense, one or two lines):
+  - checkbox, 16 px favicon (section 5.5: `_favicon` on Chrome, `favIconUrl` or an initial-letter avatar on Firefox), title on one line with ellipsis, domain in grey;
+  - chips with the age ("12 g") and secondary reasons ("aperta 1 volta", "già nei preferiti");
+  - actions that appear on hover/focus: **Vai** (Go: activates the tab and its window), **Mantieni** (Keep: excludes it for 7 days), **Chiudi** (Close).
+- **Section header**: count, "Seleziona tutti", "Chiudi tutti (N)".
+- **Window-level suggestion**: if all the tabs of a window are "Da chiudere", show a card "Finestra con 12 schede non toccata da 3 settimane, [Chiudi finestra]".
+- **Sticky selection bar** at the bottom, visible only when something is selected: "Chiudi N", "Mantieni", "Sospendi" (frees memory without closing), "Raggruppa".
+- **Undo toast** after every close: "17 schede chiuse · Annulla" (8 s, focusable, does not disappear while hovered).
+- **Empty state**: a simple illustration + "Tutto in ordine. Nessuna scheda da rivedere."
+- The "Da valutare" (To review) bucket is collapsed by default; "Da chiudere" is expanded.
 
-### 4.4 Vista "Organizza"
-1. L'utente sceglie l'ambito: **Finestra corrente** (default) o **Tutte le finestre**.
-2. Sceglie la modalità: **Per sito** (immediata) o **Per argomento** (euristica locale, oppure AI se disponibile; badge "AI on-device" quando attiva).
-3. **Anteprima**: elenco dei gruppi proposti con nome modificabile inline, colore (palette dei gruppi Chrome), schede contenute. Si può deselezionare un gruppo, spostare una scheda tra gruppi (menu "Sposta in…", niente drag & drop in v1), unire due gruppi.
-4. Opzioni: "Ordina le schede nella finestra per gruppo", "Comprimi i gruppi", "Lascia fuori le schede fissate".
-5. **Applica** crea i gruppi nativi (`chrome.tabs.group` + `chrome.tabGroups.update`). Toast con "Annulla" che fa `ungroup` e ripristina gli indici originali (snapshot preso prima).
-- Le schede già in un gruppo creato dall'utente **non vengono toccate** di default (opzione per includerle).
+### 4.4 "Organizza" view (Organize)
+1. The user chooses the scope: **Finestra corrente** (Current window, default) or **Tutte le finestre** (All windows).
+2. Chooses the mode: **Per sito** (By site, immediate) or **Per argomento** (By topic: local heuristic, or AI when available; "AI on-device" badge when active).
+3. **Preview**: list of proposed groups with an inline-editable name, colour (Chrome group palette) and the tabs they contain. A group can be deselected, a tab can be moved between groups ("Sposta in…" menu, no drag & drop in v1), two groups can be merged.
+4. Options: "Ordina le schede nella finestra per gruppo", "Comprimi i gruppi", "Lascia fuori le schede fissate".
+5. **Applica** (Apply) creates the native groups (`chrome.tabs.group` + `chrome.tabGroups.update`). Toast with "Annulla", which does `ungroup` and restores the original indexes (a snapshot taken beforehand).
+- Tabs already in a group created by the user **are not touched** by default (an option includes them).
 
-### 4.5 Vista "Archivio"
-- Elenco delle schede chiuse tramite TabDeclutter: titolo, dominio, data di chiusura, motivo.
-- Ricerca testuale (titolo + URL), filtro per data ("Oggi", "Ultimi 7 giorni", "Più vecchie") e per origine ("Chiuse da me", "Duplicati chiusi automaticamente").
-- Azioni: Ripristina (singolo/multiplo), Elimina dall'archivio, Svuota archivio (con conferma inline, non `confirm()`), Esporta (copia come lista Markdown di link negli appunti).
-- Conservazione: 30 giorni o 1000 voci (configurabile), pulizia tramite `chrome.alarms`.
+### 4.5 "Archivio" view (Archive)
+- List of the tabs closed through TabDeclutter: title, domain, close date, reason.
+- Text search (title + URL), filter by date ("Oggi", "Ultimi 7 giorni", "Più vecchie") and by origin ("Chiuse da me", "Duplicati chiusi automaticamente").
+- Actions: Restore (single/multiple), Delete from archive, Empty archive (with an inline confirmation, not `confirm()`), Export (copy as a Markdown list of links to the clipboard).
+- Retention: 30 days or 1000 entries (configurable), cleanup through `chrome.alarms`.
 
-### 4.6 Impostazioni (pannello ⚙ dentro il Side Panel, niente pagina options separata)
-| Impostazione | Default | Note |
+### 4.6 Settings (⚙ panel inside the Side Panel, no separate options page)
+| Setting | Default | Notes |
 |---|---|---|
-| Considera "vecchia" una scheda dopo | 7 giorni | 1 / 3 / 7 / 14 / 30 |
-| Periodo di grazia per schede nuove | 2 ore | le schede aperte da poco non vengono mai suggerite |
-| Siti protetti | lista vuota | pattern di dominio, es. `mail.google.com`, `*.atlassian.net` |
-| Includi schede in gruppi | sì, con peso ridotto | |
-| Ignora parametri `#hash` per i duplicati | sì | |
-| Mostra badge | sì | |
-| Usa AI on-device se disponibile | sì | mostra stato: disponibile / da scaricare / non supportata |
-| Conservazione archivio | 30 giorni | |
-| Lingua | automatica | IT/EN |
-| **Sezione "Protezione duplicati"** | vedi sezione 8.3 | sotto-pagina dedicata con tutte le opzioni |
+| Consider a tab "old" after | 7 days | 1 / 3 / 7 / 14 / 30 |
+| Grace period for new tabs | 2 hours | recently opened tabs are never suggested |
+| Protected sites | empty list | domain patterns, e.g. `mail.google.com`, `*.atlassian.net` |
+| Include tabs in groups | yes, with reduced weight | |
+| Ignore `#hash` for duplicates | yes | |
+| Show badge | yes | |
+| Use on-device AI when available | yes | shows the state: available / downloadable / not supported |
+| Archive retention | 30 days | |
+| Language | automatic | IT/EN |
+| **"Protezione duplicati" section** | see section 8.3 | dedicated sub-page with all the options |
 
-### 4.7 Linee guida visive
-- **Stile**: pulito, denso ma arioso, simile alla UI nativa di Chrome (Material 3 "leggero"), senza librerie di componenti.
-- **Tipografia**: `system-ui`, 13 px base, 12 px per i metadati, 15 px per i titoli di sezione, numeri tabulari per età/conteggi.
-- **Colori**: design token in CSS custom properties. Neutri per lo sfondo e un solo accento (blu `#1a73e8` light / `#8ab4f8` dark). Colori semantici usati con parsimonia: rosso solo per "Elimina definitivamente", ambra per "Da valutare". Contrasto WCAG AA.
-- **Tema**: `prefers-color-scheme` light/dark automatico.
-- **Spaziatura**: scala 4 px (4/8/12/16/24).
-- **Movimento**: comparsa/scomparsa delle righe a 150 ms ease-out, collasso altezza alla chiusura. Tutto disattivato con `prefers-reduced-motion`.
-- **Icona estensione**: forma semplice e riconoscibile a 16 px (es. scheda stilizzata con una scintilla o una scopa minimal). SVG sorgente + PNG 16/32/48/128.
-- **Larghezza**: il pannello va da circa 320 px a 600 px+. Layout fluido, nessun overflow orizzontale.
+### 4.7 Visual guidelines
+- **Style**: clean, dense but airy, close to Chrome's native UI ("light" Material 3), without component libraries.
+- **Typography**: `system-ui`, 13 px base, 12 px for metadata, 15 px for section titles, tabular numerals for ages/counts.
+- **Colours**: design tokens as CSS custom properties. Neutrals for the background and a single accent (blue `#1a73e8` light / `#8ab4f8` dark). Semantic colours used sparingly: red only for "Elimina definitivamente", amber for "Da valutare". WCAG AA contrast.
+- **Theme**: automatic light/dark from `prefers-color-scheme`.
+- **Spacing**: 4 px scale (4/8/12/16/24).
+- **Motion**: rows appear/disappear in 150 ms ease-out, height collapse on close. All disabled with `prefers-reduced-motion`.
+- **Extension icon**: a simple shape recognisable at 16 px (e.g. a stylised tab with a sparkle, or a minimal broom). Source SVG + PNG 16/32/48/128.
+- **Width**: the panel ranges from about 320 px to 600 px+. Fluid layout, no horizontal overflow.
 
-### 4.8 Accessibilità e tastiera
-- Lista navigabile con frecce ↑/↓ (pattern roving tabindex), `Space` seleziona, `Enter` va alla scheda, `Del`/`Backspace` chiude, `K` mantiene, `Ctrl/Cmd+A` seleziona la sezione, `Ctrl/Cmd+Z` annulla l'ultima azione.
-- Ruoli ARIA corretti (`listbox`/`option` o `grid`), `aria-live="polite"` per toast e conteggi.
-- Focus ring visibile, target cliccabili di almeno 24 px.
+### 4.8 Accessibility and keyboard
+- List navigable with the ↑/↓ arrows (roving tabindex pattern), `Space` selects, `Enter` goes to the tab, `Del`/`Backspace` closes, `K` keeps, `Ctrl/Cmd+A` selects the section, `Ctrl/Cmd+Z` undoes the last action.
+- Correct ARIA roles (`listbox`/`option` or `grid`), `aria-live="polite"` for toasts and counts.
+- Visible focus ring, click targets of at least 24 px.
 
 ---
 
-## 5. Architettura tecnica
+## 5. Technical architecture
 
 ### 5.1 Stack
-| Scelta | Motivo |
+| Choice | Reason |
 |---|---|
-| **WXT** (ultima versione stabile, richiede Node 22) | Framework MV3 mantenuto attivamente e basato su Vite, con HMR per parte e build cross-browser. Plasmo è in maintenance mode |
-| **TypeScript** strict | Correttezza, refactoring sicuro |
-| **Preact + @preact/signals** | Circa 4 KB, API React familiare, reattività fine senza re-render inutili |
-| **CSS puro con custom properties** (CSS Modules o un file per componente) | Nessun runtime CSS, bundle minimo |
-| **tldts** (o equivalente leggero) | Calcolo corretto del dominio registrabile (eTLD+1) per raggruppare `docs.google.com` e `mail.google.com` in modo sensato |
-| **Vitest** | Test unitari della logica pura |
-| **Playwright** | E2E con l'estensione caricata in Chromium |
-| **Puppeteer (WebDriver BiDi) + web-ext** | E2E di base su Firefox (`webExtension.install`), `web-ext lint` per la validazione AMO e `web-ext run` per lo sviluppo manuale |
-| **ESLint + Prettier** | Qualità e coerenza |
-| **pnpm** | Gestore pacchetti |
+| **WXT** (latest stable version, requires Node 22) | Actively maintained MV3 framework based on Vite, with per-part HMR and cross-browser builds. Plasmo is in maintenance mode |
+| **TypeScript** strict | Correctness, safe refactoring |
+| **Preact + @preact/signals** | About 4 KB, familiar React API, fine-grained reactivity without needless re-renders |
+| **Plain CSS with custom properties** (CSS Modules or one file per component) | No CSS runtime, minimal bundle |
+| **tldts** (or an equivalent lightweight library) | Correct computation of the registrable domain (eTLD+1), to group `docs.google.com` and `mail.google.com` sensibly |
+| **Vitest** | Unit tests of the pure logic |
+| **Playwright** | E2E with the extension loaded in Chromium |
+| **Puppeteer (WebDriver BiDi) + web-ext** | Basic E2E on Firefox (`webExtension.install`), `web-ext lint` for AMO validation and `web-ext run` for manual development |
+| **ESLint + Prettier** | Quality and consistency |
+| **pnpm** | Package manager |
 
-Nessun'altra dipendenza runtime senza una giustificazione in `docs/DECISIONS.md`.
+No other runtime dependency without a justification in `docs/DECISIONS.md`.
 
-### 5.2 Componenti
+### 5.2 Components
 
 ```
 ┌───────────────────────────┐        chrome.storage.local         ┌──────────────────────────────┐
 │ Background service worker │ ─────── (activity, settings, ─────▶ │ Side Panel (Preact)          │
-│ - activity tracker        │          archive, keeps)             │ - legge tabs + activity      │
+│ - activity tracker        │          archive, keeps)             │ - reads tabs + activity      │
 │ - duplicate guard (live)  │                                      │                              │
-│ - badge updater           │ ◀────── storage.onChanged ────────── │ - calcola punteggi (core/)   │
-│ - context menus, commands │                                      │ - esegue azioni sulle tabs   │
-│ - alarms (cleanup)        │                                      │ - AI on-device (Prompt API)  │
+│ - badge updater           │ ◀────── storage.onChanged ────────── │ - computes scores (core/)    │
+│ - context menus, commands │                                      │ - runs actions on the tabs   │
+│ - alarms (cleanup)        │                                      │ - on-device AI (Prompt API)  │
 └───────────────────────────┘                                      └──────────────────────────────┘
               ▲                                                                ▲
-              └──────────────── src/core/ (TypeScript puro, testato) ──────────┘
+              └──────────────── src/core/ (pure TypeScript, tested) ───────────┘
         scoring · url-normalize · classify · cluster · duplicate-guard · patterns · types
 ```
 
-- **`core/`** è codice puro senza API del browser (dipendenze iniettate), condiviso da background e pannello e testato al 100% con Vitest.
-- **Namespace unico `browser.*`** (fornito da WXT) in tutto il codice. `chrome.*` è consentito **solo** dentro `platform/` per le API esclusive di Chrome, sempre dietro feature detection (sezione 5.5).
-- **Background (service worker)**: tracciamento eventi, **protezione duplicati** (deve funzionare anche a pannello chiuso, quindi vive qui), badge, menu e alarm. Nessuno stato tenuto solo in variabili globali, perché il service worker viene terminato dopo circa 30 s di inattività. Ogni handler rilegge lo stato da storage (con una cache in memoria invalidata su `storage.onChanged`).
-- **Side Panel**: tutta la UI e tutte le azioni. Il pannello chiama direttamente `chrome.tabs`/`chrome.tabGroups` senza passare messaggi al background, così c'è meno codice e meno punti di rottura. Ascolta `chrome.tabs.on*` per aggiornarsi dal vivo (con debounce di 150 ms).
-- **AI**: eseguita nel Side Panel (contesto documento, aperto quando serve) e non nel service worker, così il ciclo di vita resta semplice. Nessun offscreen document necessario.
+- **`core/`** is pure code with no browser APIs (dependencies injected), shared by the background and the panel and 100% tested with Vitest.
+- **A single `browser.*` namespace** (provided by WXT) throughout the code. `chrome.*` is allowed **only** inside `platform/`, for Chrome-only APIs, always behind feature detection (section 5.5).
+- **Background (service worker)**: event tracking, **duplicate protection** (it must work with the panel closed too, so it lives here), badge, menus and alarms. No state kept only in global variables, because the service worker is terminated after about 30 s of inactivity. Every handler re-reads the state from storage (with an in-memory cache invalidated on `storage.onChanged`).
+- **Side Panel**: the whole UI and every action. The panel calls `chrome.tabs`/`chrome.tabGroups` directly, without passing messages to the background, so there is less code and fewer points of failure. It listens to `chrome.tabs.on*` to update live (with a 150 ms debounce).
+- **AI**: runs in the Side Panel (a document context, open when needed) and not in the service worker, so the lifecycle stays simple. No offscreen document needed.
 
-### 5.3 Struttura del repository
+### 5.3 Repository layout
 
 ```
 tabdeclutter/
@@ -222,37 +224,37 @@ tabdeclutter/
 ├─ src/
 │  ├─ entrypoints/
 │  │  ├─ background/
-│  │  │  ├─ index.ts         # registrazione listener (sincrona, top-level)
-│  │  │  ├─ tracker.ts       # attività schede (sezione 6.1)
-│  │  │  ├─ guard.ts         # protezione duplicati live (sezione 8)
+│  │  │  ├─ index.ts         # listener registration (synchronous, top-level)
+│  │  │  ├─ tracker.ts       # tab activity (section 6.1)
+│  │  │  ├─ guard.ts         # live duplicate protection (section 8)
 │  │  │  ├─ badge.ts
-│  │  │  └─ menus.ts         # menu contestuali + commands
+│  │  │  └─ menus.ts         # context menus + commands
 │  │  └─ sidepanel/
 │  │     ├─ index.html
 │  │     ├─ main.tsx
 │  │     ├─ App.tsx
 │  │     ├─ views/ (DeclutterView.tsx, OrganizeView.tsx, ArchiveView.tsx, SettingsView.tsx, DuplicateSettingsView.tsx)
 │  │     ├─ components/ (TabRow.tsx, Section.tsx, SelectionBar.tsx, Toast.tsx, HealthBar.tsx, GuardChip.tsx, PatternListEditor.tsx, GroupPreview.tsx, EmptyState.tsx, Chip.tsx, Icon.tsx)
-│  │     ├─ state/ (tabs.ts, selection.ts, undo.ts, ai.ts): signals e store
+│  │     ├─ state/ (tabs.ts, selection.ts, undo.ts, ai.ts): signals and stores
 │  │     └─ styles/ (tokens.css, base.css)
 │  ├─ core/
 │  │  ├─ types.ts
-│  │  ├─ url.ts              # normalizzazione URL, eTLD+1
-│  │  ├─ classify.ts         # tipo di pagina (search, auth, blank, error…)
-│  │  ├─ scoring.ts          # punteggio + motivi
-│  │  ├─ duplicates.ts       # chiave di confronto + insiemi di duplicati (usato da Riordina e Guard)
-│  │  ├─ duplicate-guard.ts  # decisione pura: quale scheda chiudere, quale tenere, cosa fare dopo
-│  │  ├─ patterns.ts         # whitelist: wildcard `*` e `/regex/`, compilazione e validazione
-│  │  ├─ cluster.ts          # raggruppamento per sito/argomento (senza AI)
-│  │  ├─ ai-grouping.ts      # prompt + schema + merge (dipende da un'interfaccia LLM iniettata)
+│  │  ├─ url.ts              # URL normalization, eTLD+1
+│  │  ├─ classify.ts         # page type (search, auth, blank, error…)
+│  │  ├─ scoring.ts          # score + reasons
+│  │  ├─ duplicates.ts       # comparison key + duplicate sets (used by Declutter and the Guard)
+│  │  ├─ duplicate-guard.ts  # pure decision: which tab to close, which to keep, what to do next
+│  │  ├─ patterns.ts         # whitelist: `*` wildcards and `/regex/`, compilation and validation
+│  │  ├─ cluster.ts          # grouping by site/topic (without AI)
+│  │  ├─ ai-grouping.ts      # prompt + schema + merge (depends on an injected LLM interface)
 │  │  └─ time.ts
-│  ├─ platform/              # wrapper sottili e tipizzati sulle API del browser
-│  │  ├─ capabilities.ts     # feature detection Chrome/Firefox (sezione 5.5)
-│  │  ├─ panel.ts            # apertura pannello: sidePanel (Chrome) / sidebarAction (Firefox)
-│  │  ├─ storage.ts          # item tipizzati con versione e migrazioni (WXT storage.defineItem)
+│  ├─ platform/              # thin, typed wrappers over the browser APIs
+│  │  ├─ capabilities.ts     # Chrome/Firefox feature detection (section 5.5)
+│  │  ├─ panel.ts            # opening the panel: sidePanel (Chrome) / sidebarAction (Firefox)
+│  │  ├─ storage.ts          # typed items with versions and migrations (WXT storage.defineItem)
 │  │  ├─ tabs.ts
 │  │  ├─ favicon.ts
-│  │  └─ llm.ts              # adattatore Prompt API → interfaccia core
+│  │  └─ llm.ts              # Prompt API adapter → core interface
 │  └─ public/
 │     ├─ icon/ (16, 32, 48, 128 png + svg)
 │     └─ _locales/ (en/messages.json, it/messages.json)
@@ -265,11 +267,11 @@ tabdeclutter/
 └─ .github/workflows/ (ci.yml, release.yml)
 ```
 
-### 5.4 Manifest (generato da WXT, contenuto atteso)
+### 5.4 Manifest (generated by WXT, expected content)
 
-Il manifest **non** si scrive a mano. È generato da `wxt.config.ts`, che lo specializza per browser con `manifest: ({ browser }) => ({ … })`.
+The manifest is **not** written by hand. It is generated by `wxt.config.ts`, which specialises it per browser with `manifest: ({ browser }) => ({ … })`.
 
-**Build Chrome** (`.output/chrome-mv3/manifest.json`):
+**Chrome build** (`.output/chrome-mv3/manifest.json`):
 
 ```jsonc
 {
@@ -279,16 +281,16 @@ Il manifest **non** si scrive a mano. È generato da `wxt.config.ts`, che lo spe
   "default_locale": "en",
   "minimum_chrome_version": "121",          // Tab.lastAccessed
   "permissions": [
-    "tabs",          // URL e titolo delle schede (avviso: "Leggere la cronologia di navigazione")
-    "tabGroups",     // creare/modificare gruppi
-    "storage",       // attività, archivio, impostazioni
-    "sidePanel",     // interfaccia principale
-    "alarms",        // pulizia archivio, refresh badge
-    "favicon",       // icone delle schede da cache locale, nessuna richiesta di rete
-    "sessions",      // ripristino con cronologia/scroll per "Annulla"
+    "tabs",          // tab URLs and titles (warning: "Read your browsing history")
+    "tabGroups",     // create/edit groups
+    "storage",       // activity, archive, settings
+    "sidePanel",     // main interface
+    "alarms",        // archive cleanup, badge refresh
+    "favicon",       // tab icons from the local cache, no network requests
+    "sessions",      // restore with history/scroll for "Annulla"
     "contextMenus"
   ],
-  "optional_permissions": ["bookmarks"],    // segnale "già nei preferiti", richiesto solo se l'utente lo attiva
+  "optional_permissions": ["bookmarks"],    // "already bookmarked" signal, requested only if the user turns it on
   "incognito": "not_allowed",
   "action": { "default_title": "__MSG_actionTitle__" },
   "side_panel": { "default_path": "sidepanel.html" },
@@ -299,21 +301,21 @@ Il manifest **non** si scrive a mano. È generato da `wxt.config.ts`, che lo spe
   }
 }
 ```
-**Build Firefox** (`.output/firefox-mv3/manifest.json`), differenze rispetto a Chrome:
+**Firefox build** (`.output/firefox-mv3/manifest.json`), differences from Chrome:
 
 ```jsonc
 {
   "manifest_version": 3,
   "browser_specific_settings": {
     "gecko": {
-      "id": "tabdeclutter@<dominio-o-nome-utente>",   // FISSO per sempre: identifica l'add-on su AMO
-      "strict_min_version": "140.0",                  // tabGroups (139) + consenso dati integrato (140)
-      "data_collection_permissions": { "required": ["none"] }   // obbligatorio per i nuovi add-on AMO
+      "id": "tabdeclutter@<domain-or-username>",      // FIXED forever: identifies the add-on on AMO
+      "strict_min_version": "140.0",                  // tabGroups (139) + built-in data consent (140)
+      "data_collection_permissions": { "required": ["none"] }   // mandatory for new AMO add-ons
     }
   },
-  "background": { "scripts": ["background.js"] },     // event page (WXT lo genera; niente service_worker)
+  "background": { "scripts": ["background.js"] },     // event page (WXT generates it; no service_worker)
   "permissions": ["tabs", "tabGroups", "storage", "alarms", "sessions", "menus"],
-  // niente "sidePanel" né "favicon" (non esistono su Firefox)
+  // no "sidePanel" or "favicon" (they do not exist on Firefox)
   "optional_permissions": ["bookmarks"],
   "incognito": "not_allowed",
   "sidebar_action": {
@@ -329,16 +331,16 @@ Il manifest **non** si scrive a mano. È generato da `wxt.config.ts`, che lo spe
 }
 ```
 
-- La protezione duplicati **non richiede permessi aggiuntivi**: `tabs` basta (`tab.pendingUrl` dove esiste, `onCreated`, `onUpdated`, `remove`, `move`, `update`). Niente `webNavigation`.
-- **Niente** `host_permissions`, niente content script, niente `<all_urls>`, su entrambi i browser.
-- CSP di default MV3. Nessun codice remoto, nessun `eval`, nessun `new Function`: requisiti di entrambi gli store.
+- Duplicate protection **needs no additional permissions**: `tabs` is enough (`tab.pendingUrl` where it exists, `onCreated`, `onUpdated`, `remove`, `move`, `update`). No `webNavigation`.
+- **No** `host_permissions`, no content scripts, no `<all_urls>`, on either browser.
+- Default MV3 CSP. No remote code, no `eval`, no `new Function`: requirements of both stores.
 
-### 5.5 Compatibilità Chrome + Firefox
+### 5.5 Chrome + Firefox compatibility
 
-**Regola**: il codice applicativo chiede a `platform/capabilities.ts` cosa è disponibile e **non controlla mai il nome del browser**. Le build si separano solo dove WXT lo richiede (manifest, `import.meta.env.BROWSER` per l'apertura del pannello).
+**Rule**: application code asks `platform/capabilities.ts` what is available and **never checks the browser name**. The builds diverge only where WXT requires it (manifest, `import.meta.env.BROWSER` for opening the panel).
 
 ```ts
-// platform/capabilities.ts: valutato una volta all'avvio di ogni contesto
+// platform/capabilities.ts: evaluated once when each context starts
 export const caps = {
   sidePanel:        typeof chrome !== 'undefined' && !!chrome.sidePanel,     // Chrome
   sidebarAction:    !!browser.sidebarAction,                                 // Firefox
@@ -351,134 +353,134 @@ export const caps = {
 };
 ```
 
-| Area | Chrome | Firefox | Cosa fare |
+| Area | Chrome | Firefox | What to do |
 |---|---|---|---|
-| Pannello | `side_panel` + `sidePanel` | `sidebar_action` + `sidebarAction` | Un solo entrypoint WXT `sidepanel`. Apertura tramite `platform/panel.ts` |
-| Background | Service worker | Event page (non persistente) | Stesso codice. Nessuno stato solo in memoria, listener registrati al top-level (vale per entrambi) |
-| Favicon | `/_favicon/?pageUrl=…&size=32` (cache locale) | `tab.favIconUrl` | Su Firefox: usa `favIconUrl` solo se `data:`. Altrimenti **avatar con iniziale del dominio** colorata (hash del dominio), per rispettare "zero richieste di rete". Nell'archivio non salvare favicon remote |
-| `pendingUrl` | Sì (Chrome 79+) | Non affidabile o assente | Guard: su Firefox si decide al primo `onUpdated` con `changeInfo.url`. Latenza leggermente maggiore, accettabile |
-| Tab groups | `tabs.group` + `tabGroups.update` | Stesse API (Firefox 138/139+), senza `tabGroups.create` (vale anche su Chrome) | Stesso codice. Su Firefox `sessions` non espone `groupId` e gli ID dei gruppi cambiano al riavvio: l'annullamento usa il titolo del gruppo come fallback |
-| Colori gruppi | `grey…orange` | Stessi 9 nomi | Nessuna differenza |
-| Riconciliazione dopo riavvio | Abbinamento per URL (sezione 6.1) | `sessions.setTabValue(tabId, 'td', {createdAt…})` **persiste attraverso i riavvii** | Su Firefox usa i tab value (affidabili), con l'abbinamento per URL come fallback |
-| Discard | Cambia `tabId` (`onReplaced`) | `tabId` stabile | Il codice gestisce `onReplaced` se arriva, nessuna differenza logica |
-| Container (Multi-Account) | — | `tab.cookieStoreId` | Due schede con la stessa URL **in container diversi non sono duplicati** (sono sessioni/account diversi). La chiave di duplicato include `cookieStoreId` se presente |
-| Schede nascoste (`tab.hidden`) | — | Sì (altre estensioni le nascondono) | Escluse da Riordina, Organizza e Guard |
-| "Duplica scheda" intenzionale | Euristica (sezione 8.6) | Non rilevabile in modo affidabile | Opzione nascosta su Firefox (come fa Duplicate Tabs Closer) |
-| AI on-device | Prompt API / Gemini Nano | Non disponibile | Organizza per argomento usa l'euristica TF-IDF (sezione 7.2). L'opzione AI non viene mostrata |
-| Menu contestuali | `contextMenus` | `menus` (alias `contextMenus` disponibile) | Usare `browser.contextMenus` con i soli `contexts` comuni: `page`, `tab` (solo Firefox, aggiunto se presente), `action` |
-| Pagine interne | `chrome://`, `chrome-extension://` | `about:`, `moz-extension://` | `core/classify.ts` e i default della whitelist coprono entrambi (`about:newtab`, `about:home`, `about:blank`, `about:addons`…) |
-| i18n | `_locales` | `_locales` | Identico |
-| `storage.session` | Sì | Sì (Firefox 115+) | Identico |
+| Panel | `side_panel` + `sidePanel` | `sidebar_action` + `sidebarAction` | A single WXT `sidepanel` entrypoint. Opened through `platform/panel.ts` |
+| Background | Service worker | Event page (non-persistent) | Same code. No state held only in memory, listeners registered at the top level (applies to both) |
+| Favicon | `/_favicon/?pageUrl=…&size=32` (local cache) | `tab.favIconUrl` | On Firefox: use `favIconUrl` only if it is `data:`. Otherwise an **avatar with the domain's initial**, coloured (hash of the domain), to honour "zero network requests". Do not store remote favicons in the archive |
+| `pendingUrl` | Yes (Chrome 79+) | Unreliable or absent | Guard: on Firefox the decision is made at the first `onUpdated` with `changeInfo.url`. Slightly higher latency, acceptable |
+| Tab groups | `tabs.group` + `tabGroups.update` | Same APIs (Firefox 138/139+), without `tabGroups.create` (true on Chrome as well) | Same code. On Firefox `sessions` does not expose `groupId` and group IDs change on restart: undo uses the group title as a fallback |
+| Group colours | `grey…orange` | Same 9 names | No difference |
+| Reconciliation after restart | Matching by URL (section 6.1) | `sessions.setTabValue(tabId, 'td', {createdAt…})` **persists across restarts** | On Firefox use the tab values (reliable), with URL matching as a fallback |
+| Discard | Changes the `tabId` (`onReplaced`) | Stable `tabId` | The code handles `onReplaced` if it arrives; no logical difference |
+| Containers (Multi-Account) | — | `tab.cookieStoreId` | Two tabs with the same URL **in different containers are not duplicates** (they are different sessions/accounts). The duplicate key includes `cookieStoreId` when present |
+| Hidden tabs (`tab.hidden`) | — | Yes (other extensions hide them) | Excluded from Declutter, Organize and the Guard |
+| Intentional "Duplicate tab" | Heuristic (section 8.6) | Not reliably detectable | Option hidden on Firefox (as Duplicate Tabs Closer does) |
+| On-device AI | Prompt API / Gemini Nano | Not available | Organize by topic uses the TF-IDF heuristic (section 7.2). The AI option is not shown |
+| Context menus | `contextMenus` | `menus` (`contextMenus` alias available) | Use `browser.contextMenus` with only the common `contexts`: `page`, `tab` (Firefox only, added when present), `action` |
+| Internal pages | `chrome://`, `chrome-extension://` | `about:`, `moz-extension://` | `core/classify.ts` and the whitelist defaults cover both (`about:newtab`, `about:home`, `about:blank`, `about:addons`…) |
+| i18n | `_locales` | `_locales` | Identical |
+| `storage.session` | Yes | Yes (Firefox 115+) | Identical |
 
-Tutte le differenze sopra devono avere un test (unit con capabilities mockate) o una voce nella checklist manuale Firefox (sezione 14).
+Every difference above must have a test (unit, with mocked capabilities) or an entry in the manual Firefox checklist (section 14).
 
 ---
 
-## 6. Il cuore: rilevare le schede inutili
+## 6. The core: detecting useless tabs
 
-### 6.1 Dati raccolti per ogni scheda
+### 6.1 Data collected for each tab
 
-Fonte: API `chrome.tabs` + tracker proprio. Il tracker serve perché `Tab.lastAccessed` diventa `undefined` quando una scheda viene sospesa (discarded), non è presente negli oggetti tab passati agli eventi, e l'ID della scheda cambia al discard (`onReplaced`).
+Source: the `chrome.tabs` API + our own tracker. The tracker is needed because `Tab.lastAccessed` becomes `undefined` when a tab is suspended (discarded), is not present in the tab objects passed to events, and the tab ID changes on discard (`onReplaced`).
 
 ```ts
 // core/types.ts
 interface TabActivity {
   tabId: number;
-  url: string;              // ultimo URL noto (per la riconciliazione dopo un riavvio)
+  url: string;              // last known URL (for reconciliation after a restart)
   createdAt: number;        // ms epoch
-  lastActiveAt: number;     // ultima volta in primo piano
-  activations: number;      // quante volte è stata attivata
-  foregroundMs: number;     // tempo cumulativo in primo piano (approssimato)
+  lastActiveAt: number;     // last time it was in the foreground
+  activations: number;      // how many times it was activated
+  foregroundMs: number;     // cumulative time in the foreground (approximate)
 }
 ```
 
-Eventi tracciati nel background:
-| Evento | Azione |
+Events tracked in the background:
+| Event | Action |
 |---|---|
-| `tabs.onCreated` | crea il record (`createdAt = now`) |
-| `tabs.onActivated` | chiude il "periodo di foreground" della scheda precedente, `activations++`, `lastActiveAt = now` |
-| `windows.onFocusChanged` | sospende/riprende il conteggio del foreground (`WINDOW_ID_NONE` = browser non in primo piano) |
-| `tabs.onUpdated` (url cambiato) | aggiorna `url`. Una navigazione in una scheda attiva conta come attività |
-| `tabs.onReplaced` | migra il record dal vecchio al nuovo `tabId` (discard/prerender) |
-| `tabs.onRemoved` | elimina il record |
-| `runtime.onStartup` | **riconciliazione**: gli ID cambiano al riavvio del browser. Abbina i record salvati alle schede attuali per URL (multiset, a parità di URL vince l'ordine di finestra/indice). I record non abbinati si scartano. **Su Firefox** si usa prima `sessions.getTabValue`, che sopravvive al riavvio (sezione 5.5) |
-| `runtime.onInstalled` | inizializza i record per tutte le schede esistenti usando `tab.lastAccessed` se presente, altrimenti `now` (e segna `bootstrapped: true` per non suggerirle subito) |
+| `tabs.onCreated` | creates the record (`createdAt = now`) |
+| `tabs.onActivated` | ends the previous tab's "foreground period", `activations++`, `lastActiveAt = now` |
+| `windows.onFocusChanged` | pauses/resumes the foreground count (`WINDOW_ID_NONE` = browser not in the foreground) |
+| `tabs.onUpdated` (url changed) | updates `url`. A navigation in an active tab counts as activity |
+| `tabs.onReplaced` | migrates the record from the old to the new `tabId` (discard/prerender) |
+| `tabs.onRemoved` | deletes the record |
+| `runtime.onStartup` | **reconciliation**: IDs change when the browser restarts. Match the saved records to the current tabs by URL (multiset; for equal URLs the window/index order wins). Unmatched records are discarded. **On Firefox** `sessions.getTabValue` is tried first, since it survives restarts (section 5.5) |
+| `runtime.onInstalled` | initialises the records for all existing tabs using `tab.lastAccessed` when present, otherwise `now` (and marks `bootstrapped: true` so they are not suggested straight away) |
 
-- Valore effettivo usato: `lastActive = max(record.lastActiveAt, tab.lastAccessed ?? 0)`.
-- Scritture su `storage.local` con **debounce di 1–2 s** e coalescenza. Mai una scrittura per evento.
-- Il foreground è approssimato: niente polling. Se il sistema va in idle si può usare opzionalmente `chrome.idle` (non in v1, per evitare un permesso in più).
+- Effective value used: `lastActive = max(record.lastActiveAt, tab.lastAccessed ?? 0)`.
+- Writes to `storage.local` with a **1–2 s debounce** and coalescing. Never one write per event.
+- Foreground time is approximate: no polling. If the system goes idle, `chrome.idle` could optionally be used (not in v1, to avoid one more permission).
 
-### 6.2 Normalizzazione URL (`core/url.ts`)
-- Host minuscolo, rimozione di `www.`, porta di default rimossa.
-- Rimozione dei parametri di tracking: `utm_*`, `fbclid`, `gclid`, `dclid`, `msclkid`, `mc_cid`, `mc_eid`, `igshid`, `ref_src`, `_ga`, `si` (YouTube share), `spm`.
-- Parametri di query ordinati alfabeticamente. Hash rimosso (configurabile, con eccezione per le SPA con routing in hash: se il path è `/` e l'hash inizia con `#/` va mantenuto).
-- Slash finale rimosso (tranne per la root).
-- `registrableDomain()` tramite tldts.
-- Test con almeno 40 casi.
-- **Chiave di duplicato unica** (`core/duplicates.ts` → `duplicateKey(url, matchOptions)`): la stessa funzione e le stesse opzioni di confronto (sezione 8.3) valgono **sia** per la sezione "Duplicati" di Riordina **sia** per la protezione live. Una sola definizione di "duplicato" in tutta l'estensione, quindi nessun comportamento incoerente.
+### 6.2 URL normalization (`core/url.ts`)
+- Lower-case host, `www.` removed, default port removed.
+- Tracking parameters removed: `utm_*`, `fbclid`, `gclid`, `dclid`, `msclkid`, `mc_cid`, `mc_eid`, `igshid`, `ref_src`, `_ga`, `si` (YouTube share), `spm`.
+- Query parameters sorted alphabetically. Hash removed (configurable, with an exception for SPAs with hash routing: if the path is `/` and the hash starts with `#/`, keep it).
+- Trailing slash removed (except for the root).
+- `registrableDomain()` through tldts.
+- Tested with at least 40 cases.
+- **A single duplicate key** (`core/duplicates.ts` → `duplicateKey(url, matchOptions)`): the same function and the same comparison options (section 8.3) apply **both** to the "Duplicati" section of Declutter **and** to live protection. One definition of "duplicate" across the whole extension, so no inconsistent behaviour.
 
-### 6.3 Classificazione del tipo di pagina (`core/classify.ts`)
-Regole basate solo su URL e titolo, nessun accesso al contenuto:
+### 6.3 Page type classification (`core/classify.ts`)
+Rules based only on the URL and the title, with no access to the content:
 
-| Classe | Esempi di regola |
+| Class | Example rules |
 |---|---|
-| `blank` | `chrome://newtab`, `about:blank`, `edge://newtab`, URL vuoto |
-| `search` | host di motori noti (google.*, bing.com, duckduckgo.com, ecosia.org, search.brave.com, yahoo, yandex, startpage, kagi) con path `/search` o parametro `q`/`p`/`query`; anche le ricerche interne di siti noti (YouTube `/results`, Amazon `/s`, GitHub `/search`) |
-| `auth` | path con `login`, `signin`, `sign-in`, `oauth`, `callback`, `sso`, `auth`, `logout`; host `accounts.google.com`, `login.microsoftonline.com` |
-| `error` | titolo che corrisponde a pattern multilingua: "404", "Not Found", "Pagina non trovata", "This site can't be reached", "Impossibile raggiungere il sito", "Access denied", ecc. **Confidenza bassa**: solo come motivo secondario |
-| `browser-internal` | `chrome://`, `edge://`, `chrome-extension://` (escluse le pagine di TabDeclutter): `downloads`, `settings`, `extensions`, `history` |
-| `file` | `file://` (es. PDF già scaricato) |
-| `media` | URL di immagini/PDF diretti (`.png`, `.jpg`, `.pdf`…) |
-| `content` | tutto il resto (default) |
+| `blank` | `chrome://newtab`, `about:blank`, `edge://newtab`, empty URL |
+| `search` | hosts of known engines (google.*, bing.com, duckduckgo.com, ecosia.org, search.brave.com, yahoo, yandex, startpage, kagi) with a `/search` path or a `q`/`p`/`query` parameter; also the internal searches of known sites (YouTube `/results`, Amazon `/s`, GitHub `/search`) |
+| `auth` | path containing `login`, `signin`, `sign-in`, `oauth`, `callback`, `sso`, `auth`, `logout`; hosts `accounts.google.com`, `login.microsoftonline.com` |
+| `error` | title matching multilingual patterns: "404", "Not Found", "Pagina non trovata", "This site can't be reached", "Impossibile raggiungere il sito", "Access denied", etc. **Low confidence**: only as a secondary reason |
+| `browser-internal` | `chrome://`, `edge://`, `chrome-extension://` (TabDeclutter's own pages excluded): `downloads`, `settings`, `extensions`, `history` |
+| `file` | `file://` (e.g. an already downloaded PDF) |
+| `media` | direct image/PDF URLs (`.png`, `.jpg`, `.pdf`…) |
+| `content` | everything else (default) |
 
-Le liste di host e pattern vivono in un unico file dati (`core/rules.ts`) facile da estendere.
+The host and pattern lists live in a single data file (`core/rules.ts`) that is easy to extend.
 
-### 6.4 Punteggio (`core/scoring.ts`)
+### 6.4 Score (`core/scoring.ts`)
 
-Funzione pura: `scoreTabs(tabs, activity, settings, now, context) → ScoredTab[]`.
+Pure function: `scoreTabs(tabs, activity, settings, now, context) → ScoredTab[]`.
 
 ```ts
 interface ScoredTab {
   tabId: number;
   score: number;                 // 0–100
   bucket: 'close' | 'review' | 'keep';
-  primaryReason: ReasonCode;     // determina la sezione nella UI
-  reasons: Reason[];             // tutti i motivi, con dati per il testo i18n
-  protectedBy?: ProtectionCode;  // se protetta, il motivo
+  primaryReason: ReasonCode;     // decides the section in the UI
+  reasons: Reason[];             // all the reasons, with data for the i18n text
+  protectedBy?: ProtectionCode;  // if protected, the reason
 }
 ```
 
-**Passo 1: protezioni (score = 0, bucket `keep`, mai suggerita):**
-- scheda **fissata** (pinned);
-- scheda che **riproduce audio** (`audible`) o in condivisione schermo/registrazione;
-- scheda **attiva** in qualsiasi finestra;
-- aperta da meno del **periodo di grazia** (default 2 h) o inizializzata al primo avvio (`bootstrapped`) da meno di 24 h;
-- dominio nella lista dei **siti protetti**;
-- marcata **"Mantieni"** e non ancora scaduta (chiave: URL normalizzato, scadenza 7 giorni o "per sempre");
-- pagine di TabDeclutter stesse.
+**Step 1: protections (score = 0, bucket `keep`, never suggested):**
+- **pinned** tab;
+- tab **playing audio** (`audible`) or sharing the screen/recording;
+- **active** tab in any window;
+- opened less than the **grace period** ago (default 2 h), or initialised on first run (`bootstrapped`) less than 24 h ago;
+- domain in the **protected sites** list;
+- marked **"Mantieni"** (Keep) and not yet expired (key: normalized URL, expiry 7 days or "forever");
+- TabDeclutter's own pages.
 
-**Passo 2: regole forti (sovrascrivono):**
-- **Duplicato** (stessa `duplicateKey`): per ogni insieme di duplicati la scheda da **mantenere** si sceglie con le stesse regole di priorità della protezione live (sezione 8.4). Le altre ricevono `score = 95`, motivo `duplicate`. Le URL in whitelist duplicati non vengono mai segnalate come duplicato.
-- **Pagina vuota** (`blank`) non attiva: `score = 90`, motivo `blank`.
+**Step 2: strong rules (override):**
+- **Duplicate** (same `duplicateKey`): for each duplicate set, the tab to **keep** is chosen with the same priority rules as live protection (section 8.4). The others get `score = 95`, reason `duplicate`. URLs in the duplicate whitelist are never reported as duplicates.
+- Inactive **blank page** (`blank`): `score = 90`, reason `blank`.
 
-**Passo 3: punteggio additivo (troncato a 100):**
+**Step 3: additive score (capped at 100):**
 
-| Componente | Peso | Formula |
+| Component | Weight | Formula |
 |---|---|---|
-| Inattività | 0–55 | `55 * clamp(log(1 + idleH / 24) / log(1 + staleDays), 0, 1)`: cresce in fretta nei primi giorni e satura a `staleDays` |
-| Pagina transitoria (`search`, `auth`, `error`, `browser-internal`) | +25 (`error` +15) | solo se inattiva da più di 1 h |
-| Basso coinvolgimento | +15 | `activations ≤ 1` e `foregroundMs < 15 s` (aperta "per dopo" e mai letta) |
-| Quasi-duplicato | +15 | stesso path e host, query diversa, oppure stessa pagina con hash diverso |
-| Già nei preferiti (permesso opzionale) | +10 | "La ritrovi nei preferiti" |
-| Già sospesa da Chrome (`discarded`) | +5 | Chrome stesso l'ha giudicata poco importante |
-| In un gruppo creato dall'utente | ×0.6 | moltiplicatore finale (se l'opzione "includi gruppi" è attiva) |
-| Finestra "dimenticata" (tutte le schede inattive da più di `staleDays`) | +10 | |
+| Inactivity | 0–55 | `55 * clamp(log(1 + idleH / 24) / log(1 + staleDays), 0, 1)`: grows fast in the first days and saturates at `staleDays` |
+| Transient page (`search`, `auth`, `error`, `browser-internal`) | +25 (`error` +15) | only if inactive for more than 1 h |
+| Low engagement | +15 | `activations ≤ 1` and `foregroundMs < 15 s` (opened "for later" and never read) |
+| Near-duplicate | +15 | same path and host, different query, or the same page with a different hash |
+| Already bookmarked (optional permission) | +10 | "La ritrovi nei preferiti" |
+| Already discarded by Chrome (`discarded`) | +5 | Chrome itself judged it unimportant |
+| In a user-created group | ×0.6 | final multiplier (if the "include groups" option is on) |
+| "Forgotten" window (all tabs inactive for more than `staleDays`) | +10 | |
 
-**Bucket**: `score ≥ 70` → `close` ("Da chiudere"), `40–69` → `review` ("Da valutare"), `< 40` → `keep` (non mostrata).
+**Buckets**: `score ≥ 70` → `close` ("Da chiudere"), `40–69` → `review` ("Da valutare"), `< 40` → `keep` (not shown).
 
-**Motivo principale** (sezione UI), in ordine di priorità: `duplicate` > `blank` > `transient` (search/auth/error) > `stale-unread` (inattiva e basso coinvolgimento) > `stale` (inattiva) > `review`.
+**Primary reason** (UI section), in priority order: `duplicate` > `blank` > `transient` (search/auth/error) > `stale-unread` (inactive and low engagement) > `stale` (inactive) > `review`.
 
-**Testi dei motivi (i18n)**, esempi:
+**Reason texts (i18n)**, examples:
 - "Duplicato di un'altra scheda aperta"
 - "Non la apri da 12 giorni"
 - "Aperta 1 volta, letta per pochi secondi"
@@ -486,136 +488,136 @@ interface ScoredTab {
 - "Pagina di accesso/reindirizzamento"
 - "Già salvata nei preferiti"
 
-**Requisiti non funzionali dello scoring:**
-- Complessità O(n) (più O(n) per il raggruppamento dei duplicati tramite mappa). 1000 schede in meno di 15 ms su hardware medio (test di benchmark in Vitest).
-- Deterministico: stessi input producono stesso output (`now` iniettato).
-- Pesi e soglie centralizzati in `core/scoring.config.ts` per poterli tarare.
+**Non-functional requirements of the scoring:**
+- O(n) complexity (plus O(n) for grouping duplicates through a map). 1000 tabs in under 15 ms on average hardware (benchmark test in Vitest).
+- Deterministic: the same inputs produce the same output (`now` injected).
+- Weights and thresholds centralised in `core/scoring.config.ts` so they can be tuned.
 
-### 6.5 Taratura
-- Creare fixture realistiche (`tests/fixtures/tabs-300.json`) con etichetta attesa per ogni scheda ("dovrebbe essere suggerita" sì/no).
-- Un test di regressione calcola **precisione** (tra le suggerite in `close`, quante sono davvero inutili) con target ≥ 0,9. Un falso positivo costa più di un falso negativo: meglio suggerire meno ma giusto.
+### 6.5 Tuning
+- Create realistic fixtures (`tests/fixtures/tabs-300.json`) with an expected label for each tab ("should be suggested" yes/no).
+- A regression test computes **precision** (among the tabs suggested in `close`, how many are really useless) with a target ≥ 0.9. A false positive costs more than a false negative: better to suggest less, but correctly.
 
 ---
 
-## 7. Organizzazione automatica
+## 7. Automatic organization
 
-### 7.1 Per sito (deterministica)
-- Raggruppa per `registrableDomain`. Crea un gruppo solo se il dominio ha **almeno 3 schede** (configurabile). Le altre restano fuori dai gruppi.
-- Nome del gruppo: nome leggibile del sito (es. `github.com` → "GitHub"), da una piccola mappa di nomi noti con fallback al dominio senza TLD capitalizzato.
-- Colore stabile: hash del dominio → uno dei colori `chrome.tabGroups.Color` (`grey, blue, red, yellow, green, pink, purple, cyan, orange`).
+### 7.1 By site (deterministic)
+- Group by `registrableDomain`. Create a group only if the domain has **at least 3 tabs** (configurable). The others stay out of groups.
+- Group name: a readable site name (e.g. `github.com` → "GitHub"), from a small map of known names, falling back to the capitalised domain without its TLD.
+- Stable colour: hash of the domain → one of the `chrome.tabGroups.Color` colours (`grey, blue, red, yellow, green, pink, purple, cyan, orange`).
 
-### 7.2 Per argomento senza AI (`core/cluster.ts`)
-Algoritmo leggero e deterministico:
-1. **Tokenizzazione** di titolo + path URL: minuscolo, split su non-alfanumerici, rimozione di stopword IT/EN (lista inclusa), token di lunghezza ≥ 3, rimozione dei suffissi del sito nel titolo (" - YouTube", " | Medium").
-2. **Vettori TF-IDF** calcolati sull'insieme delle schede aperte, con un token extra per il dominio a peso moderato.
-3. **Clustering agglomerativo** con similarità coseno e average linkage, soglia ~0,25 (configurabile). Con n ≤ 500 il costo O(n²) è accettabile (meno di 50 ms).
-4. Cluster con meno di 2 schede finiscono in "Altro" (non raggruppate).
-5. **Nome del gruppo**: i 1–2 token con TF-IDF più alto nel cluster, capitalizzati (es. "Rust · Async").
-6. Limite: al massimo 8 gruppi. I cluster più piccoli vengono fusi in "Altro".
+### 7.2 By topic without AI (`core/cluster.ts`)
+A lightweight, deterministic algorithm:
+1. **Tokenization** of title + URL path: lower case, split on non-alphanumerics, IT/EN stopwords removed (list included), tokens of length ≥ 3, site suffixes removed from the title (" - YouTube", " | Medium").
+2. **TF-IDF vectors** computed over the set of open tabs, with an extra token for the domain at a moderate weight.
+3. **Agglomerative clustering** with cosine similarity and average linkage, threshold ~0.25 (configurable). With n ≤ 500 the O(n²) cost is acceptable (under 50 ms).
+4. Clusters with fewer than 2 tabs go to "Altro" (Other; not grouped).
+5. **Group name**: the 1–2 tokens with the highest TF-IDF in the cluster, capitalised (e.g. "Rust · Async").
+6. Limit: at most 8 groups. The smallest clusters are merged into "Altro".
 
-### 7.3 Per argomento con AI on-device (opzionale, `core/ai-grouping.ts` + `platform/llm.ts`)
-**API**: Prompt API di Chrome (`LanguageModel`, Gemini Nano), stabile nelle estensioni da Chrome 138. **Solo Chrome**: su Firefox `caps.promptApi` è falso, l'opzione AI non compare e si usa sempre 7.2. Il modulo AI viene caricato con `import()` dinamico, così nella build Firefox non pesa sull'avvio.
+### 7.3 By topic with on-device AI (optional, `core/ai-grouping.ts` + `platform/llm.ts`)
+**API**: Chrome's Prompt API (`LanguageModel`, Gemini Nano), stable in extensions since Chrome 138. **Chrome only**: on Firefox `caps.promptApi` is false, the AI option does not appear and 7.2 is always used. The AI module is loaded with a dynamic `import()`, so it does not weigh on start-up in the Firefox build.
 
-**Rilevamento e stato:**
+**Detection and state:**
 ```ts
 if (!('LanguageModel' in self)) → 'unsupported'
 await LanguageModel.availability({ expectedInputs:[{type:'text',languages:['en']}], expectedOutputs:[{type:'text',languages:['en']}] })
 // 'unavailable' | 'downloadable' | 'downloading' | 'available'
 ```
-- `downloadable`: nelle impostazioni/vista Organizza mostra "Attiva AI on-device (download unico di diversi GB gestito da Chrome)". Il download parte **solo su clic esplicito** (serve user activation) e il progresso si mostra con `monitor` → `downloadprogress`.
-- `unavailable` o `unsupported`: l'opzione AI è nascosta e si usa l'algoritmo 7.2 senza messaggi invasivi (solo una nota nelle impostazioni).
+- `downloadable`: in the settings/Organize view show "Attiva AI on-device (download unico di diversi GB gestito da Chrome)". The download starts **only on an explicit click** (it needs user activation) and the progress is shown with `monitor` → `downloadprogress`.
+- `unavailable` or `unsupported`: the AI option is hidden and the 7.2 algorithm is used, without intrusive messages (only a note in the settings).
 
-**Prompt** (in inglese, perché le lingue supportate ufficialmente sono en/ja/es/de/fr; i titoli in italiano vengono comunque passati come dati):
+**Prompt** (in English, because the officially supported languages are en/ja/es/de/fr; Italian titles are still passed in as data):
 - System prompt: "You organize browser tabs into a small number of topical groups. Group by the user's task or topic, not by website. Use short group names (1–3 words). Prefer 3–8 groups. Tabs that fit nowhere go to 'Other'."
-- Input: lista compatta `id|title|host` (titolo troncato a 80 caratteri).
-- **Output vincolato** con `responseConstraint` (JSON Schema):
+- Input: a compact `id|title|host` list (title truncated to 80 characters).
+- **Constrained output** with `responseConstraint` (JSON Schema):
   ```json
   { "type":"object","properties":{"groups":{"type":"array","maxItems":8,"items":{"type":"object",
     "properties":{"name":{"type":"string","maxLength":24},"tabIds":{"type":"array","items":{"type":"integer"}}},
     "required":["name","tabIds"]}}},"required":["groups"] }
   ```
-- **Batch**: massimo ~40 schede per prompt, controllando `session.contextUsage`/`contextWindow` e gestendo `QuotaExceededError` con un batch più piccolo. Per più di 40 schede: pre-clustering con 7.2 in macro-cluster, poi AI per affinare e nominare ciascun macro-cluster.
-- **Validazione** dell'output: ogni ID deve esistere ed essere assegnato una sola volta. Gli ID mancanti vanno in "Other", quelli inventati si scartano. Se il parse fallisce, fallback a 7.2.
-- **Nomi in italiano**: se la UI è in italiano, chiedere nomi brevi in inglese oppure tradurre con il **Translator API** solo se disponibile. Approccio v1: chiedere nomi in inglese e consentire la modifica inline nell'anteprima. Annotare la scelta in `DECISIONS.md`.
-- **Prestazioni**: sessione creata lazy alla prima richiesta, riusata, distrutta alla chiusura del pannello. Spinner con "Annulla" (`AbortController` → `signal`). Timeout di 20 s, poi fallback.
-- L'AI non decide **mai** cosa chiudere: serve solo a raggruppare e nominare.
+- **Batching**: at most ~40 tabs per prompt, checking `session.contextUsage`/`contextWindow` and handling `QuotaExceededError` with a smaller batch. For more than 40 tabs: pre-clustering with 7.2 into macro-clusters, then AI to refine and name each macro-cluster.
+- **Validation** of the output: every ID must exist and be assigned only once. Missing IDs go to "Other", invented ones are discarded. If parsing fails, fall back to 7.2.
+- **Italian names**: if the UI is in Italian, ask for short names in English, or translate with the **Translator API** only when it is available. v1 approach: ask for English names and allow inline editing in the preview. Record the choice in `DECISIONS.md`.
+- **Performance**: the session is created lazily on the first request, reused, and destroyed when the panel closes. Spinner with "Annulla" (`AbortController` → `signal`). 20 s timeout, then fallback.
+- The AI **never** decides what to close: it is only used to group and name.
 
-### 7.4 Applicazione dei gruppi
-- Snapshot pre-applicazione `{tabId, windowId, index, groupId}[]` per l'annullamento.
-- Per ogni gruppo: `chrome.tabs.group({ tabIds, createProperties:{ windowId } })` → `chrome.tabGroups.update(groupId, { title, color, collapsed })`.
-- Le schede di finestre diverse non vengono spostate tra finestre: un gruppo per finestra, cioè il clustering è eseguito per finestra quando l'ambito è "Tutte le finestre". In alternativa si offre l'opzione esplicita "Unisci tutto nella finestra corrente".
-- Gestire gli errori (scheda chiusa nel frattempo): applicare quello che si può e riportare un messaggio sintetico.
+### 7.4 Applying the groups
+- A pre-apply snapshot `{tabId, windowId, index, groupId}[]` for undo.
+- For each group: `chrome.tabs.group({ tabIds, createProperties:{ windowId } })` → `chrome.tabGroups.update(groupId, { title, color, collapsed })`.
+- Tabs of different windows are not moved between windows: one group per window, i.e. clustering runs per window when the scope is "Tutte le finestre". Alternatively, the explicit option "Unisci tutto nella finestra corrente" is offered.
+- Handle errors (a tab closed in the meantime): apply what can be applied and report a short message.
 
 ---
 
-## 8. Protezione duplicati in tempo reale (Duplicate Guard)
+## 8. Real-time duplicate protection (Duplicate Guard)
 
-Obiettivo: replicare in TabDeclutter le funzioni di *Duplicate Tabs Closer* che servono davvero, con comportamento prevedibile, così l'utente può disinstallare l'altra estensione.
+Goal: reproduce in TabDeclutter the *Duplicate Tabs Closer* features that really matter, with predictable behaviour, so the user can uninstall the other extension.
 
-### 8.1 Modalità
-| Modalità | Comportamento |
+### 8.1 Modes
+| Mode | Behaviour |
 |---|---|
-| **OFF** | Nessun controllo live. I duplicati compaiono comunque in Riordina → "Duplicati" |
-| **Solo avvisi** | Nessuna chiusura. Badge e sezione "Duplicati" aggiornati in tempo reale |
-| **Chiudi automaticamente** | Appena una scheda diventa duplicato di un'altra (in base a regole e priorità) viene chiusa la scheda "perdente" |
-| **In pausa** | Stato temporaneo (15 min / 1 h / fino al riavvio), poi torna alla modalità precedente. Gestito con `chrome.alarms` e stato in `storage.session` |
+| **OFF** | No live checks. Duplicates still appear in Declutter → "Duplicati" |
+| **Solo avvisi** (Warn only) | No closing. Badge and "Duplicati" section updated in real time |
+| **Chiudi automaticamente** (Close automatically) | As soon as a tab becomes a duplicate of another (according to the rules and priorities) the "losing" tab is closed |
+| **In pausa** (Paused) | Temporary state (15 min / 1 h / until restart), then back to the previous mode. Handled with `chrome.alarms` and state in `storage.session` |
 
-Default al primo avvio: **scelto dall'utente nell'onboarding** (sezione 17), con "Chiudi automaticamente" preselezionato.
+Default on first run: **chosen by the user during onboarding** (section 17), with "Chiudi automaticamente" preselected.
 
-### 8.2 Quando scatta il controllo (background)
-| Evento | Caso |
+### 8.2 When the check fires (background)
+| Event | Case |
 |---|---|
-| `tabs.onCreated` | Nuova scheda: usa `tab.pendingUrl ?? tab.url`. Se vuota, `chrome://newtab` o `about:newtab`/`about:blank` (caso tipico su Firefox, dove manca `pendingUrl`), aspetta il primo `onUpdated` con `url` |
-| `tabs.onUpdated` con `changeInfo.url` | Navigazione di una scheda esistente verso una URL già aperta altrove, oppure nuova scheda che riceve la sua URL |
-| `tabs.onAttached` | Scheda spostata in un'altra finestra (rilevante con ambito "finestra") |
+| `tabs.onCreated` | New tab: uses `tab.pendingUrl ?? tab.url`. If it is empty, `chrome://newtab` or `about:newtab`/`about:blank` (the typical case on Firefox, where `pendingUrl` is missing), wait for the first `onUpdated` with `url` |
+| `tabs.onUpdated` with `changeInfo.url` | An existing tab navigating to a URL already open elsewhere, or a new tab receiving its URL |
+| `tabs.onAttached` | Tab moved to another window (relevant with the "window" scope) |
 
-- **Indice in memoria** `Map<duplicateKey, Set<tabId>>`, ricostruito con un `tabs.query({})` al risveglio del service worker (meno di 5 ms per 500 schede) e aggiornato incrementalmente sugli eventi. Chiave calcolata su `url || pendingUrl`.
-- **Coda seriale**: tutti gli eventi del guard passano da una coda promise-based. Due schede uguali aperte nello stesso istante non devono mai chiudersi a vicenda (ne resta sempre esattamente una).
-- **Latenza target**: decisione e chiusura entro 50 ms dall'evento, così l'utente quasi non vede la scheda duplicata.
-- **Listener registrati in modo sincrono al top-level** del service worker (requisito MV3). Impostazioni e indice vengono caricati con una sola promise `ready` attesa da ogni handler.
+- **In-memory index** `Map<duplicateKey, Set<tabId>>`, rebuilt with a `tabs.query({})` when the service worker wakes up (under 5 ms for 500 tabs) and updated incrementally on events. Key computed on `url || pendingUrl`.
+- **Serial queue**: all guard events go through a promise-based queue. Two identical tabs opened at the same instant must never close each other (exactly one always remains).
+- **Target latency**: decision and close within 50 ms of the event, so the user barely sees the duplicate tab.
+- **Listeners registered synchronously at the top level** of the service worker (an MV3 requirement). Settings and index are loaded through a single `ready` promise awaited by every handler.
 
-### 8.3 Impostazioni (sotto-pagina "Protezione duplicati")
+### 8.3 Settings ("Protezione duplicati" sub-page)
 
-**Comportamento**
-| Opzione | Valori | Default |
+**Behaviour**
+| Option | Values | Default |
 |---|---|---|
-| Quando viene rilevato un duplicato | OFF / Solo avvisi / Chiudi automaticamente | scelto in onboarding |
-| Sulla scheda rimasta | Nessuna azione / **Attivala** / Spostala nella posizione della scheda chiusa e attivala | Attivala |
-| Ambito | **Stessa finestra** / Tutte le finestre | Tutte le finestre |
+| When a duplicate is detected | OFF / Solo avvisi / Chiudi automaticamente | chosen in onboarding |
+| On the remaining tab | Nessuna azione (no action) / **Attivala** (activate it) / Spostala nella posizione della scheda chiusa e attivala (move it to the closed tab's position and activate it) | Attivala |
+| Scope | **Stessa finestra** (same window) / Tutte le finestre (all windows) | Tutte le finestre |
 
-**Priorità ed esclusioni** (decidono quale scheda resta, sezione 8.4)
-| Opzione | Default |
+**Priority and exclusions** (they decide which tab stays, section 8.4)
+| Option | Default |
 |---|---|
-| Quale tenere: **Più vecchia** / Più recente / Più vecchia ricaricata con la nuova URL | Più vecchia |
-| Preferisci la scheda HTTPS (e considera `http`/`https` equivalenti) | ✔ |
-| Mantieni la scheda fissata | ✔ |
-| Mantieni la scheda attiva (quella su cui stai lavorando) | ✔ |
-| Preferisci la finestra attiva (solo con ambito "Tutte le finestre") | ✔ |
-| Ignora schede vuote (`about:blank`, nuova scheda) | ✔ (sempre vero per `chrome://newtab`) |
-| Ignora pagine di login/OAuth (classe `auth`, sezione 6.3), per non rompere i flussi di accesso | ✔ |
-| Consenti duplicati creati intenzionalmente con "Duplica scheda" di Chrome | ✔ (vedi 8.6). **Solo Chrome**: nascosta su Firefox |
-| Considera i container separati (solo Firefox): la stessa URL in container diversi non è un duplicato | ✔ |
+| Which to keep: **Più vecchia** (oldest) / Più recente (newest) / Più vecchia ricaricata con la nuova URL (oldest, reloaded with the new URL) | Più vecchia |
+| Prefer the HTTPS tab (and treat `http`/`https` as equivalent) | ✔ |
+| Keep the pinned tab | ✔ |
+| Keep the active tab (the one you are working on) | ✔ |
+| Prefer the active window (only with the "Tutte le finestre" scope) | ✔ |
+| Ignore empty tabs (`about:blank`, new tab) | ✔ (always true for `chrome://newtab`) |
+| Ignore login/OAuth pages (`auth` class, section 6.3), so as not to break sign-in flows | ✔ |
+| Allow duplicates created intentionally with Chrome's "Duplicate tab" | ✔ (see 8.6). **Chrome only**: hidden on Firefox |
+| Treat containers as separate (Firefox only): the same URL in different containers is not a duplicate | ✔ |
 
-**Confronto URL** (definisce cosa conta come duplicato, condiviso con Riordina)
-| Opzione | Default |
+**URL comparison** (defines what counts as a duplicate, shared with Declutter)
+| Option | Default |
 |---|---|
-| Ignora maiuscole/minuscole nella URL | ✘ |
-| Ignora `www.` | ✔ |
-| Ignora `#hash` (con eccezione per le route SPA `#/…`) | ✔ |
-| Ignora parametri di tracking (`utm_*`, `fbclid`…) | ✔ |
-| Ignora tutti i parametri di query | ✘ |
-| Ignora il path (confronta solo il dominio) | ✘ (con avviso: "molto aggressivo") |
+| Ignore case in the URL | ✘ |
+| Ignore `www.` | ✔ |
+| Ignore `#hash` (with an exception for SPA routes `#/…`) | ✔ |
+| Ignore tracking parameters (`utm_*`, `fbclid`…) | ✔ |
+| Ignore all query parameters | ✘ |
+| Ignore the path (compare the domain only) | ✘ (with a warning: "molto aggressivo") |
 
-**Whitelist duplicati** (URL per cui i duplicati sono sempre consentiti)
-- Editor a righe (`PatternListEditor`): un pattern per riga, `*` = qualsiasi sequenza di caratteri, righe racchiuse in `/…/` = espressione regolare. È **compatibile con la sintassi di Duplicate Tabs Closer**, quindi l'utente può incollare la whitelist che usa oggi. È anche presente il pulsante "Importa da Duplicate Tabs Closer", che spiega di copiare e incollare il testo: un'estensione non può leggere i dati di un'altra.
-- Validazione live riga per riga: le regex non valide vengono evidenziate con il messaggio d'errore e ignorate (mai un crash). Lunghezza massima 500 caratteri per pattern.
-- Anteprima: "Questa regola corrisponde a 3 schede aperte" sotto ogni riga (aiuta a capire se il pattern è giusto).
-- Default precompilati per browser:
+**Duplicate whitelist** (URLs for which duplicates are always allowed)
+- Line editor (`PatternListEditor`): one pattern per line, `*` = any sequence of characters, lines enclosed in `/…/` = regular expression. It is **compatible with Duplicate Tabs Closer's syntax**, so the user can paste the whitelist they use today. There is also an "Importa da Duplicate Tabs Closer" button, which explains how to copy and paste the text: an extension cannot read another extension's data.
+- Live line-by-line validation: invalid regexes are highlighted with the error message and ignored (never a crash). Maximum length 500 characters per pattern.
+- Preview: "Questa regola corrisponde a 3 schede aperte" under each line (helps tell whether the pattern is right).
+- Pre-filled defaults per browser:
   - Chrome: `chrome://newtab`, `about:blank`, `chrome://extensions*`, `chrome-extension://*`;
   - Firefox: `about:newtab`, `about:home`, `about:blank`, `about:addons`, `moz-extension://*`.
-- Pattern compilati una volta sola (`core/patterns.ts` → `compile(patterns) → (url) => boolean`) e ricompilati solo su `storage.onChanged`.
+- Patterns compiled only once (`core/patterns.ts` → `compile(patterns) → (url) => boolean`) and recompiled only on `storage.onChanged`.
 
-### 8.4 Algoritmo di decisione (`core/duplicate-guard.ts`, funzione pura)
+### 8.4 Decision algorithm (`core/duplicate-guard.ts`, pure function)
 
 ```ts
 resolveDuplicate(trigger: TabInfo, candidates: TabInfo[], ctx: {
@@ -623,298 +625,298 @@ resolveDuplicate(trigger: TabInfo, candidates: TabInfo[], ctx: {
 }) → null | { closeTabId: number; keepTabId: number; after: 'none' | 'activate' | 'move-activate'; reloadKeptWith?: string }
 ```
 
-1. **Filtri d'uscita (return `null`)**: modalità ≠ "Chiudi automaticamente" (o in pausa). URL in whitelist, vuota, `auth` (se attivo), `chrome://`/`chrome-extension://`. Scheda in incognito. Scheda creata dall'estensione stessa (8.6). Duplicato intenzionale (8.6). Nessun candidato con la stessa `duplicateKey` nell'ambito.
-2. Se ci sono più candidati, si confronta il trigger con il **candidato migliore** (stesse regole sotto) e si chiude sempre **una sola** scheda per evento.
-3. **Ordine di priorità** per scegliere quale scheda tenere (la prima regola che distingue vince):
-   1. scheda **fissata**;
-   2. scheda **attiva** su cui l'utente sta lavorando: vale solo quando *una scheda esistente viene navigata* (es. digito nella barra degli indirizzi una URL già aperta altrove) e quella scheda è attiva. In quel caso resta lei e si chiude l'altra. **Una scheda appena creata non conta come "attiva"** per questa regola, altrimenti ogni link aperto in primo piano chiuderebbe la scheda vecchia (comportamento poco intuitivo di altre estensioni);
-   3. scheda **HTTPS** (se l'opzione è attiva);
-   4. regola di **età**: più vecchia (`createdAt` minore) / più recente / più vecchia + `reloadKeptWith = trigger.url` (la scheda vecchia carica la URL nuova, utile quando la differenza è solo in parti ignorate come query o hash);
-   5. **finestra attiva** (solo ambito "Tutte le finestre").
-4. **Azione dopo la chiusura**:
-   - "Attivala": `tabs.update(keep, { active: true })` + `windows.update(keep.windowId, { focused: true })`. **Eccezione**: se la scheda chiusa era stata aperta **in background** (es. clic con rotella o Ctrl+clic, cioè `active === false` alla creazione), non si sposta il focus: l'utente non voleva cambiare scheda;
-   - "Sposta e attiva": `tabs.move(keep, { windowId: closed.windowId, index: closed.index })` e poi attiva;
+1. **Exit filters (return `null`)**: mode ≠ "Chiudi automaticamente" (or paused). URL whitelisted, empty, `auth` (if enabled), `chrome://`/`chrome-extension://`. Incognito tab. Tab created by the extension itself (8.6). Intentional duplicate (8.6). No candidate with the same `duplicateKey` within the scope.
+2. If there are several candidates, the trigger is compared with the **best candidate** (same rules below) and only **one** tab is ever closed per event.
+3. **Priority order** for choosing which tab to keep (the first rule that tells them apart wins):
+   1. **pinned** tab;
+   2. **active** tab the user is working on: applies only when *an existing tab is navigated* (e.g. typing in the address bar a URL already open elsewhere) and that tab is active. In that case it stays and the other one is closed. **A newly created tab does not count as "active"** for this rule, otherwise every link opened in the foreground would close the old tab (an unintuitive behaviour of other extensions);
+   3. **HTTPS** tab (if the option is on);
+   4. **age** rule: oldest (smaller `createdAt`) / newest / oldest + `reloadKeptWith = trigger.url` (the old tab loads the new URL, useful when the difference is only in ignored parts such as the query or the hash);
+   5. **active window** (only with the "Tutte le finestre" scope).
+4. **Action after closing**:
+   - "Attivala": `tabs.update(keep, { active: true })` + `windows.update(keep.windowId, { focused: true })`. **Exception**: if the closed tab had been opened **in the background** (e.g. middle click or Ctrl+click, i.e. `active === false` at creation), focus is not moved: the user did not want to switch tabs;
+   - "Sposta e attiva": `tabs.move(keep, { windowId: closed.windowId, index: closed.index })` and then activate;
    - `reloadKeptWith`: `tabs.update(keep, { url })`.
-5. La scheda chiusa va in **archivio** con motivo `duplicate-auto` e riferimento alla scheda mantenuta, così è ripristinabile.
+5. The closed tab goes to the **archive** with the reason `duplicate-auto` and a reference to the kept tab, so it can be restored.
 
-Tutta la tabella di casi va coperta da test unitari (almeno 30 casi: ogni regola, ogni combinazione di priorità, ambiti, finestre, fissate, attiva/background, whitelist, regex invalida).
+The whole table of cases must be covered by unit tests (at least 30 cases: every rule, every priority combination, scopes, windows, pinned, active/background, whitelist, invalid regex).
 
-### 8.5 Feedback all'utente (non invasivo)
-- **Nessuna notifica di sistema** di default: chiudere un duplicato è un'operazione frequente e notificarla ogni volta sarebbe rumore. L'utente vede comunque il risultato, perché la scheda esistente viene attivata.
-- Il badge lampeggia brevemente (cambio colore per 1,5 s) a ogni chiusura automatica.
-- Nel pannello (se aperto) compare il contatore della sezione 4.2. L'archivio ha il filtro "Duplicati chiusi automaticamente".
-- **Ripristino rapido**: menu sull'icona "Riapri l'ultimo duplicato chiuso", che riapre la scheda e la **esenta** dal guard (vedi 8.6), più l'opzione "…e consenti sempre duplicati per questo sito".
+### 8.5 Feedback to the user (unobtrusive)
+- **No system notification** by default: closing a duplicate happens often, and notifying it every time would be noise. The user sees the result anyway, because the existing tab is activated.
+- The badge flashes briefly (colour change for 1.5 s) on every automatic close.
+- In the panel (if open) the counter from section 4.2 appears. The archive has the "Duplicati chiusi automaticamente" filter.
+- **Quick restore**: the icon menu item "Riapri l'ultimo duplicato chiuso", which reopens the tab and **exempts** it from the guard (see 8.6), plus the option "…e consenti sempre duplicati per questo sito".
 
-### 8.6 Casi limite da gestire esplicitamente
-| Caso | Comportamento |
+### 8.6 Edge cases to handle explicitly
+| Case | Behaviour |
 |---|---|
-| Schede aperte/ripristinate **dall'estensione** (Annulla, Ripristina, "Riapri duplicato") | Registrate in un set di esenzione (`storage.session`, TTL 10 s, per tabId e per URL). Il guard le ignora |
-| **Avvio del browser** con ripristino della sessione | Periodo di grazia di 15 s dopo `runtime.onStartup`: niente chiusure automatiche. I duplicati eventuali compaiono in Riordina |
-| **"Duplica scheda"** di Chrome (intenzionale; su Firefox non gestito, vedi 5.5) | Euristica: nuova scheda con `openerTabId` = scheda con la stessa URL, `index = opener.index + 1` e URL già impostata alla creazione (non `pendingUrl` da un link). Esenta la scheda finché non naviga altrove. **Da verificare empiricamente** su Chrome stabile: se il segnale non è affidabile, documentarlo in `DECISIONS.md` e affidarsi a "Riapri l'ultimo duplicato" |
-| **Redirect** (A → B già aperta) | Si valuta ogni `changeInfo.url`. Le pagine `auth` sono escluse per non interrompere i login |
-| `tabs.onReplaced` (discard/prerender) | Aggiorna l'indice senza valutare duplicati |
-| Scheda chiusa nel frattempo (`tabs.remove` fallisce) | Ignora l'errore e ricostruisce l'indice |
-| Chiusura dell'**ultima scheda di una finestra** | Consentita: è un duplicato di una scheda esistente altrove, che viene attivata |
-| Schede con modifiche non salvate (form, editor) | Con "Più vecchia" la scheda chiusa è quasi sempre quella nuova, appena aperta, quindi è sicuro. Con "Più recente" mostra un avviso nelle impostazioni ("può chiudere schede su cui stavi lavorando") |
-| Coesistenza con Duplicate Tabs Closer | Nell'onboarding e nelle impostazioni: "Se usi ancora Duplicate Tabs Closer, disattivalo per evitare conflitti". Non si può rilevare in modo affidabile, quindi è solo un testo informativo |
+| Tabs opened/restored **by the extension** (Annulla, Ripristina, "Riapri duplicato") | Recorded in an exemption set (`storage.session`, 10 s TTL, by tabId and by URL). The guard ignores them |
+| **Browser start-up** with session restore | 15 s grace period after `runtime.onStartup`: no automatic closes. Any duplicates appear in Declutter |
+| Chrome's **"Duplicate tab"** (intentional; not handled on Firefox, see 5.5) | Heuristic: new tab with `openerTabId` = a tab with the same URL, `index = opener.index + 1` and the URL already set at creation (not a `pendingUrl` from a link). Exempts the tab until it navigates elsewhere. **To be verified empirically** on stable Chrome: if the signal is unreliable, document it in `DECISIONS.md` and rely on "Riapri l'ultimo duplicato" |
+| **Redirect** (A → B already open) | Every `changeInfo.url` is evaluated. `auth` pages are excluded so sign-ins are not interrupted |
+| `tabs.onReplaced` (discard/prerender) | Updates the index without evaluating duplicates |
+| Tab closed in the meantime (`tabs.remove` fails) | Ignore the error and rebuild the index |
+| Closing the **last tab of a window** | Allowed: it is a duplicate of an existing tab elsewhere, which gets activated |
+| Tabs with unsaved changes (forms, editors) | With "Più vecchia" the closed tab is almost always the new, just-opened one, so it is safe. With "Più recente", show a warning in the settings ("può chiudere schede su cui stavi lavorando") |
+| Coexistence with Duplicate Tabs Closer | In onboarding and settings: "Se usi ancora Duplicate Tabs Closer, disattivalo per evitare conflitti". It cannot be detected reliably, so it is only an informational text |
 
-### 8.7 Azione manuale "Chiudi tutti i duplicati"
-- Dal chip, dalla scorciatoia o da Riordina → "Duplicati" → "Chiudi tutti".
-- Funziona anche in modalità OFF/Solo avvisi. Applica le stesse priorità, archivia e mostra il toast con Annulla (se il pannello è aperto). Dalla scorciatoia, l'annullamento passa dal menu sull'icona.
+### 8.7 Manual action "Chiudi tutti i duplicati"
+- From the chip, the shortcut, or Declutter → "Duplicati" → "Chiudi tutti".
+- Works in OFF/Solo avvisi mode too. Applies the same priorities, archives, and shows the toast with Annulla (if the panel is open). From the shortcut, undo goes through the icon menu.
 
 ---
 
-## 9. Azioni, archivio e annullamento
+## 9. Actions, archive and undo
 
-| Azione | Implementazione |
+| Action | Implementation |
 |---|---|
-| **Chiudi** | 1) salva `ArchivedTab` in archivio; 2) `chrome.tabs.remove(ids)`; 3) toast con "Annulla" |
-| **Annulla chiusura** | per ogni scheda: cerca in `chrome.sessions.getRecentlyClosed()` (massimo 25 voci) una voce con URL corrispondente → `sessions.restore(sessionId)` (mantiene cronologia e scroll). Altrimenti `tabs.create({ url, windowId, index })` e reinserimento nel gruppo originale se esiste ancora. Infine rimozione dall'archivio |
-| **Mantieni** | aggiunge l'URL normalizzato a `keeps` con scadenza (7 giorni default; "Sempre" dal menu della riga) |
-| **Proteggi sito** | aggiunge il dominio alla lista dei siti protetti |
-| **Sospendi** | `chrome.tabs.discard(id)` (non attiva, non già sospesa). Utile per chi non vuole chiudere |
-| **Chiudi finestra** | archivia tutte le schede e chiama `chrome.windows.remove` |
-| **Ripristina da archivio** | come "Annulla" (fallback `tabs.create` nella finestra corrente) |
+| **Chiudi** (Close) | 1) save an `ArchivedTab` to the archive; 2) `chrome.tabs.remove(ids)`; 3) toast with "Annulla" |
+| **Undo close** | for each tab: look in `chrome.sessions.getRecentlyClosed()` (at most 25 entries) for an entry with a matching URL → `sessions.restore(sessionId)` (keeps history and scroll). Otherwise `tabs.create({ url, windowId, index })` and re-insertion into the original group if it still exists. Finally, removal from the archive |
+| **Mantieni** (Keep) | adds the normalized URL to `keeps` with an expiry (7 days by default; "Sempre" from the row menu) |
+| **Protect site** | adds the domain to the protected sites list |
+| **Sospendi** (Discard) | `chrome.tabs.discard(id)` (not active, not already discarded). Useful for people who do not want to close |
+| **Close window** | archives all the tabs and calls `chrome.windows.remove` |
+| **Restore from archive** | like "Annulla" (fallback `tabs.create` in the current window) |
 
-- **Sicurezze**:
-  - se la selezione include *tutte* le schede di una finestra, il bottone diventa "Chiudi N schede e la finestra" (testo esplicito);
-  - mai chiudere la scheda attiva della finestra corrente senza una conferma inline;
-  - chiusure di massa oltre 25 schede: conferma inline nella barra ("Chiudi 42 schede? [Conferma] [Annulla]").
+- **Safeguards**:
+  - if the selection includes *all* the tabs of a window, the button becomes "Chiudi N schede e la finestra" (explicit text);
+  - never close the active tab of the current window without an inline confirmation;
+  - bulk closes of more than 25 tabs: inline confirmation in the bar ("Chiudi 42 schede? [Conferma] [Annulla]").
 - `ArchivedTab = { id, url, title, favIconUrl?, closedAt, reason, windowId, groupTitle? }`.
 
 ---
 
-## 10. Persistenza (`platform/storage.ts`)
+## 10. Persistence (`platform/storage.ts`)
 
-Tutto su `chrome.storage.local` tramite item tipizzati e versionati (WXT `storage.defineItem` con `version` e `migrations`).
+Everything in `chrome.storage.local` through typed, versioned items (WXT `storage.defineItem` with `version` and `migrations`).
 
-| Chiave | Tipo | Dimensione stimata |
+| Key | Type | Estimated size |
 |---|---|---|
-| `local:activity` | `Record<tabId, TabActivity>` | 1000 schede × circa 150 B = 150 KB |
-| `local:keeps` | `Record<normalizedUrl, expiresAt \| null>` | piccola |
-| `local:protectedDomains` | `string[]` | piccola |
-| `local:archive` | `ArchivedTab[]` (FIFO, cap 1000) | circa 400 KB al massimo |
-| `local:settings` | `Settings` (incluse `GuardSettings` e `MatchOptions`) | piccola |
-| `local:duplicateWhitelist` | `string[]` (pattern grezzi, come scritti dall'utente) | piccola |
-| `session:guardState` | `{ pausedUntil?: number; resumeMode?: Mode; exemptions: {tabId?, url?, until}[]; lastAutoClosedId?: string }` | piccola, si azzera al riavvio |
+| `local:activity` | `Record<tabId, TabActivity>` | 1000 tabs × about 150 B = 150 KB |
+| `local:keeps` | `Record<normalizedUrl, expiresAt \| null>` | small |
+| `local:protectedDomains` | `string[]` | small |
+| `local:archive` | `ArchivedTab[]` (FIFO, cap 1000) | about 400 KB at most |
+| `local:settings` | `Settings` (including `GuardSettings` and `MatchOptions`) | small |
+| `local:duplicateWhitelist` | `string[]` (raw patterns, as written by the user) | small |
+| `session:guardState` | `{ pausedUntil?: number; resumeMode?: Mode; exemptions: {tabId?, url?, until}[]; lastAutoClosedId?: string }` | small, reset on restart |
 
-- La quota di `storage.local` (10 MB) è sufficiente: **non** richiedere `unlimitedStorage`.
-- Le scritture dell'archivio sono batch (una scrittura per azione, non per scheda).
-- Cleanup via `chrome.alarms` ogni 6 h: archivio scaduto, `keeps` scaduti, record di activity orfani.
+- The `storage.local` quota (10 MB) is enough: do **not** request `unlimitedStorage`.
+- Archive writes are batched (one write per action, not per tab).
+- Cleanup through `chrome.alarms` every 6 h: expired archive entries, expired `keeps`, orphaned activity records.
 
 ---
 
-## 11. Prestazioni: budget e tecniche
+## 11. Performance: budgets and techniques
 
-| Metrica | Budget |
+| Metric | Budget |
 |---|---|
-| JS del side panel (gzip) | ≤ 60 KB (escluso tldts, se usato: valutare la variante leggera) |
-| JS del background (gzip) | ≤ 15 KB |
-| Apertura pannello → lista visibile con 300 schede | ≤ 150 ms |
-| Scoring di 1000 schede | ≤ 15 ms |
-| Clustering di 300 schede (senza AI) | ≤ 50 ms |
-| Duplicate Guard: dall'evento alla chiusura (SW già attivo) | ≤ 50 ms |
-| Duplicate Guard: dall'evento alla chiusura (SW da risvegliare) | ≤ 300 ms |
-| Memoria del service worker | trascurabile: termina quando inattivo |
-| Richieste di rete | **0** |
+| Side panel JS (gzip) | ≤ 60 KB (excluding tldts, if used: consider the lightweight variant) |
+| Background JS (gzip) | ≤ 15 KB |
+| Panel open → list visible with 300 tabs | ≤ 150 ms |
+| Scoring 1000 tabs | ≤ 15 ms |
+| Clustering 300 tabs (without AI) | ≤ 50 ms |
+| Duplicate Guard: from event to close (SW already running) | ≤ 50 ms |
+| Duplicate Guard: from event to close (SW to be woken up) | ≤ 300 ms |
+| Service worker memory | negligible: it terminates when idle |
+| Network requests | **0** |
 
-Tecniche:
-- Service worker **solo a eventi**, nessun `setInterval`. Il badge si ricalcola su eventi delle tabs (debounce di 2 s) e su un alarm ogni 30 min (perché l'età cresce col tempo).
-- Nel pannello, `content-visibility: auto` + `contain-intrinsic-size` sulle righe come virtualizzazione "gratuita". Virtualizzazione vera solo se i test con 1000 schede superano il budget.
-- Favicon su Chrome via `chrome-extension://<id>/_favicon/?pageUrl=…&size=32`: cache del browser, nessuna richiesta di rete, nessun problema di CSP. Su Firefox: `favIconUrl` se `data:`, altrimenti avatar con iniziale (sezione 5.5).
-- Budget di prestazioni verificati su **entrambi** i browser. Su Firefox la latenza del guard senza `pendingUrl` può arrivare a ≤ 150 ms (SW attivo).
-- Signals per aggiornare solo le righe cambiate. Liste con `key` stabile (`tabId`).
-- Calcoli pesanti (clustering, AI) solo su richiesta, mai all'apertura del pannello.
-- Code splitting: vista Organizza e modulo AI caricati con `import()` dinamico.
+Techniques:
+- **Event-only** service worker, no `setInterval`. The badge is recomputed on tab events (2 s debounce) and on an alarm every 30 min (because age grows over time).
+- In the panel, `content-visibility: auto` + `contain-intrinsic-size` on the rows as "free" virtualization. Real virtualization only if the 1000-tab tests exceed the budget.
+- Favicons on Chrome via `chrome-extension://<id>/_favicon/?pageUrl=…&size=32`: browser cache, no network requests, no CSP problems. On Firefox: `favIconUrl` if it is `data:`, otherwise an initial-letter avatar (section 5.5).
+- Performance budgets verified on **both** browsers. On Firefox the guard latency without `pendingUrl` may reach ≤ 150 ms (SW running).
+- Signals so that only the changed rows update. Lists with a stable `key` (`tabId`).
+- Heavy computations (clustering, AI) only on demand, never when the panel opens.
+- Code splitting: the Organize view and the AI module loaded with a dynamic `import()`.
 
 ---
 
-## 12. Privacy, sicurezza e pubblicazione su Chrome Web Store e Firefox Add-ons
+## 12. Privacy, security and publishing on the Chrome Web Store and Firefox Add-ons
 
-### 12.1 Regole comuni (valide per entrambi gli store)
-- `docs/PRIVACY.md`: nessun dato raccolto o trasmesso, tutto resta nello storage locale del browser, nessuna analytics, nessun codice remoto. La stessa privacy policy è linkata in entrambi gli store (ospitata ad es. su GitHub Pages del repo).
-- **Single purpose**: "Aiutare l'utente a ridurre, deduplicare e organizzare le schede aperte". Riordina, Organizza e Protezione duplicati sono tutte parti di questo scopo, quindi è conforme alla policy del Chrome Web Store.
-- Giustificazione di ogni permesso, per browser, in `docs/PERMISSIONS.md`. Serve per i form di entrambi gli store e per spiegare gli avvisi: Chrome "Leggere la cronologia di navigazione", Firefox "Accedere alle schede del browser".
-- Nessun `eval`/`new Function`, nessun codice remoto, nessun `innerHTML` con dati delle schede (i titoli sono input non fidato: rendering solo come testo).
-- **Licenza**: MIT (file `LICENSE`).
-- Incognito: `not_allowed` in v1. Disinstallazione: nessun `setUninstallURL`.
-- **Una sola versione** (`package.json` → manifest) per entrambi gli store, SemVer, `CHANGELOG.md`.
+### 12.1 Common rules (for both stores)
+- `docs/PRIVACY.md`: no data collected or transmitted, everything stays in the browser's local storage, no analytics, no remote code. The same privacy policy is linked from both stores (hosted e.g. on the repository's GitHub Pages).
+- **Single purpose**: "Aiutare l'utente a ridurre, deduplicare e organizzare le schede aperte" (Help the user reduce, deduplicate and organize their open tabs). Declutter, Organize and Duplicate protection are all part of this purpose, so it complies with the Chrome Web Store policy.
+- Justification of every permission, per browser, in `docs/PERMISSIONS.md`. It is needed for the forms of both stores and to explain the warnings: Chrome "Leggere la cronologia di navigazione" (EN: "Read your browsing history"), Firefox "Accedere alle schede del browser" (EN: "Access browser tabs").
+- No `eval`/`new Function`, no remote code, no `innerHTML` with tab data (titles are untrusted input: render them as text only).
+- **Licence**: MIT (`LICENSE` file).
+- Incognito: `not_allowed` in v1. Uninstall: no `setUninstallURL`.
+- **A single version** (`package.json` → manifest) for both stores, SemVer, `CHANGELOG.md`.
 
 ### 12.2 Chrome Web Store
-- Account sviluppatore (quota una tantum) e verifica dell'email.
-- Pacchetto: `pnpm zip` → `.output/tabdeclutter-<ver>-chrome.zip`.
-- Scheda "Privacy practices": single purpose, giustificazione per permesso, certificazione "non raccolgo dati utente", link alla privacy policy.
-- Materiali: icona 128×128, almeno 1 screenshot 1280×800 (consigliati 3–5: Riordina, Organizza, Protezione duplicati, Archivio, tema scuro), small promo tile 440×280, descrizione IT/EN.
-- Lo stesso zip si può pubblicare anche su **Microsoft Edge Add-ons** senza modifiche (opzionale).
+- Developer account (one-time fee) and email verification.
+- Package: `pnpm zip` → `.output/tabdeclutter-<ver>-chrome.zip`.
+- "Privacy practices" tab: single purpose, per-permission justification, the "I do not collect user data" certification, link to the privacy policy.
+- Assets: 128×128 icon, at least 1 screenshot at 1280×800 (3–5 recommended: Declutter, Organize, Duplicate protection, Archive, dark theme), small promo tile 440×280, IT/EN description.
+- The same zip can also be published on **Microsoft Edge Add-ons** without changes (optional).
 
 ### 12.3 Firefox Add-ons (AMO)
-- Account Mozilla (gratuito). Prima pubblicazione **manuale** dal Developer Hub, le successive anche da CI.
-- Pacchetto: `pnpm zip:firefox` → `wxt zip -b firefox` produce **due** file: `…-firefox.zip` (add-on) e `…-sources.zip` (sorgenti).
-- **Sorgenti obbligatori**: il bundle è generato da Vite, quindi AMO richiede il codice sorgente e istruzioni per ricostruirlo identico. Di conseguenza:
-  - `README.md` (o `docs/AMO_REVIEW.md`) con sistema operativo, versione esatta di Node e pnpm, e i comandi `pnpm install --frozen-lockfile && pnpm build:firefox`;
-  - lockfile committato, versioni pinnate (`packageManager` in `package.json`, `.nvmrc`);
-  - lo zip dei sorgenti **non deve contenere codice minificato o generato**: nessun file vendorizzato minificato, niente `.output/`;
-  - build **riproducibile**: uno script CI ricostruisce dallo zip dei sorgenti e confronta (diff) il risultato con lo zip dell'add-on;
-  - valutare `minify: false` per la build Firefox: semplifica la revisione umana, a costo di un pacchetto un po' più grande.
-- `browser_specific_settings.gecko.id` fisso e `data_collection_permissions: { required: ["none"] }`: senza questa chiave AMO **rifiuta** l'invio.
-- `web-ext lint` sull'output Firefox deve dare **0 errori** (in CI). I warning vanno valutati e documentati.
-- Materiali: icona, screenshot, riassunto (≤ 250 caratteri), descrizione IT/EN, categoria "Schede", licenza MIT, link alla privacy policy, note per i revisori (cosa fa, perché `tabs`, come testarlo).
+- Mozilla account (free). First publication **by hand** from the Developer Hub; later ones from CI too.
+- Package: `pnpm zip:firefox` → `wxt zip -b firefox` produces **two** files: `…-firefox.zip` (add-on) and `…-sources.zip` (sources).
+- **Sources are mandatory**: the bundle is generated by Vite, so AMO requires the source code and instructions to rebuild it identically. Therefore:
+  - `README.md` (or `docs/AMO_REVIEW.md`) with the operating system, the exact Node and pnpm versions, and the commands `pnpm install --frozen-lockfile && pnpm build:firefox`;
+  - lockfile committed, pinned versions (`packageManager` in `package.json`, `.nvmrc`);
+  - the sources zip **must not contain minified or generated code**: no minified vendored files, no `.output/`;
+  - **reproducible** build: a CI script rebuilds from the sources zip and compares (diffs) the result with the add-on zip;
+  - consider `minify: false` for the Firefox build: it simplifies human review, at the cost of a slightly larger package.
+- A fixed `browser_specific_settings.gecko.id` and `data_collection_permissions: { required: ["none"] }`: without this key AMO **rejects** the submission.
+- `web-ext lint` on the Firefox output must report **0 errors** (in CI). Warnings must be assessed and documented.
+- Assets: icon, screenshots, summary (≤ 250 characters), IT/EN description, "Tabs" category, MIT licence, link to the privacy policy, notes for reviewers (what it does, why `tabs`, how to test it).
 
-### 12.4 Automazione rilascio (CI)
-- Workflow `release.yml` su tag `v*`: lint, typecheck, unit test, E2E Chrome, smoke E2E Firefox, `web-ext lint`, poi `wxt zip` e `wxt zip -b firefox`. Gli zip vengono allegati alla GitHub Release.
-- Invio automatico opzionale con `wxt submit` (`--chrome-zip`, `--firefox-zip`, `--firefox-sources-zip`), con secret `CHROME_*` e `FIREFOX_JWT_ISSUER`/`FIREFOX_JWT_SECRET`/`FIREFOX_EXTENSION_ID`. Si attiva solo dopo la prima pubblicazione manuale su ciascuno store.
-
----
-
-## 13. Milestone di implementazione
-
-Ogni milestone termina con: build verde **per Chrome e per Firefox**, lint pulito (incluso `web-ext lint`), test verdi, criteri di accettazione verificati **su entrambi i browser**, breve nota in `docs/DECISIONS.md` per eventuali scelte.
-
-### M0. Scaffolding (½–1 giorno)
-- WXT + Preact + TS strict + Vitest + Playwright + Puppeteer/web-ext + ESLint/Prettier + pnpm. Node e pnpm pinnati (`.nvmrc`, `packageManager`).
-- Script `package.json`: `dev`, `dev:firefox`, `build`, `build:firefox`, `zip`, `zip:firefox`, `lint`, `lint:firefox` (`web-ext lint -s .output/firefox-mv3`), `test`, `e2e`, `e2e:firefox`.
-- `wxt.config.ts` con manifest specializzato per browser (sezione 5.4), `platform/capabilities.ts` e `platform/panel.ts`.
-- Entrypoint `background` e `sidepanel` vuoti. Clic sull'icona → apre il pannello su **entrambi** i browser.
-- i18n di base (`_locales/en`, `_locales/it`) e helper `t(key, ...subs)`.
-- CI GitHub Actions: install, lint, typecheck, unit, build Chrome + Firefox, `web-ext lint`.
-- **Accettazione**: `pnpm dev` apre Chrome e `pnpm dev:firefox` apre Firefox con l'estensione, e in entrambi il pannello mostra "Hello" localizzato. `web-ext lint` con 0 errori. CI verde.
-
-### M1. Core puro e tracker (1–2 giorni)
-- `core/url.ts`, `core/classify.ts`, `core/duplicates.ts`, `core/scoring.ts` con test esaustivi.
-- Tracker nel background (sezione 6.1), con onStartup/onInstalled/onReplaced e scritture con debounce.
-- Fixture `tabs-50/300/1000.json` e benchmark.
-- **Accettazione**: copertura ≥ 95% su `core/`. Benchmark entro budget. Riavviando il browser, l'età delle schede si conserva (verifica manuale documentata).
-
-### M2. Vista Riordina in sola lettura (1–2 giorni)
-- Design token, layout, HealthBar, sezioni per motivo, TabRow con favicon, chip ed età relativa localizzata (`Intl.RelativeTimeFormat`).
-- Aggiornamento live sugli eventi delle tabs. Azione "Vai alla scheda".
-- Badge nel background.
-- **Accettazione**: con 300 schede il pannello è visibile entro 150 ms. Light/dark corretti. Navigazione da tastiera completa. Nessun errore in console.
-
-### M3. Azioni, archivio, annulla (1–2 giorni)
-- Selezione multipla, SelectionBar, Chiudi/Mantieni/Sospendi/Chiudi finestra, toast di annullamento, vista Archivio con ricerca e ripristino, menu contestuali, alarm di cleanup.
-- **Accettazione**: E2E: chiudo 10 schede → Annulla → tornano tutte (con la stessa URL, nella stessa finestra). Archivio persistente dopo il riavvio. Le sicurezze della sezione 9 funzionano.
-
-### M3b. Protezione duplicati (1–2 giorni)
-- `core/patterns.ts`, `core/duplicate-guard.ts` (funzioni pure + test), `background/guard.ts` (indice, coda seriale, esenzioni, grazia all'avvio, pausa con alarm), `DuplicateSettingsView` con `PatternListEditor`, `GuardChip`, comandi e menu contestuali, "Chiudi tutti i duplicati".
-- **Accettazione**:
-  - E2E: apro la stessa URL due volte → la seconda si chiude in meno di 300 ms e la prima diventa attiva;
-  - URL in whitelist (wildcard e regex) → restano entrambe;
-  - in pausa → restano entrambe, e alla fine della pausa la modalità torna quella di prima;
-  - apertura in background (Ctrl+clic) → nessun cambio di focus;
-  - scheda ripristinata da Annulla → non viene chiusa;
-  - 20 aperture simultanee della stessa URL → ne resta esattamente una;
-  - la whitelist incollata da Duplicate Tabs Closer funziona identica.
-
-### M4. Organizza senza AI (1–2 giorni)
-- Per sito + per argomento (TF-IDF + agglomerativo), anteprima modificabile, applica, annulla.
-- **Accettazione**: su `tabs-300.json` i cluster per argomento sono sensati (revisione manuale di un campione, salvata in `docs/`). Applica e annulla ripristinano esattamente ordine e gruppi originali.
-
-### M5. AI on-device (1 giorno)
-- `platform/llm.ts` (rilevamento, download con progresso, sessione, abort, timeout), `core/ai-grouping.ts` (batch, schema, validazione, merge) con LLM mockato nei test.
-- **Accettazione**: sui dispositivi senza modello la UI non mostra errori e usa il fallback. Con il modello i gruppi sono prodotti in meno di 10 s per 40 schede. Output invalido → fallback automatico (testato con mock).
-
-### M6. Impostazioni, rifinitura, accessibilità (1–2 giorni)
-- SettingsView completa, permesso opzionale `bookmarks` richiesto al toggle, stati vuoti, animazioni, `prefers-reduced-motion`, audit con axe (Playwright + @axe-core/playwright), traduzioni complete.
-- Icona definitiva.
-- **Accettazione**: zero violazioni axe "serious/critical". Tutte le stringhe localizzate (test che confronta le chiavi en/it).
-
-### M7. Hardening e rilascio su entrambi gli store (1–2 giorni)
-- Test E2E completi, test manuale con 1000 schede e 10 finestre su Chrome **e** Firefox, verifica del budget del bundle (`rollup-plugin-visualizer`), screenshot per entrambi gli store, `STORE_LISTING.md` (testi Chrome e AMO), `PRIVACY.md`, `PERMISSIONS.md`, `AMO_REVIEW.md` (istruzioni di build per i revisori).
-- Zip di produzione: `wxt zip` (Chrome) e `wxt zip -b firefox` (add-on + sorgenti). Verifica della build riproducibile dallo zip dei sorgenti.
-- Workflow `release.yml` (sezione 12.4).
-- **Accettazione**: checklist di rilascio (sezione 14) tutta spuntata. Pacchetti pronti per l'invio a Chrome Web Store e AMO.
+### 12.4 Release automation (CI)
+- `release.yml` workflow on `v*` tags: lint, typecheck, unit tests, Chrome E2E, Firefox smoke E2E, `web-ext lint`, then `wxt zip` and `wxt zip -b firefox`. The zips are attached to the GitHub Release.
+- Optional automatic submission with `wxt submit` (`--chrome-zip`, `--firefox-zip`, `--firefox-sources-zip`), with `CHROME_*` secrets and `FIREFOX_JWT_ISSUER`/`FIREFOX_JWT_SECRET`/`FIREFOX_EXTENSION_ID`. It is turned on only after the first manual publication on each store.
 
 ---
 
-## 14. Strategia di test e checklist di rilascio
+## 13. Implementation milestones
 
-**Unit (Vitest)**: normalizzazione URL, classificazione, duplicati, scoring (tabella di casi + proprietà: le schede protette hanno sempre score 0; il punteggio è monotono nell'inattività), clustering (deterministico, limiti 8 gruppi e minimo 2), ai-grouping (mock: output valido, ID inventati, duplicati, JSON malformato, quota superata).
+Every milestone ends with: a green build **for Chrome and for Firefox**, clean lint (including `web-ext lint`), green tests, acceptance criteria verified **on both browsers**, and a short note in `docs/DECISIONS.md` for any choices made.
 
-**E2E (Playwright, Chromium con estensione caricata da `.output/chrome-mv3`)**:
-- apertura pannello e rendering delle sezioni con schede seminate;
-- chiusura + annulla;
-- mantieni → la scheda sparisce dai suggerimenti e non ricompare per 7 giorni (con tempo simulato);
-- organizza per sito → gruppi creati con titolo e colore → annulla;
-- archivio: ricerca, ripristino, svuota;
-- protezione duplicati: tutti i casi di accettazione di M3b, più ambito "Stessa finestra" vs "Tutte le finestre", "Sposta e attiva", "Più vecchia ricaricata", navigazione di una scheda attiva verso una URL già aperta (regola "scheda attiva").
+### M0. Scaffolding (½–1 day)
+- WXT + Preact + strict TS + Vitest + Playwright + Puppeteer/web-ext + ESLint/Prettier + pnpm. Node and pnpm pinned (`.nvmrc`, `packageManager`).
+- `package.json` scripts: `dev`, `dev:firefox`, `build`, `build:firefox`, `zip`, `zip:firefox`, `lint`, `lint:firefox` (`web-ext lint -s .output/firefox-mv3`), `test`, `e2e`, `e2e:firefox`.
+- `wxt.config.ts` with a per-browser manifest (section 5.4), `platform/capabilities.ts` and `platform/panel.ts`.
+- Empty `background` and `sidepanel` entrypoints. Click on the icon → opens the panel on **both** browsers.
+- Basic i18n (`_locales/en`, `_locales/it`) and a `t(key, ...subs)` helper.
+- GitHub Actions CI: install, lint, typecheck, unit, Chrome + Firefox build, `web-ext lint`.
+- **Acceptance**: `pnpm dev` opens Chrome and `pnpm dev:firefox` opens Firefox with the extension, and in both the panel shows a localized "Hello". `web-ext lint` with 0 errors. CI green.
 
-**E2E Firefox (Puppeteer con WebDriver BiDi, estensione caricata da `.output/firefox-mv3`)**: smoke test degli stessi flussi principali (apertura sidebar, chiusura + annulla, guard su URL duplicata, organizza per sito). Se un flusso non è automatizzabile su Firefox, entra nella checklist manuale.
+### M1. Pure core and tracker (1–2 days)
+- `core/url.ts`, `core/classify.ts`, `core/duplicates.ts`, `core/scoring.ts` with exhaustive tests.
+- Tracker in the background (section 6.1), with onStartup/onInstalled/onReplaced and debounced writes.
+- `tabs-50/300/1000.json` fixtures and benchmarks.
+- **Acceptance**: coverage ≥ 95% on `core/`. Benchmarks within budget. After a browser restart, the tabs' age is preserved (documented manual check).
 
-**Unit specifici per compatibilità**: `capabilities` mockate (Chrome/Firefox) per favicon, guard senza `pendingUrl`, chiave di duplicato con `cookieStoreId`, schede `hidden`, opzioni nascoste su Firefox, default della whitelist per browser.
+### M2. Read-only Declutter view (1–2 days)
+- Design tokens, layout, HealthBar, sections by reason, TabRow with favicon, chips and localized relative age (`Intl.RelativeTimeFormat`).
+- Live updates on tab events. "Vai alla scheda" (Go to tab) action.
+- Badge in the background.
+- **Acceptance**: with 300 tabs the panel is visible within 150 ms. Light/dark correct. Full keyboard navigation. No console errors.
 
-**Manuale (Chrome)**: riavvio del browser (persistenza dell'età), discard da `chrome://discards` (onReplaced), più finestre, schede fissate/audio, tema scuro, zoom 200%, screen reader (NVDA/VoiceOver) sulle azioni principali.
+### M3. Actions, archive, undo (1–2 days)
+- Multiple selection, SelectionBar, Close/Keep/Discard/Close window, undo toast, Archive view with search and restore, context menus, cleanup alarm.
+- **Acceptance**: E2E: close 10 tabs → Annulla → they all come back (with the same URL, in the same window). The archive persists after a restart. The safeguards of section 9 work.
 
-**Manuale (Firefox)**: apertura sidebar da icona e scorciatoia, riavvio con ripristino della sessione (età conservata tramite `sessions.setTabValue`), container Multi-Account (stessa URL in container diversi, nessuna chiusura), tab groups (creazione/annullamento), favicon/avatar, `about:` pages, tema scuro, schede scaricate dalla memoria (`about:unloads`).
+### M3b. Duplicate protection (1–2 days)
+- `core/patterns.ts`, `core/duplicate-guard.ts` (pure functions + tests), `background/guard.ts` (index, serial queue, exemptions, start-up grace, pause with an alarm), `DuplicateSettingsView` with `PatternListEditor`, `GuardChip`, commands and context menus, "Chiudi tutti i duplicati".
+- **Acceptance**:
+  - E2E: open the same URL twice → the second closes in under 300 ms and the first becomes active;
+  - whitelisted URL (wildcard and regex) → both stay;
+  - paused → both stay, and when the pause ends the mode goes back to what it was;
+  - opening in the background (Ctrl+click) → no focus change;
+  - tab restored by Annulla → it is not closed;
+  - 20 simultaneous openings of the same URL → exactly one remains;
+  - a whitelist pasted from Duplicate Tabs Closer works identically.
 
-**Checklist di rilascio**
-- [ ] Build Chrome e Firefox generate dallo stesso commit, stessa versione
-- [ ] `web-ext lint` con 0 errori. `data_collection_permissions` e `gecko.id` presenti
-- [ ] Zip dei sorgenti AMO senza file minificati. Build riproducibile verificata
-- [ ] Tutti i flussi verificati su Chrome **e** Firefox
-- [ ] Zero richieste di rete (verificato da DevTools → Network sul pannello e sul service worker)
-- [ ] Permessi = quelli della sezione 5.4, ognuno giustificato
-- [ ] Budget di prestazioni rispettati
-- [ ] Nessun errore/warning in console
-- [ ] i18n en/it complete
-- [ ] axe pulito
-- [ ] PRIVACY.md, PERMISSIONS.md, STORE_LISTING.md e AMO_REVIEW.md pronti, con screenshot 1280×800 per entrambi gli store
+### M4. Organize without AI (1–2 days)
+- By site + by topic (TF-IDF + agglomerative), editable preview, apply, undo.
+- **Acceptance**: on `tabs-300.json` the topic clusters make sense (manual review of a sample, saved in `docs/`). Apply and undo restore exactly the original order and groups.
+
+### M5. On-device AI (1 day)
+- `platform/llm.ts` (detection, download with progress, session, abort, timeout), `core/ai-grouping.ts` (batching, schema, validation, merge) with a mocked LLM in the tests.
+- **Acceptance**: on devices without the model the UI shows no errors and uses the fallback. With the model, groups are produced in under 10 s for 40 tabs. Invalid output → automatic fallback (tested with mocks).
+
+### M6. Settings, polish, accessibility (1–2 days)
+- Complete SettingsView, the optional `bookmarks` permission requested on toggle, empty states, animations, `prefers-reduced-motion`, axe audit (Playwright + @axe-core/playwright), complete translations.
+- Final icon.
+- **Acceptance**: zero "serious/critical" axe violations. All strings localized (a test that compares the en/it keys).
+
+### M7. Hardening and release on both stores (1–2 days)
+- Complete E2E tests, a manual test with 1000 tabs and 10 windows on Chrome **and** Firefox, bundle budget check (`rollup-plugin-visualizer`), screenshots for both stores, `STORE_LISTING.md` (Chrome and AMO texts), `PRIVACY.md`, `PERMISSIONS.md`, `AMO_REVIEW.md` (build instructions for reviewers).
+- Production zips: `wxt zip` (Chrome) and `wxt zip -b firefox` (add-on + sources). Verification that the build is reproducible from the sources zip.
+- `release.yml` workflow (section 12.4).
+- **Acceptance**: the release checklist (section 14) fully ticked. Packages ready to submit to the Chrome Web Store and AMO.
 
 ---
 
-## 15. Possibili evoluzioni (v2, non implementare ora)
-- AI on-device anche su Firefox (API ML sperimentale di Firefox per le estensioni, oppure transformers.js), per il raggruppamento per argomento.
-- Firefox per Android e Safari.
-- Embedding semantici locali (transformers.js + `all-MiniLM-L6-v2` in offscreen document, WASM incluso nel pacchetto) per raggruppare meglio per argomento senza Gemini Nano.
-- "Revisione settimanale": notifica opzionale una volta a settimana se ci sono più di N schede da chiudere.
-- Regole personalizzate tipo "se URL contiene X allora mantieni/suggerisci".
-- Statistiche personali (schede chiuse nel tempo), solo locali.
+## 14. Test strategy and release checklist
+
+**Unit (Vitest)**: URL normalization, classification, duplicates, scoring (table of cases + properties: protected tabs always score 0; the score is monotonic in inactivity), clustering (deterministic, limits of 8 groups and minimum 2), ai-grouping (mocks: valid output, invented IDs, duplicates, malformed JSON, quota exceeded).
+
+**E2E (Playwright, Chromium with the extension loaded from `.output/chrome-mv3`)**:
+- opening the panel and rendering the sections with seeded tabs;
+- close + undo;
+- keep → the tab disappears from the suggestions and does not come back for 7 days (with simulated time);
+- organize by site → groups created with title and colour → undo;
+- archive: search, restore, empty;
+- duplicate protection: all the M3b acceptance cases, plus the "Stessa finestra" vs "Tutte le finestre" scope, "Sposta e attiva", "Più vecchia ricaricata", navigating an active tab to a URL already open (the "active tab" rule).
+
+**Firefox E2E (Puppeteer with WebDriver BiDi, extension loaded from `.output/firefox-mv3`)**: smoke tests of the same main flows (opening the sidebar, close + undo, guard on a duplicate URL, organize by site). If a flow cannot be automated on Firefox, it goes into the manual checklist.
+
+**Compatibility-specific unit tests**: mocked `capabilities` (Chrome/Firefox) for favicons, the guard without `pendingUrl`, the duplicate key with `cookieStoreId`, `hidden` tabs, options hidden on Firefox, per-browser whitelist defaults.
+
+**Manual (Chrome)**: browser restart (age persistence), discard from `chrome://discards` (onReplaced), multiple windows, pinned/audio tabs, dark theme, 200% zoom, screen reader (NVDA/VoiceOver) on the main actions.
+
+**Manual (Firefox)**: opening the sidebar from the icon and the shortcut, restart with session restore (age preserved through `sessions.setTabValue`), Multi-Account containers (same URL in different containers, no close), tab groups (create/undo), favicon/avatar, `about:` pages, dark theme, tabs unloaded from memory (`about:unloads`).
+
+**Release checklist**
+- [ ] Chrome and Firefox builds generated from the same commit, same version
+- [ ] `web-ext lint` with 0 errors. `data_collection_permissions` and `gecko.id` present
+- [ ] AMO sources zip without minified files. Reproducible build verified
+- [ ] All flows verified on Chrome **and** Firefox
+- [ ] Zero network requests (verified in DevTools → Network on the panel and on the service worker)
+- [ ] Permissions = those of section 5.4, each one justified
+- [ ] Performance budgets met
+- [ ] No console errors/warnings
+- [ ] en/it i18n complete
+- [ ] axe clean
+- [ ] PRIVACY.md, PERMISSIONS.md, STORE_LISTING.md and AMO_REVIEW.md ready, with 1280×800 screenshots for both stores
 
 ---
 
-## 16. Rischi e mitigazioni
+## 15. Possible evolutions (v2, do not implement now)
+- On-device AI on Firefox too (Firefox's experimental ML API for extensions, or transformers.js), for topical grouping.
+- Firefox for Android and Safari.
+- Local semantic embeddings (transformers.js + `all-MiniLM-L6-v2` in an offscreen document, WASM bundled in the package) to group better by topic without Gemini Nano.
+- "Weekly review": an optional notification once a week if there are more than N tabs to close.
+- Custom rules such as "if the URL contains X then keep/suggest".
+- Personal statistics (tabs closed over time), local only.
 
-| Rischio | Mitigazione |
+---
+
+## 16. Risks and mitigations
+
+| Risk | Mitigation |
 |---|---|
-| Falsi positivi (suggerire una scheda importante) | Soglie conservative, motivi spiegati, "Mantieni", siti protetti, archivio + annulla, precisione ≥ 0,9 sulle fixture |
-| `lastAccessed` assente o inaffidabile (discard, riavvio) | Tracker proprio + riconciliazione per URL + `max()` dei valori disponibili |
-| Service worker terminato e stato perso | Nessuno stato solo in memoria: tutto su storage, scritture con debounce e flush immediato su `onSuspend` |
-| Gemini Nano non disponibile (hardware, lingua, spazio) | AI opzionale con fallback euristico sempre presente |
-| Prestazioni con migliaia di schede | Algoritmi O(n), `content-visibility`, clustering on-demand, benchmark in CI |
-| Cambiamenti alle API Chrome/Firefox | Wrapper in `platform/`, `minimum_chrome_version` / `strict_min_version`, verifica sulla documentazione ufficiale (developer.chrome.com, MDN) |
-| Divergenze di comportamento tra Chrome e Firefox | Feature detection centralizzata (`capabilities.ts`), tabella 5.5 come contratto, test con capabilities mockate, checklist manuale Firefox |
-| Rifiuto in revisione AMO (sorgenti, codice minificato, permessi) | Zip dei sorgenti pulito, build riproducibile in CI, `web-ext lint`, note per i revisori, `minify: false` valutato per Firefox |
-| Rifiuto in revisione Chrome Web Store (single purpose, permessi) | Scopo unico dichiarato, giustificazione di ogni permesso, nessun permesso inutilizzato |
-| Guard che chiude una scheda che l'utente voleva (redirect, login, "Duplica scheda") | Esclusione delle pagine `auth`, esenzioni, grazia all'avvio, nuova scheda mai considerata "attiva", archivio + "Riapri l'ultimo duplicato" + "Consenti per questo sito" a portata di clic |
-| Regex della whitelist lente o errate | Validazione live, limite di lunghezza, compilazione una sola volta, errori isolati per riga |
-| Corse tra eventi (aperture simultanee) | Coda seriale + indice aggiornato prima della chiusura + test con 20 aperture parallele |
-| Avviso permessi "cronologia" che spaventa l'utente | Spiegazione chiara nello store e nell'onboarding: "Leggiamo titoli e indirizzi delle schede solo sul tuo dispositivo" |
+| False positives (suggesting an important tab) | Conservative thresholds, explained reasons, "Mantieni", protected sites, archive + undo, precision ≥ 0.9 on the fixtures |
+| `lastAccessed` missing or unreliable (discard, restart) | Own tracker + reconciliation by URL + `max()` of the available values |
+| Service worker terminated and state lost | No state only in memory: everything in storage, debounced writes and an immediate flush on `onSuspend` |
+| Gemini Nano unavailable (hardware, language, disk space) | Optional AI with an always-present heuristic fallback |
+| Performance with thousands of tabs | O(n) algorithms, `content-visibility`, on-demand clustering, benchmarks in CI |
+| Changes to the Chrome/Firefox APIs | Wrappers in `platform/`, `minimum_chrome_version` / `strict_min_version`, checks against the official documentation (developer.chrome.com, MDN) |
+| Behaviour differences between Chrome and Firefox | Centralised feature detection (`capabilities.ts`), table 5.5 as the contract, tests with mocked capabilities, manual Firefox checklist |
+| Rejection in AMO review (sources, minified code, permissions) | Clean sources zip, reproducible build in CI, `web-ext lint`, notes for reviewers, `minify: false` considered for Firefox |
+| Rejection in Chrome Web Store review (single purpose, permissions) | Single declared purpose, justification of every permission, no unused permission |
+| The guard closes a tab the user wanted (redirect, login, "Duplicate tab") | Exclusion of `auth` pages, exemptions, start-up grace, a new tab never counted as "active", archive + "Riapri l'ultimo duplicato" + "Consenti per questo sito" one click away |
+| Slow or wrong whitelist regexes | Live validation, length limit, compiled only once, errors isolated per line |
+| Races between events (simultaneous openings) | Serial queue + index updated before closing + a test with 20 parallel openings |
+| The "history" permission warning scares the user | A clear explanation in the store listing and in onboarding: "Leggiamo titoli e indirizzi delle schede solo sul tuo dispositivo" |
 
 ---
 
-## 17. Onboarding (primo avvio)
-Una sola schermata nel pannello, mai pagine aperte automaticamente:
+## 17. Onboarding (first run)
+A single screen in the panel, never pages opened automatically:
 1. "TabDeclutter ti suggerisce quali schede chiudere e ti aiuta a organizzarle. Tutto resta sul tuo dispositivo."
-2. Scelta rapida della soglia di vecchiaia (3/7/14 giorni).
-3. **Protezione duplicati**: "Quando apri una scheda già aperta: [Chiudila e torna a quella esistente] (preselezionato) / [Avvisami soltanto] / [Non fare nulla]", con il link "Hai una whitelist di Duplicate Tabs Closer? Incollala qui" (apre l'editor) e la nota "Se usi Duplicate Tabs Closer, disattivalo".
-4. Nota: "Nei primi giorni i suggerimenti si basano su dati parziali e diventano più precisi con l'uso."
-5. Pulsante "Inizia".
+2. Quick choice of the age threshold (3/7/14 days).
+3. **Duplicate protection**: "Quando apri una scheda già aperta: [Chiudila e torna a quella esistente] (preselezionato) / [Avvisami soltanto] / [Non fare nulla]", with the link "Hai una whitelist di Duplicate Tabs Closer? Incollala qui" (opens the editor) and the note "Se usi Duplicate Tabs Closer, disattivalo".
+4. Note: "Nei primi giorni i suggerimenti si basano su dati parziali e diventano più precisi con l'uso."
+5. "Inizia" (Start) button.
 
 ---
 
-## 18. Fonti consultate
-- Chrome Prompt API (stato, requisiti hardware, `availability`, `responseConstraint`, quote): https://developer.chrome.com/docs/ai/prompt-api
-- `chrome.tabs` reference (`lastAccessed` da Chrome 121, `discard`, `discarded`): https://developer.chrome.com/docs/extensions/reference/api/tabs
-- Bug/discussione `lastAccessed` undefined dopo il discard: https://groups.google.com/a/chromium.org/g/chromium-extensions/c/k9V7ndpUjXk
+## 18. Sources consulted
+- Chrome Prompt API (status, hardware requirements, `availability`, `responseConstraint`, quotas): https://developer.chrome.com/docs/ai/prompt-api
+- `chrome.tabs` reference (`lastAccessed` since Chrome 121, `discard`, `discarded`): https://developer.chrome.com/docs/extensions/reference/api/tabs
+- Bug/discussion on `lastAccessed` undefined after discard: https://groups.google.com/a/chromium.org/g/chromium-extensions/c/k9V7ndpUjXk
 - Firefox tab groups API (Firefox 138/139): https://blog.mozilla.org/addons/2025/04/30/webextensions-support-for-tab-groups/, https://developer.mozilla.org/docs/Mozilla/Add-ons/WebExtensions/API/tabGroups
-- Firefox `data_collection_permissions` obbligatorio per i nuovi add-on: https://blog.mozilla.org/addons/2025/10/23/data-collection-consent-changes-for-new-firefox-extensions/, https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent
-- Invio su AMO e sorgenti: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/Distribution/Submitting_an_add-on
-- WXT side panel (Chrome `side_panel` / Firefox `sidebar_action`): https://wxt.dev/entrypoints/sidepanel, differenze API: https://extension.js.org/docs/implementation-guide/side-panel
-- `tabs.Tab` su Firefox (`favIconUrl`, `lastAccessed`, `pendingUrl`): https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/Tab
-- Duplicate Tabs Closer (modalità, priorità, whitelist `*`/regex, matching, "intentional duplicate"): https://github.com/Peuj/duplicate-tabs-closer
-- Tab Wrangler (approccio auto-close + Corral): https://github.com/tabwrangler/tabwrangler, https://tabwrangler.com/
-- Confronto framework WXT/Plasmo/CRXJS: https://wxt.dev/guide/resources/compare, https://dev.to/extensionbooster/plasmo-vs-crxjs-vs-wxt-which-chrome-extension-framework-should-you-use-in-2026-37o4
-- Transformers.js in estensioni MV3 (offscreen document, WASM locale): https://huggingface.co/blog/transformersjs-chrome-extension, https://dev.to/sathiyasenpai/why-i-moved-my-transformersjs-pipeline-out-of-the-chrome-mv3-service-worker-and-into-an-offscreen-1kk4
-- Chrome Tab Organizer nativo: https://techcrunch.com/2024/01/23/google-chrome-gains-ai-features-including-a-writing-helper-theme-creator-and-tab-organizer
-- Panoramiche sui tab manager 2026 (spesso di parte, scritte da concorrenti): https://www.superchargebrowser.com/library/best-chrome-tab-managers-2026, https://leap-tabs.com/blog/best-tab-managers-chrome-2026
-- Limiti sulla memoria per scheda (`chrome.processes` solo su Dev/Canary): https://github.com/daermond/Tab-Memory-Manager
+- Firefox `data_collection_permissions` mandatory for new add-ons: https://blog.mozilla.org/addons/2025/10/23/data-collection-consent-changes-for-new-firefox-extensions/, https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent
+- AMO submission and sources: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/Distribution/Submitting_an_add-on
+- WXT side panel (Chrome `side_panel` / Firefox `sidebar_action`): https://wxt.dev/entrypoints/sidepanel, API differences: https://extension.js.org/docs/implementation-guide/side-panel
+- `tabs.Tab` on Firefox (`favIconUrl`, `lastAccessed`, `pendingUrl`): https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/Tab
+- Duplicate Tabs Closer (modes, priorities, `*`/regex whitelist, matching, "intentional duplicate"): https://github.com/Peuj/duplicate-tabs-closer
+- Tab Wrangler (auto-close + Corral approach): https://github.com/tabwrangler/tabwrangler, https://tabwrangler.com/
+- WXT/Plasmo/CRXJS framework comparison: https://wxt.dev/guide/resources/compare, https://dev.to/extensionbooster/plasmo-vs-crxjs-vs-wxt-which-chrome-extension-framework-should-you-use-in-2026-37o4
+- Transformers.js in MV3 extensions (offscreen document, local WASM): https://huggingface.co/blog/transformersjs-chrome-extension, https://dev.to/sathiyasenpai/why-i-moved-my-transformersjs-pipeline-out-of-the-chrome-mv3-service-worker-and-into-an-offscreen-1kk4
+- Native Chrome Tab Organizer: https://techcrunch.com/2024/01/23/google-chrome-gains-ai-features-including-a-writing-helper-theme-creator-and-tab-organizer
+- Overviews of 2026 tab managers (often biased, written by competitors): https://www.superchargebrowser.com/library/best-chrome-tab-managers-2026, https://leap-tabs.com/blog/best-tab-managers-chrome-2026
+- Per-tab memory limits (`chrome.processes` only on Dev/Canary): https://github.com/daermond/Tab-Memory-Manager

@@ -8,7 +8,7 @@ This repository is built by unattended agent sessions driven by
 [phasekit](https://github.com/RobertoReale/phasekit). One task means one session, one
 `plan/phase-<id>` branch and one commit.
 
-- `PLAN.md`: the product spec (Italian). Binding.
+- `PLAN.md`: the product spec. Binding.
 - `TASKS.md`: the execution plan, the invariants (§2), the ledger (§12) and the fix tasks (§13).
 - `AGENT-RULES.md`: how to behave while working here. Unattended sessions must read it first.
 - `PROMPTS.md`: the prompt each unattended session receives.

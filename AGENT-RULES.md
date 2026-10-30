@@ -7,14 +7,16 @@ says what the product is, and this file says how to behave while doing it.
 
 | File | What it is | How to read it |
 |---|---|---|
-| `PLAN.md` | The product spec, in Italian, ~76 KB. **Binding.** | Never read it whole. `grep -n '^#' PLAN.md` gives the section line numbers; read only the sections your task lists under **Spec**, plus §3 (design principles) the first time you touch product code in a session. |
+| `PLAN.md` | The product spec, ~74 KB. **Binding.** | Never read it whole. `grep -n '^#' PLAN.md` gives the section line numbers; read only the sections your task lists under **Spec**, plus §3 (design principles) the first time you touch product code in a session. |
 | `TASKS.md` | The execution plan: one section per task, the invariants (§2) and the ledger (§12). | Your task's section is quoted in your prompt. Grep for anything else (the ledger row, the invariants). |
 | `docs/DECISIONS.md` | Every choice the spec did not make for you. | Grep or read when a task touches an earlier decision. |
 | `docs/MANUAL-CHECKS.md` | What only a person can verify. | Append to it; never tick anything in it. |
 
-Code, identifiers, comments, commit messages and docs aimed at developers are in **English**. User-facing
-strings go through i18n (`en` and `it`). `docs/` files that the plan writes in Italian (for example
-`CLUSTER-REVIEW.md`, `MANUAL-CHECKS.md`) stay in Italian.
+Code, identifiers, comments, commit messages and documentation are in **English**. User-facing
+strings go through i18n (`en` and `it`); the Italian strings PLAN.md quotes (labels, reasons,
+messages) are the `it` locale's text, and the `en` locale carries their English equivalents. The one
+exception to English is the entries of `docs/MANUAL-CHECKS.md`: they are written in Italian because
+they are shown to the owner word for word (see Recording).
 
 ## The gates
 
@@ -34,7 +36,7 @@ green when it exits 0.
 ## Scope
 
 - Do the task in your prompt and nothing else. Do not start the next one.
-- Do not add features the spec does not list (PLAN.md §0.4: "poche cose, fatte bene").
+- Do not add features the spec does not list (PLAN.md §0.4: "few things, done well").
 - **Dependencies.** Runtime: only `wxt`, `preact`, `@preact/signals`, `tldts` (or a lighter variant)
   unless the task names another one. Dev dependencies that a task's tooling needs (test runners,
   lint plugins, axe, visualizer, an SVG rasterizer) are allowed, each recorded in DECISIONS.md with
@@ -82,7 +84,7 @@ and `...\firefox`, loaded as the page he sees explains); never ask him to build,
 open the repository. Say how long it takes if it is more than a few minutes. Before writing a step,
 make sure it is actually possible: for example, a Firefox *temporary* add-on disappears when
 Firefox closes, so a check that needs a restart must say how to do it. Add new entries at the end of
-the file, after the existing ones and outside the "Prima della pubblicazione" section unless that is
+the file, after the existing ones and outside the "Before publishing" section unless that is
 where they belong.
 
 ```markdown

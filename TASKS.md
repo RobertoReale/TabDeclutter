@@ -1,1087 +1,1073 @@
-# TASKS.md — piano di esecuzione di TabDeclutter
+# TASKS.md — TabDeclutter execution plan
 
-> Questo è il file che phasekit esegue. Ogni task (`M1.4`, `M3b.2`…) è **una sessione, un branch
-> `plan/phase-<id>`, un commit**. La specifica di prodotto è `PLAN.md` ed è vincolante: qui ci sono
-> solo l'ordine, il perimetro di ogni task e la condizione osservabile che lo rende "fatto".
-> Le regole di comportamento dell'agente sono in `AGENT-RULES.md`.
+> This is the file phasekit runs. Every task (`M1.4`, `M3b.2`…) is **one session, one
+> `plan/phase-<id>` branch, one commit**. The product spec is `PLAN.md` and it is binding: this file
+> holds only the order, the scope of each task and the observable condition that makes it "done".
+> The agent's rules of behaviour are in `AGENT-RULES.md`.
 
-## 1. Come viene eseguito questo piano
+## 1. How this plan is run
 
-### 1.1 I gates
+### 1.1 The gates
 
-I gates sono definiti **una volta sola**: l'array `gates` in `phasekit.json`. Ogni commit deve
-lasciarli tutti verdi, e phasekit li riesegue prima di ogni merge su `main`.
+The gates are defined **in one place only**: the `gates` array in `phasekit.json`. Every commit must
+leave them all green, and phasekit runs them again before every merge into `main`.
 
-All'inizio sono: install (`--frozen-lockfile`), lint, typecheck, unit test, build Chrome, build
-Firefox, `web-ext lint`. Crescono man mano che il progetto si dota di nuovi controlli: M0.4 aggiunge
-l'E2E Chromium, M0.5 l'E2E Firefox, M7.2 il budget del bundle. Un gate non si toglie e non si
-indebolisce mai.
+At the start they are: install (`--frozen-lockfile`), lint, typecheck, unit tests, Chrome build,
+Firefox build, `web-ext lint`. They grow as the project gains new checks: M0.4 adds the Chromium
+E2E, M0.5 the Firefox E2E, M7.2 the bundle budget. A gate is never removed or weakened.
 
-M0.1 è l'unico task che parte senza gates (li crea lui).
+M0.1 is the only task that starts without gates (it creates them).
 
-### 1.2 File di lavoro condivisi
+### 1.2 Shared working files
 
-- `docs/DECISIONS.md`: ogni scelta non scritta in PLAN.md (versioni, librerie, API che si comportano
-  diversamente dalla specifica, tarature). Una voce per decisione, con il task che l'ha presa.
-- `docs/MANUAL-CHECKS.md`: tutto ciò che non si può verificare in automatico (un riavvio vero del
-  browser, uno screen reader, il modello AI sul PC reale). L'agente aggiunge le voci, scritte come
-  istruzioni passo-passo per l'utente. A fine fase `tools/assistant.ps1` le mostra all'utente
-  insieme a una build di prova. Non bloccano la sequenza.
-- I problemi trovati nelle verifiche diventano task di correzione `F.n` (sezione 13), inseriti in
-  `autoSequence` subito dopo il task in corso.
+- `docs/DECISIONS.md`: every choice PLAN.md does not make (versions, libraries, APIs that behave
+  differently from the spec, tuning). One entry per decision, with the task that made it.
+- `docs/MANUAL-CHECKS.md`: everything that cannot be verified automatically (a real browser
+  restart, a screen reader, the AI model on the real PC). The agent adds the entries, written as
+  step-by-step instructions for the owner. At the end of a phase `tools/assistant.ps1` shows them
+  to the owner together with a test build. They do not block the sequence.
+- Problems found by the checks become fix tasks `F.n` (section 13), inserted into `autoSequence`
+  right after the task in progress.
 
-### 1.3 Ordine
+### 1.3 Order
 
-Le fasi seguono le milestone di PLAN.md §13 (M0 → M7). Dentro ogni fase, i task sono ordinati per
-dipendenza. Le fixture etichettate (M1.5) vengono **prima** dello scoring (M1.6), perché le
-etichette devono riflettere il giudizio umano, non l'output dell'algoritmo.
+The phases follow the milestones of PLAN.md §13 (M0 → M7). Within each phase, tasks are ordered by
+dependency. The labelled fixtures (M1.5) come **before** the scoring (M1.6), because the labels must
+reflect human judgement, not the algorithm's output.
 
-## 2. Invarianti
+## 2. Invariants
 
-Cose che non devono mai rompersi, con il motivo. Dove si può, sono imposte da un test o da una
-regola di lint invece che dalla buona volontà.
+Things that must never break, with the reason. Where possible they are enforced by a test or a lint
+rule rather than by good will.
 
-1. **Zero richieste di rete dai contesti dell'estensione.** Principio PLAN §3.4 e requisito di
-   entrambi gli store. Gli E2E falliscono se un contesto dell'estensione fa una richiesta esterna
-   (fixture creata in M0.4).
-2. **Nessuna scheda chiusa senza un gesto esplicito**, tranne la protezione duplicati in modalità
-   "Chiudi automaticamente". PLAN §3.1: è la promessa del prodotto.
-3. **Ogni chiusura finisce in archivio** ed è ripristinabile. PLAN §3.3.
-4. **`src/core/` è TypeScript puro**: niente `browser.*`/`chrome.*`, dipendenze iniettate, `now`
-   iniettato. Serve a testarlo al 100% e a condividerlo tra background e pannello (PLAN §5.2).
-5. **`chrome.*` solo dentro `src/platform/`**, dietro feature detection. Il codice applicativo
-   chiede a `capabilities.ts` e non controlla mai il nome del browser (PLAN §5.5). Imposto da
-   ESLint (M0.1).
-6. **Nessuno stato solo in memoria nel background, listener registrati in modo sincrono al
-   top-level.** Il service worker di Chrome muore dopo circa 30 s di inattività (PLAN §5.2, §8.2).
-7. **Titoli e URL delle schede sono input non fidato**: mai `innerHTML` o
-   `dangerouslySetInnerHTML`. Nessun `eval`/`new Function`, nessun codice remoto. Requisito degli
-   store (PLAN §12.1). Imposto da ESLint (M0.1).
-8. **Permessi esattamente quelli di PLAN §5.4.** Niente `host_permissions`, niente content
-   script. Ogni permesso in più è un motivo di rifiuto in revisione.
-9. **Una sola definizione di "duplicato"**: `duplicateKey()` in `core/duplicates.ts`, usata sia
-   da Riordina sia dal guard (PLAN §6.2).
-10. **Ogni differenza Chrome/Firefox ha un test con capabilities mockate o una voce in
+1. **Zero network requests from the extension's contexts.** Principle PLAN §3.4 and a requirement
+   of both stores. The E2E tests fail if an extension context makes an external request (fixture
+   created in M0.4).
+2. **No tab closed without an explicit gesture**, except duplicate protection in "Chiudi
+   automaticamente" mode. PLAN §3.1: it is the product's promise.
+3. **Every close goes to the archive** and can be restored. PLAN §3.3.
+4. **`src/core/` is pure TypeScript**: no `browser.*`/`chrome.*`, injected dependencies, injected
+   `now`. This is what lets it be 100% tested and shared between the background and the panel
+   (PLAN §5.2).
+5. **`chrome.*` only inside `src/platform/`**, behind feature detection. Application code asks
+   `capabilities.ts` and never checks the browser name (PLAN §5.5). Enforced by ESLint (M0.1).
+6. **No state held only in memory in the background; listeners registered synchronously at the
+   top level.** Chrome's service worker dies after about 30 s of inactivity (PLAN §5.2, §8.2).
+7. **Tab titles and URLs are untrusted input**: never `innerHTML` or `dangerouslySetInnerHTML`. No
+   `eval`/`new Function`, no remote code. A store requirement (PLAN §12.1). Enforced by ESLint
+   (M0.1).
+8. **Permissions exactly those of PLAN §5.4.** No `host_permissions`, no content scripts. Every
+   extra permission is a reason for rejection in review.
+9. **A single definition of "duplicate"**: `duplicateKey()` in `core/duplicates.ts`, used both by
+   Declutter and by the guard (PLAN §6.2).
+10. **Every Chrome/Firefox difference has a test with mocked capabilities or an entry in
     `docs/MANUAL-CHECKS.md`** (PLAN §5.5).
-11. **Ogni stringa visibile passa dall'i18n** e le chiavi `en`/`it` coincidono (test da M0.3).
+11. **Every visible string goes through i18n** and the `en`/`it` keys match (test from M0.3).
 
 ## 3. PHASE M0 — Scaffolding
 
-### M0.1 — Toolchain e scheletro del progetto
+### M0.1 — Toolchain and project skeleton
 
-Crea il progetto vuoto ma con tutta la toolchain, così che tutti i gates iniziali di
-`phasekit.json` esistano e siano verdi.
+Creates the empty project but with the whole toolchain, so that all the initial gates of
+`phasekit.json` exist and are green.
 
-**Spec.** PLAN.md §5.1, §5.3, §12.3 (versioni pinnate, build riproducibile), §13 M0.
+**Spec.** PLAN.md §5.1, §5.3, §12.3 (pinned versions, reproducible build), §13 M0.
 
-**Cosa fare.**
-- `package.json`: `"type": "module"`, versione `0.1.0`, licenza MIT,
-  `"packageManager": "pnpm@<versione di pnpm -v>"`, `engines.node`. `.nvmrc` con la versione
-  **esatta** di `node -v` (serve alla build riproducibile per AMO). Lockfile committato.
-- WXT (ultima stabile) con `srcDir: 'src'`. Preact + `@preact/signals` (integrazione via
-  `@preact/preset-vite` o equivalente: scegli e annota). TypeScript `strict` più
+**What to do.**
+- `package.json`: `"type": "module"`, version `0.1.0`, MIT licence,
+  `"packageManager": "pnpm@<the version from pnpm -v>"`, `engines.node`. `.nvmrc` with the
+  **exact** version from `node -v` (needed for the reproducible AMO build). Lockfile committed.
+- WXT (latest stable) with `srcDir: 'src'`. Preact + `@preact/signals` (integrated through
+  `@preact/preset-vite` or an equivalent: choose and record it). TypeScript `strict` plus
   `noUncheckedIndexedAccess`.
-- ESLint (flat config, typescript-eslint) + Prettier. Regole che impongono gli invarianti 5 e 7:
-  vietato `chrome` fuori da `src/platform/`, vietati `innerHTML`, `outerHTML`,
-  `dangerouslySetInnerHTML`, `eval`, `new Function`.
-- Vitest con un primo test reale: `src/core/time.ts` (costanti `MINUTE`/`HOUR`/`DAY`, `clamp`)
-  e il suo test. Niente `passWithNoTests`.
-- Entrypoint `background` (vuoto, `defineBackground`) e `sidepanel` (Preact, un placeholder).
-- Script: `dev`, `dev:firefox`, `build`, `build:firefox`, `zip`, `zip:firefox`, `lint` (eslint +
+- ESLint (flat config, typescript-eslint) + Prettier. Rules that enforce invariants 5 and 7:
+  `chrome` forbidden outside `src/platform/`; `innerHTML`, `outerHTML`,
+  `dangerouslySetInnerHTML`, `eval`, `new Function` forbidden.
+- Vitest with a first real test: `src/core/time.ts` (`MINUTE`/`HOUR`/`DAY` constants, `clamp`)
+  and its test. No `passWithNoTests`.
+- `background` entrypoint (empty, `defineBackground`) and `sidepanel` entrypoint (Preact, a
+  placeholder).
+- Scripts: `dev`, `dev:firefox`, `build`, `build:firefox`, `zip`, `zip:firefox`, `lint` (eslint +
   prettier --check), `lint:firefox` (`web-ext lint -s .output/firefox-mv3`), `typecheck`
-  (`wxt prepare` + `tsc --noEmit`), `test` (`vitest run`). `e2e` ed `e2e:firefox` arrivano in
-  M0.4/M0.5: non creare script che non fanno niente.
-- Il minimo di manifest necessario perché `web-ext lint` dia 0 errori (es. `gecko.id`); il
-  manifest completo è M0.2.
-- `LICENSE` (MIT, Roberto Reale, 2026), `README.md` essenziale (cos'è, come si builda).
-- `.gitignore` esiste già: aggiungi solo quello che manca.
+  (`wxt prepare` + `tsc --noEmit`), `test` (`vitest run`). `e2e` and `e2e:firefox` come in
+  M0.4/M0.5: do not create scripts that do nothing.
+- The minimum manifest needed for `web-ext lint` to report 0 errors (e.g. `gecko.id`); the full
+  manifest is M0.2.
+- `LICENSE` (MIT, Roberto Reale, 2026), a minimal `README.md` (what it is, how to build it).
+- `.gitignore` already exists: add only what is missing.
 
-**Perimetro.** Solo configurazione e scheletro. Nessuna funzionalità del prodotto.
+**Scope.** Configuration and skeleton only. No product functionality.
 
-**Fatto quando.** Da albero pulito, ogni comando dell'array `gates` di `phasekit.json` termina
-con exit 0, nell'ordine. `docs/DECISIONS.md` registra le versioni scelte (Node, pnpm, WXT,
-Preact) e come è integrato Preact.
+**Done when.** From a clean tree, every command in the `gates` array of `phasekit.json` exits with
+0, in order. `docs/DECISIONS.md` records the chosen versions (Node, pnpm, WXT, Preact) and how
+Preact is integrated.
 
-### M0.2 — Manifest per browser, capabilities e apertura del pannello
+### M0.2 — Per-browser manifest, capabilities and opening the panel
 
-Il manifest generato deve coincidere con PLAN §5.4 su entrambi i browser, e il clic sull'icona
-deve aprire il pannello.
+The generated manifest must match PLAN §5.4 on both browsers, and clicking the icon must open the
+panel.
 
-**Spec.** PLAN.md §4.1 (punti di ingresso, solo apertura pannello e scorciatoia), §5.4, §5.5.
+**Spec.** PLAN.md §4.1 (entry points, only opening the panel and the shortcut), §5.4, §5.5.
 
-**Cosa fare.**
-- `wxt.config.ts` con `manifest: ({ browser }) => …`: permessi, `optional_permissions`,
+**What to do.**
+- `wxt.config.ts` with `manifest: ({ browser }) => …`: permissions, `optional_permissions`,
   `incognito`, `commands`, `side_panel` / `sidebar_action`, `minimum_chrome_version: "121"`,
-  `gecko` (`strict_min_version: "140.0"`, `data_collection_permissions`). Per l'id usa
-  `tabdeclutter@robertoreale`: è una scelta provvisoria, annotala in DECISIONS come "da
-  confermare prima del primo invio ad AMO, poi immutabile".
-  Estrai la funzione che costruisce il manifest in un modulo testabile.
-- `src/platform/capabilities.ts` come in §5.5, scritto come factory testabile
-  (`detectCapabilities(env)`) più l'istanza `caps`.
+  `gecko` (`strict_min_version: "140.0"`, `data_collection_permissions`). For the id use
+  `tabdeclutter@robertoreale`: it is a provisional choice; record it in DECISIONS as "to be
+  confirmed before the first AMO submission, immutable afterwards".
+  Extract the function that builds the manifest into a testable module.
+- `src/platform/capabilities.ts` as in §5.5, written as a testable factory
+  (`detectCapabilities(env)`) plus the `caps` instance.
 - `src/platform/panel.ts`: Chrome `sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`;
-  Firefox `action.onClicked` → `sidebarAction.toggle()` chiamato **in modo sincrono**.
-  Registrazione dal background al top-level.
+  Firefox `action.onClicked` → `sidebarAction.toggle()` called **synchronously**.
+  Registered from the background at the top level.
 
-**Perimetro.** `wxt.config.ts`, `src/platform/{capabilities,panel}.ts`, entrypoint background,
-test unitari.
+**Scope.** `wxt.config.ts`, `src/platform/{capabilities,panel}.ts`, background entrypoint, unit
+tests.
 
-**Fatto quando.**
-- Un unit test verifica, per Chrome e per Firefox, che chiavi e permessi del manifest siano
-  esattamente quelli di §5.4: nessun `host_permissions`, nessun `content_scripts`.
-- Dopo la build, `.output/chrome-mv3/manifest.json` e `.output/firefox-mv3/manifest.json` sono
-  stati ispezionati e coincidono con §5.4. Le differenze imposte da WXT sono annotate.
-- `web-ext lint`: 0 errori. Gli eventuali warning sono annotati in DECISIONS.
-- I test di `capabilities` coprono Chrome e Firefox mockati.
-- Aggiunte a MANUAL-CHECKS: "clic sull'icona apre il pannello (Chrome, Firefox)" e
+**Done when.**
+- A unit test checks, for Chrome and for Firefox, that the manifest's keys and permissions are
+  exactly those of §5.4: no `host_permissions`, no `content_scripts`.
+- After the build, `.output/chrome-mv3/manifest.json` and `.output/firefox-mv3/manifest.json` have
+  been inspected and match §5.4. Differences imposed by WXT are recorded.
+- `web-ext lint`: 0 errors. Any warnings are recorded in DECISIONS.
+- The `capabilities` tests cover mocked Chrome and Firefox.
+- Added to MANUAL-CHECKS: "clic sull'icona apre il pannello (Chrome, Firefox)" and
   "Alt+Shift+D apre il pannello (Chrome, Firefox)".
 
-### M0.3 — i18n e pannello "Hello" localizzato
+### M0.3 — i18n and a localized "Hello" panel
 
-Tutte le stringhe passano da un helper tipizzato, e un test impedisce che `en` e `it` divergano.
+Every string goes through a typed helper, and a test prevents `en` and `it` from drifting apart.
 
-**Spec.** PLAN.md §2.1 (UI bilingue), §4.6 (riga "Lingua"), §13 M0.
+**Spec.** PLAN.md §2.1 (bilingual UI), §4.6 ("Language" row), §13 M0.
 
-**Cosa fare.**
-- `src/public/_locales/{en,it}/messages.json` con `extName`, `extDescription`, `actionTitle`,
+**What to do.**
+- `src/public/_locales/{en,it}/messages.json` with `extName`, `extDescription`, `actionTitle`,
   `cmdCloseDuplicates`, `cmdToggleGuard`, `hello`.
-- Helper `t(key, ...subs)` tipizzato sulle chiavi di `en` (una chiave inesistente è un errore di
-  compilazione).
-- Unit test: stesse chiavi in `en` e `it`, stessi placeholder, sostituzione corretta.
-- Il pannello mostra `t('hello')` e imposta `lang` sul documento.
+- A `t(key, ...subs)` helper typed on the `en` keys (a key that does not exist is a compile
+  error).
+- Unit tests: the same keys in `en` and `it`, the same placeholders, correct substitution.
+- The panel shows `t('hello')` and sets `lang` on the document.
 
-**Perimetro.** `_locales`, helper i18n, pannello, test.
+**Scope.** `_locales`, i18n helper, panel, tests.
 
-**Fatto quando.** I test di parità passano. Il manifest buildato usa `__MSG_*__` e la build
-risolve le chiavi. Il pannello renderizza la stringa localizzata, verificato in E2E da M0.4.
+**Done when.** The parity tests pass. The built manifest uses `__MSG_*__` and the build resolves the
+keys. The panel renders the localized string, verified in E2E from M0.4.
 
-### M0.4 — Harness E2E Chromium
+### M0.4 — Chromium E2E harness
 
-Gli E2E diventano un gate: dopo questo task ogni merge verifica l'estensione vera, caricata in
+E2E tests become a gate: after this task every merge checks the real extension, loaded in
 Chromium.
 
-**Spec.** PLAN.md §5.1 (Playwright), §14 (E2E), §13 M0 (accettazione), §11 (zero rete).
+**Spec.** PLAN.md §5.1 (Playwright), §14 (E2E), §13 M0 (acceptance), §11 (zero network).
 
-**Cosa fare.**
-- Playwright con l'estensione caricata da `.output/chrome-mv3` in un persistent context.
-  Usa il Chromium di Playwright, non Chrome brandizzato: le versioni recenti di Chrome ignorano
-  `--load-extension`. Headless se supporta le estensioni (`channel: 'chromium'`); verifica e
-  annota.
-- Fixture riusabili:
-  1. id dell'estensione (dal service worker) e apertura di `chrome-extension://<id>/sidepanel.html`
-     in una scheda (il side panel vero non si apre senza gesto utente);
-  2. fallisce il test se una pagina dell'estensione o il service worker scrive un errore in
-     console;
-  3. fallisce il test se un contesto dell'estensione fa una richiesta di rete verso un'origine
-     che non sia l'estensione stessa (invariante 1).
-- Primo test: il pannello mostra "Hello" localizzato in `en` e in `it`.
-- Script `e2e`: builda Chrome e poi lancia Playwright, così non gira mai su una build vecchia.
-- Aggiungi a `phasekit.json` il gate `{ "name": "e2e chromium", "cwd": ".", "run": "pnpm e2e",
+**What to do.**
+- Playwright with the extension loaded from `.output/chrome-mv3` in a persistent context.
+  Use Playwright's Chromium, not branded Chrome: recent Chrome versions ignore
+  `--load-extension`. Headless if it supports extensions (`channel: 'chromium'`); check and
+  record.
+- Reusable fixtures:
+  1. the extension id (from the service worker) and opening `chrome-extension://<id>/sidepanel.html`
+     in a tab (the real side panel does not open without a user gesture);
+  2. fail the test if an extension page or the service worker writes an error to the console;
+  3. fail the test if an extension context makes a network request to an origin other than the
+     extension itself (invariant 1).
+- First test: the panel shows a localized "Hello" in `en` and in `it`.
+- `e2e` script: builds Chrome and then runs Playwright, so it never runs on a stale build.
+- Add to `phasekit.json` the gate `{ "name": "e2e chromium", "cwd": ".", "run": "pnpm e2e",
   "retries": 1 }`.
 
-**Perimetro.** Config Playwright, `tests/e2e/`, `package.json`, `phasekit.json` (solo
-l'aggiunta del gate).
+**Scope.** Playwright config, `tests/e2e/`, `package.json`, `phasekit.json` (only adding the
+gate).
 
-**Fatto quando.** `pnpm e2e` passa due volte di fila da albero pulito. Il gate è in
-`phasekit.json`. Le scelte (headless, Chromium) sono in DECISIONS.
+**Done when.** `pnpm e2e` passes twice in a row from a clean tree. The gate is in `phasekit.json`.
+The choices (headless, Chromium) are in DECISIONS.
 
-### M0.5 — Harness E2E Firefox
+### M0.5 — Firefox E2E harness
 
-Lo stesso per Firefox: smoke test sull'estensione vera, via WebDriver BiDi.
+The same for Firefox: smoke tests on the real extension, through WebDriver BiDi.
 
-**Spec.** PLAN.md §5.1 (Puppeteer + web-ext), §14 (E2E Firefox).
+**Spec.** PLAN.md §5.1 (Puppeteer + web-ext), §14 (Firefox E2E).
 
-**Cosa fare.**
-- Puppeteer con `browser: 'firefox'` e WebDriver BiDi. Installa l'estensione da
-  `.output/firefox-mv3` (`browser.installExtension` o equivalente). Fissa l'UUID interno
-  (preferenza `extensions.webextensions.uuids`) così i test aprono
+**What to do.**
+- Puppeteer with `browser: 'firefox'` and WebDriver BiDi. Install the extension from
+  `.output/firefox-mv3` (`browser.installExtension` or equivalent). Pin the internal UUID
+  (preference `extensions.webextensions.uuids`) so the tests open
   `moz-extension://<uuid>/sidepanel.html`.
-- Firefox: in locale c'è Firefox 157 in `C:\Program Files\Mozilla Firefox\firefox.exe`, in CI
-  si scarica. Rendi il percorso configurabile e annota la scelta.
-- Runner dei test a scelta (config Vitest separata o altro), annotato.
-- Primo test: il pannello mostra "Hello" localizzato; nessun errore in console.
-- Script `e2e:firefox`: builda Firefox e poi lancia i test. Headless.
-- Aggiungi a `phasekit.json` il gate `{ "name": "e2e firefox", "cwd": ".", "run":
+- Firefox: locally there is Firefox 157 at `C:\Program Files\Mozilla Firefox\firefox.exe`; in CI
+  it is downloaded. Make the path configurable and record the choice.
+- Test runner of your choice (a separate Vitest config or something else), recorded.
+- First test: the panel shows a localized "Hello"; no console errors.
+- `e2e:firefox` script: builds Firefox and then runs the tests. Headless.
+- Add to `phasekit.json` the gate `{ "name": "e2e firefox", "cwd": ".", "run":
   "pnpm e2e:firefox", "retries": 1 }`.
 
-**Perimetro.** Harness Firefox, `tests/e2e-firefox/` (o simile), `package.json`,
-`phasekit.json` (solo l'aggiunta del gate).
+**Scope.** Firefox harness, `tests/e2e-firefox/` (or similar), `package.json`,
+`phasekit.json` (only adding the gate).
 
-**Fatto quando.** `pnpm e2e:firefox` passa due volte di fila. Il gate è in `phasekit.json`.
+**Done when.** `pnpm e2e:firefox` passes twice in a row. The gate is in `phasekit.json`.
 
-### M0.6 — CI GitHub Actions
+### M0.6 — GitHub Actions CI
 
-La CI esegue gli stessi controlli dei gates, così un push rotto si vede su GitHub.
+CI runs the same checks as the gates, so a broken push shows up on GitHub.
 
 **Spec.** PLAN.md §13 M0 (CI), §12.4.
 
-**Cosa fare.** `.github/workflows/ci.yml` su push e pull request: Node da `.nvmrc`, pnpm dalla
-versione di `packageManager`, poi gli stessi comandi dell'array `gates` di `phasekit.json`,
-nello stesso ordine (Firefox installato in CI per l'E2E Firefox). `release.yml` è M7.5.
+**What to do.** `.github/workflows/ci.yml` on push and pull request: Node from `.nvmrc`, pnpm at
+the `packageManager` version, then the same commands as the `gates` array of `phasekit.json`, in the
+same order (Firefox installed in CI for the Firefox E2E). `release.yml` is M7.5.
 
-**Perimetro.** Solo `.github/workflows/ci.yml`.
+**Scope.** Only `.github/workflows/ci.yml`.
 
-**Fatto quando.** Il file è YAML valido (verifica con un validatore eseguito via `pnpm dlx`,
-senza aggiungerlo alle dipendenze) e i suoi comandi coincidono con i gates. Aggiunta a
-MANUAL-CHECKS: "CI verde al primo push su GitHub".
+**Done when.** The file is valid YAML (checked with a validator run through `pnpm dlx`, without
+adding it to the dependencies) and its commands match the gates. Added to MANUAL-CHECKS: "CI verde
+al primo push su GitHub".
 
-## 4. PHASE M1 — Core puro e tracker
+## 4. PHASE M1 — Pure core and tracker
 
-### M1.1 — Tipi e normalizzazione URL
+### M1.1 — Types and URL normalization
 
-La base di tutto il core: i tipi condivisi e una normalizzazione URL corretta e testata.
+The base of the whole core: the shared types and a correct, tested URL normalization.
 
-**Spec.** PLAN.md §6.1 (`TabActivity`), §6.2, §8.3 (tabella "Confronto URL" → `MatchOptions`),
-§10 (tipi delle chiavi di storage).
+**Spec.** PLAN.md §6.1 (`TabActivity`), §6.2, §8.3 ("URL comparison" table → `MatchOptions`),
+§10 (types of the storage keys).
 
-**Cosa fare.**
-- `src/core/types.ts`: una forma di scheda indipendente dal browser (`TabInfo`, con `pinned`,
-  `audible`, `active`, `discarded`, `hidden`, `groupId`, `cookieStoreId`, `incognito`,
-  `openerTabId`, `pendingUrl`, `lastAccessed`…), `TabActivity`, `Settings`, `GuardSettings`,
-  `MatchOptions`, `ArchivedTab`, con i valori di default in un unico modulo.
-- `src/core/url.ts`: `normalizeUrl(url, options)` e `registrableDomain()` tramite tldts
-  (dipendenza runtime ammessa; valuta la variante più leggera e annota). Gestisce URL non valide
-  e gli schemi interni di entrambi i browser senza eccezioni.
-- Coverage: `@vitest/coverage-v8` con soglia ≥ 95% (righe e branch) su `src/core/**`, imposta
-  da `pnpm test`.
+**What to do.**
+- `src/core/types.ts`: a browser-independent tab shape (`TabInfo`, with `pinned`, `audible`,
+  `active`, `discarded`, `hidden`, `groupId`, `cookieStoreId`, `incognito`, `openerTabId`,
+  `pendingUrl`, `lastAccessed`…), `TabActivity`, `Settings`, `GuardSettings`, `MatchOptions`,
+  `ArchivedTab`, with the default values in a single module.
+- `src/core/url.ts`: `normalizeUrl(url, options)` and `registrableDomain()` through tldts (an
+  allowed runtime dependency; consider the lighter variant and record it). Handles invalid URLs
+  and the internal schemes of both browsers without throwing.
+- Coverage: `@vitest/coverage-v8` with a ≥ 95% threshold (lines and branches) on `src/core/**`,
+  enforced by `pnpm test`.
 
-**Perimetro.** `src/core/{types,url}.ts`, config Vitest, test.
+**Scope.** `src/core/{types,url}.ts`, Vitest config, tests.
 
-**Fatto quando.** Almeno 40 casi di test su `url.ts`: tracking param, `www.`, porte, slash
-finale, hash SPA `#/`, query ordinate, `about:`/`chrome:`/`moz-extension:`, URL non valide.
-`pnpm test` fallisce se la coverage di `core/` scende sotto il 95%.
+**Done when.** At least 40 test cases on `url.ts`: tracking params, `www.`, ports, trailing slash,
+SPA hash `#/`, sorted queries, `about:`/`chrome:`/`moz-extension:`, invalid URLs. `pnpm test`
+fails if the coverage of `core/` drops below 95%.
 
-### M1.2 — Classificazione del tipo di pagina
+### M1.2 — Page type classification
 
-Ogni scheda riceve una classe (search, auth, error…) da regole su URL e titolo, senza leggere la
-pagina.
+Every tab gets a class (search, auth, error…) from rules on the URL and the title, without reading
+the page.
 
-**Spec.** PLAN.md §6.3, §5.5 (riga "Pagine interne").
+**Spec.** PLAN.md §6.3, §5.5 ("Internal pages" row).
 
-**Cosa fare.** `src/core/rules.ts` (tutte le liste di host e pattern in un solo file dati) e
-`src/core/classify.ts`. Copre le pagine interne di Chrome ed Edge e quelle di Firefox; le pagine
-di TabDeclutter stesse sono riconoscibili (servono allo scoring come protezione). I titoli di
-errore sono multilingua (IT/EN almeno).
+**What to do.** `src/core/rules.ts` (all the host and pattern lists in a single data file) and
+`src/core/classify.ts`. Covers the internal pages of Chrome and Edge and those of Firefox;
+TabDeclutter's own pages are recognisable (the scoring needs them as a protection). Error titles
+are multilingual (at least IT/EN).
 
-**Perimetro.** `src/core/{rules,classify}.ts`, test.
+**Scope.** `src/core/{rules,classify}.ts`, tests.
 
-**Fatto quando.** Test a tabella con almeno 5 casi per classe, inclusi falsi amici (una pagina
-che contiene "login" nel testo del path ma non è un login, se le regole lo distinguono). Coverage
-di `core/` ≥ 95%.
+**Done when.** Table tests with at least 5 cases per class, including false friends (a page whose
+path contains "login" but is not a login, if the rules tell them apart). Coverage of `core/`
+≥ 95%.
 
-### M1.3 — Pattern della whitelist duplicati
+### M1.3 — Duplicate whitelist patterns
 
-La whitelist compatibile con Duplicate Tabs Closer, compilata una volta e mai fonte di crash.
+The whitelist compatible with Duplicate Tabs Closer, compiled once and never a source of crashes.
 
-**Spec.** PLAN.md §8.3 ("Whitelist duplicati").
+**Spec.** PLAN.md §8.3 ("Duplicate whitelist").
 
-**Cosa fare.** `src/core/patterns.ts`: `compile(patterns) → { match(url): boolean, errors:
-{ line, message }[] }`. `*` = qualsiasi sequenza; righe `/…/` = regex; regex non valida = errore
-per quella riga, ignorata. Limite di 500 caratteri per pattern. Esporta i default per browser.
-Prima di scrivere, verifica la semantica esatta della sintassi di Duplicate Tabs Closer
-(maiuscole, ancoraggi, flag) sul suo repository (github.com/Peuj/duplicate-tabs-closer) e annota
-cosa hai trovato.
+**What to do.** `src/core/patterns.ts`: `compile(patterns) → { match(url): boolean, errors:
+{ line, message }[] }`. `*` = any sequence; `/…/` lines = regex; an invalid regex = an error for
+that line, which is ignored. A 500-character limit per pattern. Export the per-browser defaults.
+Before writing, check the exact semantics of Duplicate Tabs Closer's syntax (case, anchoring,
+flags) in its repository (github.com/Peuj/duplicate-tabs-closer) and record what you found.
 
-**Perimetro.** `src/core/patterns.ts`, test.
+**Scope.** `src/core/patterns.ts`, tests.
 
-**Fatto quando.** Test su wildcard, regex, regex non valide, righe vuote o con spazi, limite di
-lunghezza, default Chrome e Firefox, e almeno 3 pattern reali nella sintassi di Duplicate Tabs
-Closer che si comportano come lì.
+**Done when.** Tests on wildcards, regexes, invalid regexes, empty lines or lines with spaces, the
+length limit, the Chrome and Firefox defaults, and at least 3 real patterns in Duplicate Tabs
+Closer's syntax that behave as they do there.
 
-### M1.4 — Chiave di duplicato e scelta della scheda da tenere
+### M1.4 — Duplicate key and choosing the tab to keep
 
-Una sola definizione di duplicato e una sola regola di priorità, condivise da Riordina e dal
-guard.
+One definition of duplicate and one priority rule, shared by Declutter and the guard.
 
-**Spec.** PLAN.md §6.2 (ultimo punto), §8.3 ("Confronto URL", "Priorità ed esclusioni"), §8.4
-punto 3, §5.5 (container, schede nascoste).
+**Spec.** PLAN.md §6.2 (last point), §8.3 ("URL comparison", "Priority and exclusions"), §8.4
+point 3, §5.5 (containers, hidden tabs).
 
-**Cosa fare.** `src/core/duplicates.ts`:
+**What to do.** `src/core/duplicates.ts`:
 - `duplicateKey(url, matchOptions, cookieStoreId?)`;
-- `findDuplicateSets(tabs, options, isWhitelisted)`, che esclude le schede `hidden`;
-- un comparatore di priorità che implementa §8.4.3 (fissata, scheda attiva navigata, HTTPS, età,
-  finestra attiva), esportato in modo che M3b.1 lo riusi senza duplicarlo.
+- `findDuplicateSets(tabs, options, isWhitelisted)`, which excludes `hidden` tabs;
+- a priority comparator that implements §8.4.3 (pinned, navigated active tab, HTTPS, age, active
+  window), exported so that M3b.1 reuses it without duplicating it.
 
-**Perimetro.** `src/core/duplicates.ts`, test.
+**Scope.** `src/core/duplicates.ts`, tests.
 
-**Fatto quando.** Ci sono test per ogni opzione di `MatchOptions`, per http/https equivalenti,
-per i container (stessa URL in container diversi = non duplicato), per le schede nascoste, per
-ogni regola di priorità e per le combinazioni in cui la prima regola che distingue vince.
+**Done when.** There are tests for every `MatchOptions` option, for equivalent http/https, for
+containers (the same URL in different containers = not a duplicate), for hidden tabs, for every
+priority rule and for the combinations where the first rule that tells them apart wins.
 
-### M1.5 — Fixture etichettate (prima dello scoring)
+### M1.5 — Labelled fixtures (before the scoring)
 
-Fixture realistiche con un'etichetta "da suggerire sì/no" scritta con giudizio umano, prima che
-esista l'algoritmo che le dovrà rispettare.
+Realistic fixtures with a "suggest yes/no" label written with human judgement, before the algorithm
+that must honour them exists.
 
-**Spec.** PLAN.md §6.5, §1 (cosa rende inutile una scheda), §3.1 (un falso positivo costa più di
-un falso negativo).
+**Spec.** PLAN.md §6.5, §1 (what makes a tab useless), §3.1 (a false positive costs more than a
+false negative).
 
-**Cosa fare.**
-- Script deterministico (PRNG con seed) in `scripts/` che genera `tests/fixtures/tabs-50.json`,
-  `tabs-300.json` e `tabs-1000.json` da template curati: ricerche, login, documentazione, PR di
-  GitHub, YouTube, notizie, pagine "per dopo", duplicati, fissate, audio, gruppi, più finestre,
-  una finestra dimenticata, titoli in italiano e in inglese.
-- Ogni scheda ha i campi di `TabInfo`, il record di attività e un `now` fisso. Le schede di
-  `tabs-300` hanno anche `expected: 'suggest' | 'keep'` e una breve motivazione.
-- Le etichette rispondono a "un utente attento la chiuderebbe?", in modo conservativo. **Non
-  derivarle da regole di punteggio.**
-- Un test valida lo schema delle fixture.
+**What to do.**
+- A deterministic script (seeded PRNG) in `scripts/` that generates `tests/fixtures/tabs-50.json`,
+  `tabs-300.json` and `tabs-1000.json` from curated templates: searches, logins, documentation,
+  GitHub PRs, YouTube, news, "for later" pages, duplicates, pinned, audio, groups, several windows,
+  a forgotten window, titles in Italian and in English.
+- Every tab has the `TabInfo` fields, the activity record and a fixed `now`. The `tabs-300` tabs
+  also have `expected: 'suggest' | 'keep'` and a short rationale.
+- The labels answer "would a careful user close it?", conservatively. **Do not derive them from
+  scoring rules.**
+- A test validates the fixtures' schema.
 
-**Perimetro.** `scripts/`, `tests/fixtures/`, test di schema. Nessun codice di scoring.
+**Scope.** `scripts/`, `tests/fixtures/`, schema test. No scoring code.
 
-**Fatto quando.** Le fixture esistono, sono rigenerabili in modo identico e lo schema è
-validato. La distribuzione delle etichette (quante `suggest`, per tipo) è annotata in DECISIONS.
-Aggiunta a MANUAL-CHECKS: "rivedere a campione 30 etichette di `tabs-300.json`".
+**Done when.** The fixtures exist, can be regenerated identically and the schema is validated. The
+label distribution (how many `suggest`, by type) is recorded in DECISIONS. Added to MANUAL-CHECKS:
+"rivedere a campione 30 etichette di `tabs-300.json`".
 
-### M1.6 — Punteggio di inutilità
+### M1.6 — Uselessness score
 
-Il cuore del prodotto: un punteggio spiegabile, deterministico e veloce.
+The heart of the product: an explainable, deterministic and fast score.
 
-**Spec.** PLAN.md §6.4 (tutto), §6.5, §4.3 (suggerimento a livello di finestra), §11 (budget).
+**Spec.** PLAN.md §6.4 (all of it), §6.5, §4.3 (window-level suggestion), §11 (budgets).
 
-**Cosa fare.**
-- `src/core/scoring.config.ts`: tutti i pesi e le soglie.
-- `src/core/scoring.ts`: `scoreTabs(tabs, activity, settings, now, context)` con i passi 1–3,
-  i bucket, il motivo principale, tutti i motivi con i dati per il testo i18n, e il segnale di
-  "finestra dimenticata" per la card di §4.3.
-  Il `context` porta duplicati, keeps, domini protetti, whitelist, preferiti (opzionale) e
-  l'origine dell'estensione.
+**What to do.**
+- `src/core/scoring.config.ts`: all the weights and thresholds.
+- `src/core/scoring.ts`: `scoreTabs(tabs, activity, settings, now, context)` with steps 1–3, the
+  buckets, the primary reason, all the reasons with the data for the i18n text, and the
+  "forgotten window" signal for the §4.3 card.
+  The `context` carries duplicates, keeps, protected domains, whitelist, bookmarks (optional) and
+  the extension's origin.
 
-**Perimetro.** `src/core/scoring*.ts`, test, benchmark.
+**Scope.** `src/core/scoring*.ts`, tests, benchmarks.
 
-**Fatto quando.**
-- Ogni regola ha un test a tabella.
-- Test di proprietà: una scheda protetta ha sempre score 0; il punteggio è monotono
-  nell'inattività; stessi input danno stesso output.
-- Precisione ≥ 0,9 sul bucket `close` di `tabs-300.json`. Se non ci arrivi, tara
-  `scoring.config.ts` restando nei margini della spec. **Non cambiare mai le etichette.** Se non
-  basta, fermati e riporta i numeri.
-- Benchmark: mediana dello scoring di 1000 schede ≤ 15 ms, misurata dopo un warm-up.
-- I valori finali di precisione e benchmark sono annotati in DECISIONS.
+**Done when.**
+- Every rule has a table test.
+- Property tests: a protected tab always scores 0; the score is monotonic in inactivity; the same
+  inputs give the same output.
+- Precision ≥ 0.9 on the `close` bucket of `tabs-300.json`. If you do not reach it, tune
+  `scoring.config.ts` within the spec's margins. **Never change the labels.** If that is not
+  enough, stop and report the numbers.
+- Benchmark: median scoring time for 1000 tabs ≤ 15 ms, measured after a warm-up.
+- The final precision and benchmark values are recorded in DECISIONS.
 
-### M1.7 — Storage tipizzato e versionato
+### M1.7 — Typed, versioned storage
 
-Ogni dato persistente ha un item tipizzato, con versione e default, così le migrazioni future
-sono possibili.
+Every persisted value has a typed item, with a version and defaults, so future migrations are
+possible.
 
 **Spec.** PLAN.md §10.
 
-**Cosa fare.** `src/platform/storage.ts` con WXT `storage.defineItem` per tutte le chiavi di §10
-(`version: 1`, struttura delle migrazioni pronta, default). Helper per l'archivio (FIFO con cap,
-una scrittura per azione), per i keeps con scadenza e per le esenzioni del guard in
-`storage.session`.
+**What to do.** `src/platform/storage.ts` with WXT `storage.defineItem` for all the §10 keys
+(`version: 1`, migration structure ready, defaults). Helpers for the archive (FIFO with a cap, one
+write per action), for keeps with an expiry and for the guard's exemptions in `storage.session`.
 
-**Perimetro.** `src/platform/storage.ts`, test con `fakeBrowser` di `wxt/testing`.
+**Scope.** `src/platform/storage.ts`, tests with `fakeBrowser` from `wxt/testing`.
 
-**Fatto quando.** Test su default, lettura e scrittura, cap FIFO dell'archivio, scadenze dei
-keeps ed esenzioni con TTL.
+**Done when.** Tests on defaults, reads and writes, the archive's FIFO cap, keep expiry and
+exemptions with a TTL.
 
-### M1.8 — Tracker dell'attività delle schede
+### M1.8 — Tab activity tracker
 
-Il background registra quando ogni scheda è stata usata, e lo ricorda attraverso discard e
-riavvii.
+The background records when each tab was used, and remembers it across discards and restarts.
 
-**Spec.** PLAN.md §6.1 (tutto), §5.5 (righe "Riconciliazione dopo riavvio" e "Discard"), §16
-(flush su `onSuspend`).
+**Spec.** PLAN.md §6.1 (all of it), §5.5 ("Reconciliation after restart" and "Discard" rows), §16
+(flush on `onSuspend`).
 
-**Cosa fare.**
-- `src/core/reconcile.ts`: abbinamento puro dei record salvati alle schede attuali per URL
-  (multiset, a parità vince l'ordine finestra/indice).
-- `src/entrypoints/background/tracker.ts`: tutti gli eventi della tabella §6.1, scritture con
-  debounce di 1–2 s coalescenti, flush dove la piattaforma lo consente (verifica cosa offre il
-  service worker di Chrome e cosa l'event page di Firefox, e annota), bootstrap su `onInstalled`
-  con `bootstrapped: true`. Su Firefox usa prima `sessions.setTabValue`/`getTabValue`.
+**What to do.**
+- `src/core/reconcile.ts`: pure matching of the saved records to the current tabs by URL
+  (multiset; on a tie the window/index order wins).
+- `src/entrypoints/background/tracker.ts`: every event in the §6.1 table, coalescing writes with a
+  1–2 s debounce, a flush where the platform allows it (check what Chrome's service worker and
+  Firefox's event page offer, and record it), bootstrap on `onInstalled` with
+  `bootstrapped: true`. On Firefox use `sessions.setTabValue`/`getTabValue` first.
 
-**Perimetro.** `src/core/reconcile.ts`, tracker, registrazione nel background, test.
+**Scope.** `src/core/reconcile.ts`, tracker, registration in the background, tests.
 
-**Fatto quando.**
-- Test con `fakeBrowser` per creazione, attivazione, foreground con cambi di focus,
-  navigazione, `onReplaced`, rimozione, riconciliazione all'avvio (abbinati e scartati),
-  bootstrap, e il percorso Firefox con i tab value mockati.
-- Un test verifica che N eventi ravvicinati producano una sola scrittura.
-- Aggiunte a MANUAL-CHECKS: "riavviando Chrome l'età delle schede si conserva", lo stesso su
-  Firefox, e "una scheda sospesa da `chrome://discards` conserva il suo record".
+**Done when.**
+- Tests with `fakeBrowser` for creation, activation, foreground time with focus changes,
+  navigation, `onReplaced`, removal, reconciliation at start-up (matched and discarded),
+  bootstrap, and the Firefox path with mocked tab values.
+- A test checks that N events close together produce a single write.
+- Added to MANUAL-CHECKS: "riavviando Chrome l'età delle schede si conserva", the same on
+  Firefox, and "una scheda sospesa da `chrome://discards` conserva il suo record".
 
-## 5. PHASE M2 — Vista Riordina in sola lettura
+## 5. PHASE M2 — Read-only Declutter view
 
-### M2.1 — Design token, shell del pannello e stato reattivo
+### M2.1 — Design tokens, panel shell and reactive state
 
-Lo scheletro visivo del pannello e lo stato che lo tiene aggiornato dal vivo.
+The panel's visual skeleton and the state that keeps it updated live.
 
-**Spec.** PLAN.md §4.2 (header e navigazione), §4.7, §5.2 (Side Panel), §11 (signals, `key`
-stabili).
+**Spec.** PLAN.md §4.2 (header and navigation), §4.7, §5.2 (Side Panel), §11 (signals, stable
+`key`s).
 
-**Cosa fare.**
-- `styles/tokens.css` e `styles/base.css`: token, tema chiaro/scuro con `prefers-color-scheme`,
-  scala di spaziatura, tipografia, `prefers-reduced-motion`.
-- `App` con header (titolo, "N schede · M finestre", ⚙) e navigazione Riordina / Organizza /
-  Archivio. Organizza e Archivio mostrano per ora un semplice stato vuoto.
-- `state/tabs.ts`: carica schede, attività e impostazioni; ascolta `tabs.on*` con debounce di
-  150 ms e `storage.onChanged`; calcola i punteggi con `core/`.
+**What to do.**
+- `styles/tokens.css` and `styles/base.css`: tokens, light/dark theme with `prefers-color-scheme`,
+  spacing scale, typography, `prefers-reduced-motion`.
+- `App` with a header (title, "N schede · M finestre", ⚙) and Riordina / Organizza / Archivio
+  navigation. For now Organize and Archive show a simple empty state.
+- `state/tabs.ts`: loads tabs, activity and settings; listens to `tabs.on*` with a 150 ms debounce
+  and to `storage.onChanged`; computes the scores with `core/`.
 
-**Perimetro.** `sidepanel/` (App, styles, state), test.
+**Scope.** `sidepanel/` (App, styles, state), tests.
 
-**Fatto quando.** Un E2E Chromium verifica che i conteggi dell'header corrispondano alle schede e
-finestre aperte e si aggiornino quando se ne apre una. Un E2E con `colorScheme: 'dark'` verifica
-che il tema scuro si applichi. Nessun errore in console.
+**Done when.** A Chromium E2E checks that the header counts match the open tabs and windows and
+update when one is opened. An E2E with `colorScheme: 'dark'` checks that the dark theme applies. No
+console errors.
 
-### M2.2 — Righe, sezioni e motivi
+### M2.2 — Rows, sections and reasons
 
-La vista Riordina mostra le schede suggerite, raggruppate per motivo e spiegate in linguaggio
-umano.
+The Declutter view shows the suggested tabs, grouped by reason and explained in human language.
 
-**Spec.** PLAN.md §4.2, §4.3 (tranne selezione e azioni di massa), §6.4 ("Testi dei motivi"),
-§5.5 (riga "Favicon"), §11 (`content-visibility`).
+**Spec.** PLAN.md §4.2, §4.3 (except selection and bulk actions), §6.4 ("Reason texts"), §5.5
+("Favicon" row), §11 (`content-visibility`).
 
-**Cosa fare.**
-- Componenti `HealthBar`, `Section` (comprimibile; "Da valutare" chiusa di default), `TabRow`,
-  `Chip`, `EmptyState`. Ordine delle sezioni come in §4.3. Età con `Intl.RelativeTimeFormat`,
-  plurali con `Intl.PluralRules`.
-- `src/platform/favicon.ts`: `_favicon` su Chrome; su Firefox `favIconUrl` solo se `data:`,
-  altrimenti avatar con l'iniziale e un colore da hash del dominio.
-- Azione "Vai": attiva la scheda e mette a fuoco la sua finestra.
-- Card "finestra dimenticata".
-- La trasformazione da schede con punteggio a sezioni è una funzione pura, testata.
+**What to do.**
+- `HealthBar`, `Section` (collapsible; "Da valutare" collapsed by default), `TabRow`, `Chip`,
+  `EmptyState` components. Section order as in §4.3. Age with `Intl.RelativeTimeFormat`, plurals
+  with `Intl.PluralRules`.
+- `src/platform/favicon.ts`: `_favicon` on Chrome; on Firefox `favIconUrl` only if `data:`,
+  otherwise an avatar with the initial and a colour from a hash of the domain.
+- "Vai" action: activates the tab and focuses its window.
+- "Forgotten window" card.
+- The transformation from scored tabs to sections is a pure, tested function.
 
-**Perimetro.** Vista Riordina, componenti, `favicon.ts`, chiavi i18n, test.
+**Scope.** Declutter view, components, `favicon.ts`, i18n keys, tests.
 
-**Fatto quando.**
-- Unit test per la trasformazione in sezioni e per `favicon.ts` con capabilities mockate.
-- E2E Chromium con schede seminate (pagine locali servite dal test, attività invecchiata
-  scrivendo direttamente nello storage): compaiono le sezioni attese con i motivi corretti, e
-  "Vai" attiva la scheda.
-- Smoke E2E Firefox: la vista si apre e mostra le sezioni.
+**Done when.**
+- Unit tests for the transformation into sections and for `favicon.ts` with mocked capabilities.
+- A Chromium E2E with seeded tabs (local pages served by the test, activity aged by writing
+  directly to storage): the expected sections appear with the correct reasons, and "Vai" activates
+  the tab.
+- Firefox smoke E2E: the view opens and shows the sections.
 
-### M2.3 — Navigazione da tastiera e ARIA
+### M2.3 — Keyboard navigation and ARIA
 
-La lista si usa tutta da tastiera ed è leggibile da uno screen reader.
+The list can be used entirely from the keyboard and is readable by a screen reader.
 
-**Spec.** PLAN.md §4.8 (solo navigazione, `Enter`, ruoli ARIA, live region, focus ring,
-target ≥ 24 px; `Space`/`Del`/`K`/`Ctrl+A`/`Ctrl+Z` sono di M3.2).
+**Spec.** PLAN.md §4.8 (navigation only, `Enter`, ARIA roles, live region, focus ring,
+targets ≥ 24 px; `Space`/`Del`/`K`/`Ctrl+A`/`Ctrl+Z` belong to M3.2).
 
-**Cosa fare.** Roving tabindex su ↑/↓ tra le righe e tra le sezioni, `Enter` va alla scheda,
-ruoli ARIA coerenti (`listbox`/`option` o `grid`: scegli e annota), `aria-live="polite"` sui
-conteggi, focus ring visibile.
+**What to do.** Roving tabindex on ↑/↓ between rows and between sections, `Enter` goes to the tab,
+consistent ARIA roles (`listbox`/`option` or `grid`: choose and record), `aria-live="polite"` on the
+counts, visible focus ring.
 
-**Perimetro.** Componenti della vista Riordina, test.
+**Scope.** Declutter view components, tests.
 
-**Fatto quando.** Un E2E Chromium percorre la lista solo con la tastiera, apre e chiude una
-sezione e va a una scheda con `Enter`. I ruoli ARIA sono verificati nel DOM.
+**Done when.** A Chromium E2E walks the list with the keyboard only, opens and closes a section and
+goes to a tab with `Enter`. The ARIA roles are checked in the DOM.
 
-### M2.4 — Badge sull'icona
+### M2.4 — Badge on the icon
 
-L'icona mostra quante schede sono "Da chiudere", senza polling.
+The icon shows how many tabs are "Da chiudere", without polling.
 
-**Spec.** PLAN.md §4.1 (Badge), §11 (debounce di 2 s, alarm ogni 30 min), §8.5 (lampeggio,
-qui solo predisposto).
+**Spec.** PLAN.md §4.1 (Badge), §11 (2 s debounce, alarm every 30 min), §8.5 (flash, only prepared
+here).
 
-**Cosa fare.** `src/entrypoints/background/badge.ts`: conteggio del bucket `close` con lo stesso
-`core/`, ricalcolo su eventi delle schede (debounce di 2 s) e su un alarm ogni 30 min, nascosto
-a 0, colore neutro, rispetto dell'impostazione "Mostra badge". Esporta una funzione `flash()`
-(cambio colore per 1,5 s) che userà il guard.
+**What to do.** `src/entrypoints/background/badge.ts`: count of the `close` bucket with the same
+`core/`, recomputed on tab events (2 s debounce) and on an alarm every 30 min, hidden at 0, neutral
+colour, honouring the "Show badge" setting. Export a `flash()` function (colour change for 1.5 s)
+that the guard will use.
 
-**Perimetro.** `badge.ts`, registrazione nel background, test.
+**Scope.** `badge.ts`, registration in the background, tests.
 
-**Fatto quando.** Test con `fakeBrowser` su conteggio, debounce, alarm, impostazione disattivata
-e valore 0. Un E2E Chromium legge il testo del badge dal service worker.
+**Done when.** Tests with `fakeBrowser` on the count, debounce, alarm, the setting turned off and
+the value 0. A Chromium E2E reads the badge text from the service worker.
 
-### M2.5 — Budget di apertura del pannello
+### M2.5 — Panel opening budget
 
-Con 300 schede il pannello deve mostrare la lista entro 150 ms.
+With 300 tabs the panel must show the list within 150 ms.
 
-**Spec.** PLAN.md §11, §13 M2 (accettazione).
+**Spec.** PLAN.md §11, §13 M2 (acceptance).
 
-**Cosa fare.** Misura il tempo da apertura del pannello a lista visibile con 300 schede. Il
-metodo (300 schede vere nell'E2E, o un harness che renderizza il pannello con i dati della
-fixture) va scelto e annotato. Se sei sopra il budget, ottimizza (signals, `content-visibility`,
-lavoro rinviato). La virtualizzazione vera serve solo se nient'altro basta.
+**What to do.** Measure the time from opening the panel to the list being visible with 300 tabs.
+The method (300 real tabs in the E2E, or a harness that renders the panel with the fixture's data)
+is yours to choose and record. If you are over budget, optimize (signals, `content-visibility`,
+deferred work). Real virtualization is needed only if nothing else is enough.
 
-**Perimetro.** Codice del pannello che serve a rientrare nel budget, test di misura.
+**Scope.** The panel code needed to get within budget, measurement test.
 
-**Fatto quando.** Un test automatico misura e verifica ≤ 150 ms (mediana di più aperture) e
-gira nei gates. Il numero misurato è annotato in DECISIONS.
+**Done when.** An automated test measures and checks ≤ 150 ms (median of several openings) and runs
+in the gates. The measured number is recorded in DECISIONS.
 
-## 6. PHASE M3 — Azioni, archivio, annulla
+## 6. PHASE M3 — Actions, archive, undo
 
-### M3.1 — Azioni sulle schede e sicurezze
+### M3.1 — Tab actions and safeguards
 
-Chiudere, annullare, mantenere, sospendere: tutte reversibili, tutte con le sicurezze di §9.
+Close, undo, keep, discard: all reversible, all with the §9 safeguards.
 
-**Spec.** PLAN.md §9 (tutto), §8.6 (prima riga: esenzioni per le schede aperte
-dall'estensione), §5.5 (righe "Tab groups" e "Discard").
+**Spec.** PLAN.md §9 (all of it), §8.6 (first row: exemptions for tabs opened by the extension),
+§5.5 ("Tab groups" and "Discard" rows).
 
-**Cosa fare.**
-- `src/core/actions.ts` (puro): costruzione delle voci `ArchivedTab` (niente favicon remote) e
-  calcolo delle sicurezze (selezione che copre una finestra intera, scheda attiva della finestra
-  corrente, più di 25 schede).
+**What to do.**
+- `src/core/actions.ts` (pure): building the `ArchivedTab` entries (no remote favicons) and
+  computing the safeguards (a selection that covers a whole window, the active tab of the current
+  window, more than 25 tabs).
 - `src/platform/tabs.ts`:
-  - chiudi (archivia in batch, poi rimuovi);
-  - annulla (`sessions.getRecentlyClosed` per URL → `restore`, altrimenti `tabs.create` con
-    finestra e indice, poi reinserimento nel gruppo; su Firefox il gruppo si cerca per titolo);
-  - mantieni (7 giorni o sempre), proteggi sito, sospendi, chiudi finestra, ripristina
-    dall'archivio.
-- Ogni scheda aperta o ripristinata dall'estensione viene registrata nelle esenzioni del guard.
+  - close (archive in a batch, then remove);
+  - undo (`sessions.getRecentlyClosed` by URL → `restore`, otherwise `tabs.create` with window and
+    index, then re-insertion into the group; on Firefox the group is looked up by title);
+  - keep (7 days or forever), protect site, discard, close window, restore from the archive.
+- Every tab opened or restored by the extension is recorded in the guard's exemptions.
 
-**Perimetro.** `core/actions.ts`, `platform/tabs.ts`, test.
+**Scope.** `core/actions.ts`, `platform/tabs.ts`, tests.
 
-**Fatto quando.** Test puri sulle sicurezze. Test con `fakeBrowser` per ogni azione, inclusi
-l'annulla senza voce in `getRecentlyClosed`, il gruppo che non esiste più e la scheda già
-chiusa.
+**Done when.** Pure tests on the safeguards. Tests with `fakeBrowser` for every action, including
+undo with no entry in `getRecentlyClosed`, a group that no longer exists and a tab already closed.
 
-### M3.2 — Selezione, barra, toast e azioni di riga
+### M3.2 — Selection, bar, toast and row actions
 
-L'utente seleziona, chiude e annulla dal pannello, con mouse o tastiera.
+The user selects, closes and undoes from the panel, with the mouse or the keyboard.
 
-**Spec.** PLAN.md §4.3 (azioni di riga, header di sezione, barra di selezione, toast), §4.8
-(`Space`, `Del`/`Backspace`, `K`, `Ctrl/Cmd+A`, `Ctrl/Cmd+Z`), §9 (Sicurezze: conferme inline,
-mai `confirm()`).
+**Spec.** PLAN.md §4.3 (row actions, section header, selection bar, toast), §4.8
+(`Space`, `Del`/`Backspace`, `K`, `Ctrl/Cmd+A`, `Ctrl/Cmd+Z`), §9 (Safeguards: inline
+confirmations, never `confirm()`).
 
-**Cosa fare.**
-- `state/selection.ts` e `state/undo.ts`.
-- `SelectionBar` sticky (Chiudi N, Mantieni, Sospendi; "Raggruppa" arriva in M4.3).
-- Conferme inline.
-- `Toast` di 8 s: focusabile, non sparisce durante l'hover, `aria-live`.
-- Azioni di riga su hover/focus.
-- "Chiudi tutti (N)" e "Seleziona tutti" nelle sezioni.
-- Scorciatoie da tastiera.
+**What to do.**
+- `state/selection.ts` and `state/undo.ts`.
+- Sticky `SelectionBar` (Chiudi N, Mantieni, Sospendi; "Raggruppa" arrives in M4.3).
+- Inline confirmations.
+- 8 s `Toast`: focusable, does not disappear while hovered, `aria-live`.
+- Row actions on hover/focus.
+- "Chiudi tutti (N)" and "Seleziona tutti" in the sections.
+- Keyboard shortcuts.
 
-**Perimetro.** Componenti e state del pannello, i18n, test.
+**Scope.** Panel components and state, i18n, tests.
 
-**Fatto quando.** Unit test su selezione e undo. Un E2E Chromium copre: chiusura di una
-selezione, toast, Annulla; la conferma oltre 25 schede; la conferma per la scheda attiva; il
-testo "Chiudi N schede e la finestra"; le scorciatoie.
+**Done when.** Unit tests on selection and undo. A Chromium E2E covers: closing a selection, the
+toast, Annulla; the confirmation above 25 tabs; the confirmation for the active tab; the text
+"Chiudi N schede e la finestra"; the shortcuts.
 
-### M3.3 — Vista Archivio e pulizia periodica
+### M3.3 — Archive view and periodic cleanup
 
-Tutto ciò che è stato chiuso si ritrova, si cerca e si ripristina; l'archivio non cresce senza
-limite.
+Everything that was closed can be found, searched and restored; the archive does not grow without
+limit.
 
-**Spec.** PLAN.md §4.5, §10 (cleanup ogni 6 h).
+**Spec.** PLAN.md §4.5, §10 (cleanup every 6 h).
 
-**Cosa fare.**
-- `ArchiveView`: ricerca su titolo e URL; filtri per data e per origine; ripristino singolo e
-  multiplo; elimina; svuota con conferma inline; esporta come lista Markdown di link negli
-  appunti.
-- Alarm di pulizia ogni 6 h nel background: archivio oltre conservazione o cap, keeps scaduti,
-  record di attività orfani.
+**What to do.**
+- `ArchiveView`: search on title and URL; filters by date and by origin; single and multiple
+  restore; delete; empty with an inline confirmation; export as a Markdown list of links to the
+  clipboard.
+- A cleanup alarm every 6 h in the background: archive entries beyond retention or the cap,
+  expired keeps, orphaned activity records.
 
-**Perimetro.** `ArchiveView`, pulizia nel background, i18n, test.
+**Scope.** `ArchiveView`, cleanup in the background, i18n, tests.
 
-**Fatto quando.** Unit test su filtri, ricerca, export e pulizia (con `now` iniettato). Un E2E
-Chromium copre ricerca, ripristino e svuota.
+**Done when.** Unit tests on filters, search, export and cleanup (with an injected `now`). A
+Chromium E2E covers search, restore and empty.
 
-### M3.4 — Menu contestuali di pagina e scheda
+### M3.4 — Page and tab context menus
 
-"Mantieni sempre", "Proteggi sito" e "Consenti duplicati per questo sito" a un clic destro.
+"Mantieni sempre", "Proteggi sito" and "Consenti duplicati per questo sito" one right-click away.
 
-**Spec.** PLAN.md §4.1 (menu contestuale sulla pagina/scheda), §5.5 (riga "Menu contestuali").
-I menu sull'icona legati al guard sono di M3b.3.
+**Spec.** PLAN.md §4.1 (context menu on the page/tab), §5.5 ("Context menus" row).
+The guard-related icon menus belong to M3b.3.
 
-**Cosa fare.** `src/entrypoints/background/menus.ts`: le tre voci, contesti comuni (`page`, più
-`tab` se esiste), registrazione su `onInstalled`, titoli i18n. "Consenti duplicati per questo
-sito" aggiunge `*://<dominio>/*` alla whitelist.
+**What to do.** `src/entrypoints/background/menus.ts`: the three items, common contexts (`page`,
+plus `tab` if it exists), registration on `onInstalled`, i18n titles. "Consenti duplicati per questo
+sito" adds `*://<domain>/*` to the whitelist.
 
-**Perimetro.** `menus.ts`, registrazione nel background, test.
+**Scope.** `menus.ts`, registration in the background, tests.
 
-**Fatto quando.** Test con `fakeBrowser` per ogni voce. Aggiunta a MANUAL-CHECKS: "i menu
+**Done when.** Tests with `fakeBrowser` for every item. Added to MANUAL-CHECKS: "i menu
 contestuali compaiono e funzionano su Chrome e Firefox".
 
-### M3.5 — E2E delle azioni
+### M3.5 — Actions E2E
 
-L'accettazione di M3 verificata sull'estensione vera.
+The M3 acceptance verified on the real extension.
 
-**Spec.** PLAN.md §13 M3 (accettazione), §14 (E2E: chiusura + annulla, mantieni, archivio).
+**Spec.** PLAN.md §13 M3 (acceptance), §14 (E2E: close + undo, keep, archive).
 
-**Cosa fare.**
-- E2E Chromium:
-  - chiudo 10 schede → Annulla → tornano tutte, stessa URL, stessa finestra;
-  - l'archivio sopravvive a un riavvio del browser (rilancia il persistent context sullo stesso
-    profilo);
-  - "Mantieni" toglie la scheda dai suggerimenti, e la scheda ricompare quando il keep scade
-    (simula il tempo scrivendo scadenze nello storage);
-  - le sicurezze di §9.
-- Smoke Firefox: chiusura + annulla.
+**What to do.**
+- Chromium E2E:
+  - close 10 tabs → Annulla → they all come back, same URL, same window;
+  - the archive survives a browser restart (relaunch the persistent context on the same profile);
+  - "Mantieni" removes the tab from the suggestions, and the tab comes back when the keep expires
+    (simulate time by writing expiries to storage);
+  - the §9 safeguards.
+- Firefox smoke: close + undo.
 
-**Perimetro.** Solo test (più le correzioni che i test rivelano, nello stesso commit).
+**Scope.** Tests only (plus the fixes the tests reveal, in the same commit).
 
-**Fatto quando.** Tutti questi E2E passano nei gates.
+**Done when.** All these E2E tests pass in the gates.
 
-## 7. PHASE M3b — Protezione duplicati
+## 7. PHASE M3b — Duplicate protection
 
-### M3b.1 — Decisione pura del guard
+### M3b.1 — Pure guard decision
 
-La funzione che decide quale scheda chiudere e quale tenere, coperta caso per caso.
+The function that decides which tab to close and which to keep, covered case by case.
 
-**Spec.** PLAN.md §8.4 (tutto), §8.6 (filtri d'uscita), §8.3 (opzioni).
+**Spec.** PLAN.md §8.4 (all of it), §8.6 (exit filters), §8.3 (options).
 
-**Cosa fare.** `src/core/duplicate-guard.ts`: `resolveDuplicate(trigger, candidates, ctx)` come in
-§8.4. Riusa `duplicateKey`, il comparatore di priorità di M1.4 e `patterns.ts`, senza
-duplicarli.
+**What to do.** `src/core/duplicate-guard.ts`: `resolveDuplicate(trigger, candidates, ctx)` as in
+§8.4. Reuses `duplicateKey`, the M1.4 priority comparator and `patterns.ts`, without duplicating
+them.
 
-**Perimetro.** `src/core/duplicate-guard.ts`, test.
+**Scope.** `src/core/duplicate-guard.ts`, tests.
 
-**Fatto quando.** Almeno 30 casi di test: ogni filtro d'uscita, ogni regola di priorità e le loro
-combinazioni, ambito finestra e tutte le finestre, fissate, scheda nuova vs scheda navigata
-attiva, apertura in background, whitelist, regex non valida, `reloadKeptWith`, `move-activate`.
+**Done when.** At least 30 test cases: every exit filter, every priority rule and their
+combinations, window and all-windows scope, pinned, new tab vs navigated active tab, background
+opening, whitelist, invalid regex, `reloadKeptWith`, `move-activate`.
 
-### M3b.2 — Guard live nel background
+### M3b.2 — Live guard in the background
 
-Il guard chiude i duplicati in tempo reale, senza mai chiuderne due a vicenda.
+The guard closes duplicates in real time, without ever letting two of them close each other.
 
-**Spec.** PLAN.md §8.1, §8.2, §8.5 (lampeggio del badge), §8.6 (tutti i casi limite), §5.5 (righe
-`pendingUrl`, "Duplica scheda", container, schede nascoste), §11 (latenze).
+**Spec.** PLAN.md §8.1, §8.2, §8.5 (badge flash), §8.6 (every edge case), §5.5 (`pendingUrl`,
+"Duplicate tab", containers and hidden tabs rows), §11 (latencies).
 
-**Cosa fare.** `src/entrypoints/background/guard.ts`:
-- indice `Map<duplicateKey, Set<tabId>>` ricostruito al risveglio;
-- coda seriale e una sola promise `ready`;
-- `onCreated`/`onUpdated`/`onAttached`/`onReplaced`, con il percorso Firefox senza `pendingUrl`;
-- esenzioni, grazia di 15 s all'avvio, pausa con alarm e `storage.session`;
-- euristica "Duplica scheda" (solo Chrome);
-- azioni dopo la chiusura, con l'eccezione dell'apertura in background;
-- archivio con motivo `duplicate-auto` e riferimento alla scheda tenuta;
+**What to do.** `src/entrypoints/background/guard.ts`:
+- `Map<duplicateKey, Set<tabId>>` index rebuilt on wake-up;
+- a serial queue and a single `ready` promise;
+- `onCreated`/`onUpdated`/`onAttached`/`onReplaced`, with the Firefox path without `pendingUrl`;
+- exemptions, a 15 s grace period at start-up, pause with an alarm and `storage.session`;
+- the "Duplicate tab" heuristic (Chrome only);
+- the actions after closing, with the background-opening exception;
+- archive with the reason `duplicate-auto` and a reference to the kept tab;
 - `badge.flash()`.
 
-**Perimetro.** `guard.ts`, registrazione nel background, test.
+**Scope.** `guard.ts`, registration in the background, tests.
 
-**Fatto quando.**
-- Test con `fakeBrowser`: tutte le modalità; 20 aperture simultanee della stessa URL lasciano
-  esattamente una scheda; esenzioni con TTL; grazia all'avvio; ritorno dalla pausa alla
-  modalità precedente; Firefox senza `pendingUrl`; container; `onReplaced` che aggiorna l'indice
-  senza chiudere nulla.
-- Aggiunte a MANUAL-CHECKS: "'Duplica scheda' su Chrome stabile non viene chiusa (o il segnale
-  inaffidabile è annotato in DECISIONS)" e "flussi di login con redirect non vengono interrotti".
+**Done when.**
+- Tests with `fakeBrowser`: every mode; 20 simultaneous openings of the same URL leave exactly
+  one tab; exemptions with a TTL; start-up grace; returning from pause to the previous mode;
+  Firefox without `pendingUrl`; containers; `onReplaced` updating the index without closing
+  anything.
+- Added to MANUAL-CHECKS: "'Duplica scheda' su Chrome stabile non viene chiusa (o il segnale
+  inaffidabile è annotato in DECISIONS)" and "flussi di login con redirect non vengono interrotti".
 
-### M3b.3 — Comandi e menu del guard
+### M3b.3 — Guard commands and menus
 
-Scorciatoie e menu sull'icona per chiudere tutti i duplicati, mettere in pausa e riaprire
-l'ultimo chiuso.
+Shortcuts and icon menus to close all duplicates, pause, and reopen the last one closed.
 
-**Spec.** PLAN.md §4.1 (scorciatoie, menu sull'icona), §8.5 ("Ripristino rapido"), §8.7.
+**Spec.** PLAN.md §4.1 (shortcuts, icon menu), §8.5 ("Quick restore"), §8.7.
 
-**Cosa fare.**
-- Comandi `close-all-duplicates` (funziona anche in OFF e "Solo avvisi", archivia; l'annulla
-  passa dal menu sull'icona) e `toggle-duplicate-guard`.
-- Menu sull'icona:
-  - "Riapri l'ultimo duplicato chiuso", con esenzione;
+**What to do.**
+- Commands `close-all-duplicates` (works in OFF and "Solo avvisi" too, archives; undo goes
+  through the icon menu) and `toggle-duplicate-guard`.
+- Icon menu:
+  - "Riapri l'ultimo duplicato chiuso", with an exemption;
   - "…e consenti sempre duplicati per questo sito";
-  - "Pausa protezione duplicati" 15 min / 1 h / fino al riavvio.
+  - "Pausa protezione duplicati" 15 min / 1 h / until restart.
 
-**Perimetro.** `menus.ts`, comandi nel background, i18n, test.
+**Scope.** `menus.ts`, commands in the background, i18n, tests.
 
-**Fatto quando.** Test con `fakeBrowser` per ogni comando e ogni voce di menu, inclusa la
-riapertura che non viene richiusa dal guard.
+**Done when.** Tests with `fakeBrowser` for every command and every menu item, including the
+reopened tab not being closed again by the guard.
 
-### M3b.4 — Interfaccia del guard e whitelist
+### M3b.4 — Guard interface and whitelist
 
-L'utente vede lo stato della protezione, la configura e incolla la whitelist che usa oggi.
+The user sees the protection's state, configures it, and pastes the whitelist they use today.
 
-**Spec.** PLAN.md §4.2 (chip "🛡 Duplicati" e contatore), §8.3 (tutta la sotto-pagina), §8.6
-(avvisi: "Più recente", convivenza con Duplicate Tabs Closer), §8.7 ("Chiudi tutti" da
-Riordina), §5.5 (opzioni nascoste su Firefox).
+**Spec.** PLAN.md §4.2 ("🛡 Duplicati" chip and counter), §8.3 (the whole sub-page), §8.6
+(warnings: "Più recente", coexistence with Duplicate Tabs Closer), §8.7 ("Chiudi tutti" from
+Declutter), §5.5 (options hidden on Firefox).
 
-**Cosa fare.**
-- `GuardChip`: stato, menu, contatore di 5 s.
-- Una shell di impostazioni raggiungibile da ⚙ (il resto delle impostazioni è M6.1) con
+**What to do.**
+- `GuardChip`: state, menu, 5 s counter.
+- A settings shell reachable from ⚙ (the rest of the settings is M6.1) with
   `DuplicateSettingsView`.
-- `PatternListEditor`: validazione live per riga, anteprima "corrisponde a N schede aperte",
-  spiegazione dell'import da Duplicate Tabs Closer, default per browser.
-- Opzioni condizionate dalle capabilities: "Duplica scheda" solo su Chrome, container solo su
+- `PatternListEditor`: live per-line validation, "matches N open tabs" preview, explanation of the
+  import from Duplicate Tabs Closer, per-browser defaults.
+- Options conditioned on the capabilities: "Duplicate tab" only on Chrome, containers only on
   Firefox.
-- "Chiudi tutti i duplicati" nella sezione Duplicati di Riordina.
+- "Chiudi tutti i duplicati" in Declutter's Duplicates section.
 
-**Perimetro.** Componenti e viste del pannello, i18n, test.
+**Scope.** Panel components and views, i18n, tests.
 
-**Fatto quando.** Unit test per l'editor (righe valide, non valide, anteprima). Un E2E Chromium
-cambia la modalità dal chip e salva una whitelist. Unit test con capabilities mockate per le
-opzioni nascoste.
+**Done when.** Unit tests for the editor (valid lines, invalid lines, preview). A Chromium E2E
+changes the mode from the chip and saves a whitelist. Unit tests with mocked capabilities for the
+hidden options.
 
-### M3b.5 — E2E della protezione duplicati
+### M3b.5 — Duplicate protection E2E
 
-L'accettazione di M3b, caso per caso, sull'estensione vera.
+The M3b acceptance, case by case, on the real extension.
 
-**Spec.** PLAN.md §13 M3b (accettazione, tutti i punti), §14 (E2E protezione duplicati).
+**Spec.** PLAN.md §13 M3b (acceptance, every point), §14 (duplicate protection E2E).
 
-**Cosa fare.**
-- E2E Chromium per ogni punto di accettazione di M3b:
-  - la seconda apertura si chiude in meno di 300 ms e la prima si attiva;
-  - whitelist wildcard e regex;
-  - pausa e ritorno alla modalità precedente;
-  - Ctrl+clic senza cambio di focus;
-  - Annulla non richiuso;
-  - 20 aperture simultanee → ne resta una;
-  - whitelist incollata in formato Duplicate Tabs Closer;
-  - ambito finestra / tutte le finestre;
+**What to do.**
+- Chromium E2E for every M3b acceptance point:
+  - the second opening closes in under 300 ms and the first is activated;
+  - wildcard and regex whitelist;
+  - pause and return to the previous mode;
+  - Ctrl+click without a focus change;
+  - Annulla not closed again;
+  - 20 simultaneous openings → one remains;
+  - a whitelist pasted in Duplicate Tabs Closer format;
+  - window / all-windows scope;
   - "Sposta e attiva";
   - "Più vecchia ricaricata";
-  - regola della scheda attiva navigata.
-- Smoke Firefox: guard su URL duplicata.
+  - the navigated active tab rule.
+- Firefox smoke: guard on a duplicate URL.
 
-**Perimetro.** Solo test (più le correzioni che rivelano, nello stesso commit).
+**Scope.** Tests only (plus the fixes they reveal, in the same commit).
 
-**Fatto quando.** Tutti questi E2E passano nei gates.
+**Done when.** All these E2E tests pass in the gates.
 
-## 8. PHASE M4 — Organizza senza AI
+## 8. PHASE M4 — Organize without AI
 
-### M4.1 — Raggruppamento per sito e per argomento
+### M4.1 — Grouping by site and by topic
 
-Proposte di gruppi deterministiche: per dominio e per argomento, senza AI.
+Deterministic group proposals: by domain and by topic, without AI.
 
-**Spec.** PLAN.md §7.1, §7.2, §11 (clustering di 300 schede ≤ 50 ms).
+**Spec.** PLAN.md §7.1, §7.2, §11 (clustering 300 tabs ≤ 50 ms).
 
-**Cosa fare.** `src/core/cluster.ts`:
-- per sito (minimo 3 schede, configurabile; nomi leggibili da una mappa; colore stabile da hash);
-- per argomento: tokenizzazione con stopword IT/EN e rimozione dei suffissi del sito, TF-IDF con
-  token di dominio, agglomerativo average linkage con soglia ~0,25, minimo 2, massimo 8 gruppi,
+**What to do.** `src/core/cluster.ts`:
+- by site (at least 3 tabs, configurable; readable names from a map; stable colour from a hash);
+- by topic: tokenization with IT/EN stopwords and removal of site suffixes, TF-IDF with a domain
+  token, agglomerative average linkage with a ~0.25 threshold, minimum 2, maximum 8 groups,
   "Altro";
-- eseguito per finestra.
+- run per window.
 
-**Perimetro.** `src/core/cluster.ts`, test, benchmark.
+**Scope.** `src/core/cluster.ts`, tests, benchmarks.
 
-**Fatto quando.** Test su determinismo, limiti (8 gruppi, minimo 2), nomi e colori stabili e
-stopword. Benchmark: mediana ≤ 50 ms su `tabs-300`. Coverage di `core/` ≥ 95%.
+**Done when.** Tests on determinism, limits (8 groups, minimum 2), stable names and colours, and
+stopwords. Benchmark: median ≤ 50 ms on `tabs-300`. Coverage of `core/` ≥ 95%.
 
-### M4.2 — Applicazione e annullamento dei gruppi
+### M4.2 — Applying and undoing groups
 
-I gruppi proposti diventano gruppi nativi, e l'annullamento rimette tutto esattamente com'era.
+The proposed groups become native groups, and undo puts everything back exactly as it was.
 
-**Spec.** PLAN.md §7.4, §4.4 (punti 4–5 e ultimo), §5.5 (riga "Tab groups").
+**Spec.** PLAN.md §7.4, §4.4 (points 4–5 and the last one), §5.5 ("Tab groups" row).
 
-**Cosa fare.** In `src/platform/`:
-- snapshot `{tabId, windowId, index, groupId}`;
-- `tabs.group` per finestra + `tabGroups.update` (titolo, colore, collapsed);
-- opzioni: ordina per gruppo, lascia fuori le fissate, includi i gruppi dell'utente;
-- errori parziali riassunti in un messaggio;
-- annulla: ungroup + indici e gruppi originali (su Firefox con fallback sul titolo).
+**What to do.** In `src/platform/`:
+- `{tabId, windowId, index, groupId}` snapshot;
+- `tabs.group` per window + `tabGroups.update` (title, colour, collapsed);
+- options: sort by group, leave pinned tabs out, include the user's groups;
+- partial errors summarised in one message;
+- undo: ungroup + original indexes and groups (on Firefox with the title fallback).
 
-**Perimetro.** Modulo platform per i gruppi, test.
+**Scope.** Platform module for groups, tests.
 
-**Fatto quando.** Test con `fakeBrowser`: applica → annulla ripristina esattamente ordine e
-gruppi; scheda chiusa nel frattempo; gruppi dell'utente non toccati di default.
+**Done when.** Tests with `fakeBrowser`: apply → undo restores exactly the order and the groups; a
+tab closed in the meantime; the user's groups not touched by default.
 
-### M4.3 — Vista Organizza
+### M4.3 — Organize view
 
-Anteprima modificabile dei gruppi prima di applicarli.
+An editable preview of the groups before applying them.
 
-**Spec.** PLAN.md §4.4 (tutto), §4.3 ("Raggruppa" nella barra di selezione), §11 (`import()`
-dinamico).
+**Spec.** PLAN.md §4.4 (all of it), §4.3 ("Raggruppa" in the selection bar), §11 (dynamic
+`import()`).
 
-**Cosa fare.**
-- `OrganizeView` caricata con `import()`: ambito, modalità, anteprima `GroupPreview`.
-- Modifiche nell'anteprima: rinomina inline, colore, deseleziona, "Sposta in…", unisci.
-- Opzioni, Applica e toast con Annulla.
-- "Raggruppa" dalla barra di selezione di Riordina porta la selezione nell'anteprima.
+**What to do.**
+- `OrganizeView` loaded with `import()`: scope, mode, `GroupPreview` preview.
+- Edits in the preview: inline rename, colour, deselect, "Sposta in…", merge.
+- Options, Applica and a toast with Annulla.
+- "Raggruppa" from Declutter's selection bar brings the selection into the preview.
 
-**Perimetro.** Vista, componenti, i18n, test.
+**Scope.** View, components, i18n, tests.
 
-**Fatto quando.** Unit test sulle modifiche all'anteprima (funzioni pure). Un E2E Chromium
-copre: anteprima per sito → rinomina → Applica → gruppi nativi con titolo e colore → Annulla.
+**Done when.** Unit tests on the preview edits (pure functions). A Chromium E2E covers: preview by
+site → rename → Applica → native groups with title and colour → Annulla.
 
-### M4.4 — Revisione dei cluster e E2E di Organizza
+### M4.4 — Cluster review and Organize E2E
 
-Il raggruppamento per argomento giudicato su dati realistici, e l'accettazione di M4 su entrambi
-i browser.
+Topic grouping judged on realistic data, and the M4 acceptance on both browsers.
 
-**Spec.** PLAN.md §13 M4 (accettazione), §14 (E2E organizza).
+**Spec.** PLAN.md §13 M4 (acceptance), §14 (organize E2E).
 
-**Cosa fare.**
-- `docs/CLUSTER-REVIEW.md`: esegui il raggruppamento per argomento su `tabs-300` e giudica
-  almeno 8 cluster (sensato / no / perché). Se il risultato è chiaramente scarso, tara la soglia
-  in `cluster.ts` e annota.
-- Completa gli E2E: Chromium "applica e annulla ripristinano esattamente ordine e gruppi";
-  smoke Firefox "organizza per sito → annulla".
+**What to do.**
+- `docs/CLUSTER-REVIEW.md`: run topic grouping on `tabs-300` and judge at least 8 clusters
+  (sensible / not / why). If the result is clearly poor, tune the threshold in `cluster.ts` and
+  record it.
+- Complete the E2E tests: Chromium "apply and undo restore exactly the order and the groups";
+  Firefox smoke "organize by site → undo".
 
-**Perimetro.** `docs/CLUSTER-REVIEW.md`, test, eventuale taratura.
+**Scope.** `docs/CLUSTER-REVIEW.md`, tests, tuning if needed.
 
-**Fatto quando.** La revisione è scritta e gli E2E passano nei gates. Aggiunta a MANUAL-CHECKS:
+**Done when.** The review is written and the E2E tests pass in the gates. Added to MANUAL-CHECKS:
 "leggere CLUSTER-REVIEW.md e provare Organizza per argomento sulle proprie schede".
 
-## 9. PHASE M5 — AI on-device
+## 9. PHASE M5 — On-device AI
 
-### M5.1 — Raggruppamento AI con LLM iniettato
+### M5.1 — AI grouping with an injected LLM
 
-La logica AI completa e testata con un modello finto: batching, schema, validazione, fallback.
+The complete AI logic, tested with a fake model: batching, schema, validation, fallback.
 
-**Spec.** PLAN.md §7.3 (prompt, schema, batch, validazione, nomi in italiano, "l'AI non decide
-mai cosa chiudere").
+**Spec.** PLAN.md §7.3 (prompt, schema, batching, validation, Italian names, "the AI never decides
+what to close").
 
-**Cosa fare.** `src/core/ai-grouping.ts`:
-- interfaccia LLM iniettata;
-- input compatto `id|title|host`;
-- `responseConstraint` con lo schema di §7.3;
-- batch fino a ~40 con controllo del contesto e batch più piccolo su `QuotaExceededError`;
-- oltre 40 schede, pre-clustering con `cluster.ts`;
-- validazione (ID inventati scartati, mancanti in "Other", nessun duplicato) e fallback a §7.2.
+**What to do.** `src/core/ai-grouping.ts`:
+- injected LLM interface;
+- compact `id|title|host` input;
+- `responseConstraint` with the §7.3 schema;
+- batches of up to ~40 with a context check, and a smaller batch on `QuotaExceededError`;
+- above 40 tabs, pre-clustering with `cluster.ts`;
+- validation (invented IDs discarded, missing ones in "Other", no duplicates) and fallback to §7.2.
 
-La scelta sui nomi in italiano va annotata in DECISIONS.
+The choice about Italian names must be recorded in DECISIONS.
 
-**Perimetro.** `src/core/ai-grouping.ts`, test.
+**Scope.** `src/core/ai-grouping.ts`, tests.
 
-**Fatto quando.** Test con mock per: output valido, ID inventati, ID duplicati, JSON malformato,
-quota superata, timeout, più di 40 schede.
+**Done when.** Tests with mocks for: valid output, invented IDs, duplicate IDs, malformed JSON,
+quota exceeded, timeout, more than 40 tabs.
 
-### M5.2 — Adattatore Prompt API e integrazione
+### M5.2 — Prompt API adapter and integration
 
-Su Chrome con Gemini Nano disponibile, Organizza per argomento usa l'AI; altrove non se ne
-accorge nessuno.
+On Chrome with Gemini Nano available, Organize by topic uses the AI; elsewhere nobody notices.
 
-**Spec.** PLAN.md §7.3 ("Rilevamento e stato", "Prestazioni"), §4.4 (badge "AI on-device"), §4.6
-(riga AI), §5.5 (riga "AI on-device"), §11 (`import()`).
+**Spec.** PLAN.md §7.3 ("Detection and state", "Performance"), §4.4 ("AI on-device" badge), §4.6
+(AI row), §5.5 ("On-device AI" row), §11 (`import()`).
 
-**Cosa fare.** Prima verifica l'API attuale su developer.chrome.com/docs/ai/prompt-api: le API
-cambiano. Poi `src/platform/llm.ts`:
-- stati di disponibilità;
-- download solo su clic, con progresso;
-- sessione lazy, riusata e distrutta alla chiusura del pannello;
-- `AbortController`, timeout di 20 s con fallback.
+**What to do.** First check the current API at developer.chrome.com/docs/ai/prompt-api: APIs
+change. Then `src/platform/llm.ts`:
+- availability states;
+- download only on click, with progress;
+- a lazy session, reused and destroyed when the panel closes;
+- `AbortController`, a 20 s timeout with fallback.
 
-Integra in Organizza e nello stato delle impostazioni. Con `caps.promptApi` falso l'opzione non
-compare. Caricamento dinamico, così la build Firefox non lo paga.
+Integrate it into Organize and into the settings state. With `caps.promptApi` false the option does
+not appear. Loaded dynamically, so the Firefox build does not pay for it.
 
-**Perimetro.** `llm.ts`, vista Organizza, i18n, test.
+**Scope.** `llm.ts`, Organize view, i18n, tests.
 
-**Fatto quando.** Test con `LanguageModel` mockato per ogni stato di disponibilità, timeout e
-abort. Un E2E Chromium senza modello verifica che non compaiano errori e che si usi il fallback.
-Aggiunta a MANUAL-CHECKS: "su questo PC, con il modello: gruppi per 40 schede in meno di 10 s
-(oppure: hardware non supportato, fallback verificato)".
+**Done when.** Tests with a mocked `LanguageModel` for every availability state, timeout and abort.
+A Chromium E2E without the model checks that no errors appear and that the fallback is used. Added
+to MANUAL-CHECKS: "su questo PC, con il modello: gruppi per 40 schede in meno di 10 s (oppure:
+hardware non supportato, fallback verificato)".
 
-## 10. PHASE M6 — Impostazioni, rifinitura, accessibilità
+## 10. PHASE M6 — Settings, polish, accessibility
 
-### M6.1 — Impostazioni complete
+### M6.1 — Complete settings
 
-Tutte le impostazioni di §4.6, inclusi i preferiti con permesso opzionale e la lingua.
+All the §4.6 settings, including bookmarks with the optional permission, and the language.
 
-**Spec.** PLAN.md §4.6, §6.4 (componente "Già nei preferiti"), §5.4 (`optional_permissions`).
+**Spec.** PLAN.md §4.6, §6.4 ("Already bookmarked" component), §5.4 (`optional_permissions`).
 
-**Cosa fare.**
-- `SettingsView` completa.
-- Il toggle "preferiti" chiede il permesso `bookmarks` dentro il gesto utente e attiva il
-  segnale +10 nello scoring.
-- Lingua automatica / IT / EN: `browser.i18n` non permette di cambiare lingua a runtime, quindi
-  scegli il meccanismo (es. caricare il `messages.json` richiesto) e annotalo.
+**What to do.**
+- Complete `SettingsView`.
+- The "bookmarks" toggle requests the `bookmarks` permission inside the user gesture and turns on
+  the +10 signal in the scoring.
+- Automatic / IT / EN language: `browser.i18n` does not allow changing the language at runtime,
+  so choose the mechanism (e.g. loading the requested `messages.json`) and record it.
 
-**Perimetro.** `SettingsView`, i18n, scoring (solo il collegamento ai preferiti), test.
+**Scope.** `SettingsView`, i18n, scoring (only the bookmarks hook-up), tests.
 
-**Fatto quando.** Unit test su ogni impostazione che cambia il comportamento del core. Un E2E
-Chromium cambia lingua e soglia e ne vede l'effetto. Aggiunta a MANUAL-CHECKS: "toggle
+**Done when.** Unit tests on every setting that changes the core's behaviour. A Chromium E2E
+changes the language and the threshold and sees the effect. Added to MANUAL-CHECKS: "toggle
 preferiti: compare la richiesta di permesso (Chrome, Firefox)".
 
-### M6.2 — Onboarding al primo avvio
+### M6.2 — First-run onboarding
 
-Una sola schermata nel pannello che fa scegliere soglia e modalità del guard.
+A single screen in the panel that has the user choose the threshold and the guard mode.
 
-**Spec.** PLAN.md §17, §8.1 (default della modalità scelto in onboarding).
+**Spec.** PLAN.md §17, §8.1 (default mode chosen in onboarding).
 
-**Cosa fare.** Schermata unica al primo avvio, mai pagine aperte in automatico. Le scelte vengono
-salvate nelle impostazioni. Il link "Hai una whitelist di Duplicate Tabs Closer?" apre l'editor.
+**What to do.** A single screen on first run, never pages opened automatically. The choices are
+saved in the settings. The "Hai una whitelist di Duplicate Tabs Closer?" link opens the editor.
 
-**Perimetro.** Componente di onboarding, stato "onboarding completato", i18n, test.
+**Scope.** Onboarding component, "onboarding completed" state, i18n, tests.
 
-**Fatto quando.** Un E2E Chromium copre: primo avvio → onboarding → scelte → "Inizia" → le
-impostazioni riflettono le scelte → al riavvio del pannello l'onboarding non ricompare.
+**Done when.** A Chromium E2E covers: first run → onboarding → choices → "Inizia" → the settings
+reflect the choices → when the panel is reopened the onboarding does not come back.
 
-### M6.3 — Rifinitura visiva e icona definitiva
+### M6.3 — Visual polish and final icon
 
-Stati vuoti, animazioni sobrie, movimento ridotto rispettato e un'icona leggibile a 16 px.
+Empty states, restrained animations, reduced motion honoured, and an icon readable at 16 px.
 
-**Spec.** PLAN.md §4.3 (stato vuoto), §4.7 (movimento, icona).
+**Spec.** PLAN.md §4.3 (empty state), §4.7 (motion, icon).
 
-**Cosa fare.**
-- Animazioni di 150 ms e collasso in altezza alla chiusura, tutto disattivato con
-  `prefers-reduced-motion`.
-- Stati vuoti per tutte le viste.
-- Icona: SVG sorgente più PNG 16/32/48/128 generati da uno script (dipendenza di sviluppo
-  ammessa, da annotare), collegati al manifest.
+**What to do.**
+- 150 ms animations and height collapse on close, all disabled with `prefers-reduced-motion`.
+- Empty states for every view.
+- Icon: source SVG plus PNG 16/32/48/128 generated by a script (an allowed dev dependency, to be
+  recorded), wired into the manifest.
 
-**Perimetro.** CSS e componenti, `src/public/icon/`, script di generazione.
+**Scope.** CSS and components, `src/public/icon/`, generation script.
 
-**Fatto quando.** Un E2E con `reducedMotion: 'reduce'` verifica che non ci siano transizioni. Le
-icone sono generate in modo riproducibile e presenti nei due manifest.
+**Done when.** An E2E with `reducedMotion: 'reduce'` checks that there are no transitions. The
+icons are generated reproducibly and present in both manifests.
 
-### M6.4 — Audit di accessibilità e completezza i18n
+### M6.4 — Accessibility audit and i18n completeness
 
-Zero violazioni gravi di accessibilità e nessuna stringa dimenticata.
+Zero serious accessibility violations and no forgotten string.
 
-**Spec.** PLAN.md §13 M6 (accettazione), §4.8.
+**Spec.** PLAN.md §13 M6 (acceptance), §4.8.
 
-**Cosa fare.**
-- `@axe-core/playwright` negli E2E Chromium su ogni vista (Riordina, Organizza, Archivio,
-  Impostazioni, Protezione duplicati, Onboarding), in tema chiaro e scuro.
-- Test: ogni chiave usata nel codice esiste in `en` e in `it`, nessuna chiave inutilizzata,
-  nessuna stringa visibile scritta a mano (test o regola di lint: scegli e annota).
+**What to do.**
+- `@axe-core/playwright` in the Chromium E2E tests on every view (Declutter, Organize, Archive,
+  Settings, Duplicate protection, Onboarding), in light and dark theme.
+- Tests: every key used in the code exists in `en` and in `it`, no unused keys, no hand-written
+  visible string (a test or a lint rule: choose and record).
 
-**Perimetro.** Test e correzioni di accessibilità.
+**Scope.** Accessibility tests and fixes.
 
-**Fatto quando.** axe riporta zero violazioni "serious" e "critical" su tutte le viste, in
-entrambi i temi. I test i18n passano. Aggiunte a MANUAL-CHECKS: "NVDA sulle azioni principali" e
-"zoom al 200%".
+**Done when.** axe reports zero "serious" and "critical" violations on every view, in both themes.
+The i18n tests pass. Added to MANUAL-CHECKS: "NVDA sulle azioni principali" and "zoom al 200%".
 
-## 11. PHASE M7 — Hardening e preparazione al rilascio
+## 11. PHASE M7 — Hardening and release preparation
 
-### M7.1 — E2E completi su entrambi i browser
+### M7.1 — Complete E2E on both browsers
 
-Ogni flusso di §14 automatizzato, oppure esplicitamente nella checklist manuale.
+Every §14 flow automated, or explicitly in the manual checklist.
 
-**Spec.** PLAN.md §14 (E2E, E2E Firefox, unit per compatibilità, manuali).
+**Spec.** PLAN.md §14 (E2E, Firefox E2E, compatibility unit tests, manual).
 
-**Cosa fare.** Confronta gli elenchi di §14 con i test esistenti e completa quelli che mancano.
-Ciò che non si può automatizzare su Firefox va in MANUAL-CHECKS. Riunisci in MANUAL-CHECKS tutte
-le voci manuali di §14 (Chrome e Firefox).
+**What to do.** Compare the §14 lists with the existing tests and complete the missing ones.
+Whatever cannot be automated on Firefox goes into MANUAL-CHECKS. Gather in MANUAL-CHECKS all the
+manual items of §14 (Chrome and Firefox).
 
-**Perimetro.** Test, MANUAL-CHECKS.
+**Scope.** Tests, MANUAL-CHECKS.
 
-**Fatto quando.** Ogni voce di §14 corrisponde a un test che passa nei gates o a una voce in
-MANUAL-CHECKS. L'elenco della corrispondenza è in `docs/TEST-COVERAGE.md`.
+**Done when.** Every §14 item corresponds to a test that passes in the gates or to an entry in
+MANUAL-CHECKS. The correspondence list is in `docs/TEST-COVERAGE.md`.
 
-### M7.2 — Budget del bundle come gate
+### M7.2 — Bundle budget as a gate
 
-Le dimensioni del pacchetto diventano un controllo automatico.
+The package size becomes an automated check.
 
-**Spec.** PLAN.md §11 (budget JS), §13 M7 (`rollup-plugin-visualizer`).
+**Spec.** PLAN.md §11 (JS budgets), §13 M7 (`rollup-plugin-visualizer`).
 
-**Cosa fare.**
-- Report con `rollup-plugin-visualizer`.
-- Script `size`: gzip del JS iniziale del pannello ≤ 60 KB (tldts escluso solo se annotato) e
-  del background ≤ 15 KB, su entrambe le build.
-- Aggiungi a `phasekit.json` il gate `{ "name": "bundle size", "cwd": ".", "run":
+**What to do.**
+- A report with `rollup-plugin-visualizer`.
+- A `size` script: gzip of the panel's initial JS ≤ 60 KB (tldts excluded only if recorded) and
+  of the background ≤ 15 KB, on both builds.
+- Add to `phasekit.json` the gate `{ "name": "bundle size", "cwd": ".", "run":
   "pnpm size" }`.
 
-Se il budget è superato, ottimizza. Se è impossibile senza violare la spec, fermati e riporta.
+If the budget is exceeded, optimize. If that is impossible without violating the spec, stop and
+report.
 
-**Perimetro.** Config di build, script `size`, `phasekit.json` (solo l'aggiunta del gate),
-eventuali ottimizzazioni.
+**Scope.** Build config, `size` script, `phasekit.json` (only adding the gate), any
+optimizations.
 
-**Fatto quando.** `pnpm size` passa ed è un gate. Le misure sono annotate in DECISIONS.
+**Done when.** `pnpm size` passes and is a gate. The measurements are recorded in DECISIONS.
 
-### M7.3 — Documenti per gli store
+### M7.3 — Store documents
 
-Tutto il testo che serve per pubblicare, pronto da copiare nei form.
+All the text needed to publish, ready to copy into the forms.
 
-**Spec.** PLAN.md §12 (tutto), §8.6 (convivenza con Duplicate Tabs Closer).
+**Spec.** PLAN.md §12 (all of it), §8.6 (coexistence with Duplicate Tabs Closer).
 
-**Cosa fare.**
+**What to do.**
 - `docs/PRIVACY.md`.
-- `docs/PERMISSIONS.md`: un permesso per riga, per browser, con il testo dell'avviso e la
-  giustificazione.
-- `docs/STORE_LISTING.md`: testi IT/EN per Chrome Web Store e AMO, riassunto AMO ≤ 250
-  caratteri, single purpose.
-- `docs/AMO_REVIEW.md`: sistema operativo, versione esatta di Node e pnpm, comandi di build,
-  note per i revisori.
-- `README.md` completo, `CHANGELOG.md`.
+- `docs/PERMISSIONS.md`: one permission per row, per browser, with the warning text and the
+  justification.
+- `docs/STORE_LISTING.md`: IT/EN texts for the Chrome Web Store and AMO, AMO summary ≤ 250
+  characters, single purpose.
+- `docs/AMO_REVIEW.md`: operating system, exact Node and pnpm versions, build commands, notes for
+  reviewers.
+- Complete `README.md`, `CHANGELOG.md`.
 
-**Perimetro.** Solo documenti.
+**Scope.** Documents only.
 
-**Fatto quando.** I documenti esistono e sono coerenti con il manifest reale: un test o uno
-script confronta l'elenco dei permessi in `PERMISSIONS.md` con i manifest buildati.
+**Done when.** The documents exist and are consistent with the real manifest: a test or a script
+compares the list of permissions in `PERMISSIONS.md` with the built manifests.
 
-### M7.4 — Screenshot per gli store
+### M7.4 — Store screenshots
 
-Screenshot 1280×800 generati da script, rigenerabili a ogni versione.
+1280×800 screenshots generated by a script, reproducible for every version.
 
-**Spec.** PLAN.md §12.2 e §12.3 (materiali), §13 M7.
+**Spec.** PLAN.md §12.2 and §12.3 (assets), §13 M7.
 
-**Cosa fare.** Script che, con dati dimostrativi seminati, produce screenshot 1280×800 per
-Riordina, Organizza, Protezione duplicati, Archivio e tema scuro: Chromium con Playwright,
-Firefox con Puppeteer. Il pannello è stretto: componi lo screenshot (es. pannello a larghezza
-reale dentro una cornice 1280×800) e annota il metodo. Output in `docs/store/`.
+**What to do.** A script that, with seeded demo data, produces 1280×800 screenshots of Declutter,
+Organize, Duplicate protection, Archive and the dark theme: Chromium with Playwright, Firefox with
+Puppeteer. The panel is narrow: compose the screenshot (e.g. the panel at its real width inside a
+1280×800 frame) and record the method. Output in `docs/store/`.
 
-**Perimetro.** Script e immagini generate.
+**Scope.** Script and generated images.
 
-**Fatto quando.** Lo script gira da comando unico e produce le immagini alla dimensione
-richiesta. Aggiunta a MANUAL-CHECKS: "rivedere gli screenshot prima dell'invio".
+**Done when.** The script runs from a single command and produces the images at the required size.
+Added to MANUAL-CHECKS: "rivedere gli screenshot prima dell'invio".
 
-### M7.5 — Pacchetti e build riproducibile
+### M7.5 — Packages and reproducible build
 
-Zip pronti per entrambi gli store, e la prova che AMO può ricostruire il pacchetto dai sorgenti.
+Zips ready for both stores, and proof that AMO can rebuild the package from the sources.
 
-**Spec.** PLAN.md §12.3 (sorgenti, build riproducibile, `minify: false` da valutare), §12.4.
+**Spec.** PLAN.md §12.3 (sources, reproducible build, `minify: false` to be considered), §12.4.
 
-**Cosa fare.**
-- `pnpm zip` e `pnpm zip:firefox`. Lo zip dei sorgenti non contiene file minificati né
-  generati (`.output/`, `node_modules/`, `.phasekit/`).
-- Script che scompatta lo zip dei sorgenti in una cartella temporanea, esegue
-  `pnpm install --frozen-lockfile && pnpm build:firefox` e confronta il risultato con lo zip
-  dell'add-on.
-- `release.yml` su tag `v*`, senza invio automatico agli store.
-- Decidi su `minify: false` per Firefox e annota.
+**What to do.**
+- `pnpm zip` and `pnpm zip:firefox`. The sources zip contains no minified or generated files
+  (`.output/`, `node_modules/`, `.phasekit/`).
+- A script that unpacks the sources zip into a temporary folder, runs
+  `pnpm install --frozen-lockfile && pnpm build:firefox` and compares the result with the add-on
+  zip.
+- `release.yml` on `v*` tags, without automatic submission to the stores.
+- Decide on `minify: false` for Firefox and record it.
 
-**Perimetro.** Config di zip, script di verifica, `.github/workflows/release.yml`.
+**Scope.** Zip config, verification script, `.github/workflows/release.yml`.
 
-**Fatto quando.** Lo script di riproducibilità passa in locale. `release.yml` è YAML valido.
-**Nessun invio agli store** (è un passo manuale dell'utente, in MANUAL-CHECKS).
+**Done when.** The reproducibility script passes locally. `release.yml` is valid YAML.
+**No submission to the stores** (it is a manual step for the owner, in MANUAL-CHECKS).
 
-### M7.6 — Checklist di rilascio e audit finale
+### M7.6 — Release checklist and final audit
 
-Il punto della situazione onesto: cosa è verificato, cosa resta all'utente.
+An honest account of where things stand: what is verified, what is left to the owner.
 
-**Spec.** PLAN.md §14 ("Checklist di rilascio"), §13 M7 (accettazione).
+**Spec.** PLAN.md §14 ("Release checklist"), §13 M7 (acceptance).
 
-**Cosa fare.**
-- `docs/RELEASE-CHECKLIST.md`: ogni voce di §14 con lo stato e la prova (comando eseguito e
-  risultato) oppure il rimando a MANUAL-CHECKS.
-- Audit: confronta `README.md`, `docs/` e `TASKS.md` con il codice e correggi ciò che è
-  diventato falso.
+**What to do.**
+- `docs/RELEASE-CHECKLIST.md`: every §14 item with its status and the evidence (command run and
+  result) or a pointer to MANUAL-CHECKS.
+- Audit: compare `README.md`, `docs/` and `TASKS.md` with the code and fix whatever has become
+  untrue.
 
-**Perimetro.** Documenti.
+**Scope.** Documents.
 
-**Fatto quando.** Ogni voce della checklist di §14 ha uno stato con una prova o un rimando. Non
-resta nessuna affermazione nei documenti che il codice smentisca.
+**Done when.** Every item of the §14 checklist has a status with evidence or a pointer. No statement
+in the documents is contradicted by the code.
 
 ## 12. Ledger
 
-Spuntato **nello stesso commit** del task, mai prima. `phasekit status` lo mostra accanto al
+Ticked **in the same commit** as the task, never before. `phasekit status` shows it next to the
 `git log`.
 
-- [ ] M0.1 Toolchain e scheletro del progetto
-- [ ] M0.2 Manifest per browser, capabilities e apertura del pannello
-- [ ] M0.3 i18n e pannello "Hello" localizzato
-- [ ] M0.4 Harness E2E Chromium
-- [ ] M0.5 Harness E2E Firefox
-- [ ] M0.6 CI GitHub Actions
-- [ ] M1.1 Tipi e normalizzazione URL
-- [ ] M1.2 Classificazione del tipo di pagina
-- [ ] M1.3 Pattern della whitelist duplicati
-- [ ] M1.4 Chiave di duplicato e scelta della scheda da tenere
-- [ ] M1.5 Fixture etichettate (prima dello scoring)
-- [ ] M1.6 Punteggio di inutilità
-- [ ] M1.7 Storage tipizzato e versionato
-- [ ] M1.8 Tracker dell'attività delle schede
-- [ ] M2.1 Design token, shell del pannello e stato reattivo
-- [ ] M2.2 Righe, sezioni e motivi
-- [ ] M2.3 Navigazione da tastiera e ARIA
-- [ ] M2.4 Badge sull'icona
-- [ ] M2.5 Budget di apertura del pannello
-- [ ] M3.1 Azioni sulle schede e sicurezze
-- [ ] M3.2 Selezione, barra, toast e azioni di riga
-- [ ] M3.3 Vista Archivio e pulizia periodica
-- [ ] M3.4 Menu contestuali di pagina e scheda
-- [ ] M3.5 E2E delle azioni
-- [ ] M3b.1 Decisione pura del guard
-- [ ] M3b.2 Guard live nel background
-- [ ] M3b.3 Comandi e menu del guard
-- [ ] M3b.4 Interfaccia del guard e whitelist
-- [ ] M3b.5 E2E della protezione duplicati
-- [ ] M4.1 Raggruppamento per sito e per argomento
-- [ ] M4.2 Applicazione e annullamento dei gruppi
-- [ ] M4.3 Vista Organizza
-- [ ] M4.4 Revisione dei cluster e E2E di Organizza
-- [ ] M5.1 Raggruppamento AI con LLM iniettato
-- [ ] M5.2 Adattatore Prompt API e integrazione
-- [ ] M6.1 Impostazioni complete
-- [ ] M6.2 Onboarding al primo avvio
-- [ ] M6.3 Rifinitura visiva e icona definitiva
-- [ ] M6.4 Audit di accessibilità e completezza i18n
-- [ ] M7.1 E2E completi su entrambi i browser
-- [ ] M7.2 Budget del bundle come gate
-- [ ] M7.3 Documenti per gli store
-- [ ] M7.4 Screenshot per gli store
-- [ ] M7.5 Pacchetti e build riproducibile
-- [ ] M7.6 Checklist di rilascio e audit finale
+- [ ] M0.1 Toolchain and project skeleton
+- [ ] M0.2 Per-browser manifest, capabilities and opening the panel
+- [ ] M0.3 i18n and a localized "Hello" panel
+- [ ] M0.4 Chromium E2E harness
+- [ ] M0.5 Firefox E2E harness
+- [ ] M0.6 GitHub Actions CI
+- [ ] M1.1 Types and URL normalization
+- [ ] M1.2 Page type classification
+- [ ] M1.3 Duplicate whitelist patterns
+- [ ] M1.4 Duplicate key and choosing the tab to keep
+- [ ] M1.5 Labelled fixtures (before the scoring)
+- [ ] M1.6 Uselessness score
+- [ ] M1.7 Typed, versioned storage
+- [ ] M1.8 Tab activity tracker
+- [ ] M2.1 Design tokens, panel shell and reactive state
+- [ ] M2.2 Rows, sections and reasons
+- [ ] M2.3 Keyboard navigation and ARIA
+- [ ] M2.4 Badge on the icon
+- [ ] M2.5 Panel opening budget
+- [ ] M3.1 Tab actions and safeguards
+- [ ] M3.2 Selection, bar, toast and row actions
+- [ ] M3.3 Archive view and periodic cleanup
+- [ ] M3.4 Page and tab context menus
+- [ ] M3.5 Actions E2E
+- [ ] M3b.1 Pure guard decision
+- [ ] M3b.2 Live guard in the background
+- [ ] M3b.3 Guard commands and menus
+- [ ] M3b.4 Guard interface and whitelist
+- [ ] M3b.5 Duplicate protection E2E
+- [ ] M4.1 Grouping by site and by topic
+- [ ] M4.2 Applying and undoing groups
+- [ ] M4.3 Organize view
+- [ ] M4.4 Cluster review and Organize E2E
+- [ ] M5.1 AI grouping with an injected LLM
+- [ ] M5.2 Prompt API adapter and integration
+- [ ] M6.1 Complete settings
+- [ ] M6.2 First-run onboarding
+- [ ] M6.3 Visual polish and final icon
+- [ ] M6.4 Accessibility audit and i18n completeness
+- [ ] M7.1 Complete E2E on both browsers
+- [ ] M7.2 Bundle budget as a gate
+- [ ] M7.3 Store documents
+- [ ] M7.4 Store screenshots
+- [ ] M7.5 Packages and reproducible build
+- [ ] M7.6 Release checklist and final audit
 
-## 13. PHASE F — Correzioni dalle verifiche manuali
+## 13. PHASE F — Fixes from the manual checks
 
-Task aggiunti durante il lavoro, quando una verifica manuale trova un problema. Ognuno ha la
-stessa forma degli altri: titolo `### F.<n> — …`, la verifica che l'ha fatto nascere, cosa
-succede e cosa dovrebbe succedere (con le parole dell'utente), **Spec**, **Cosa fare**,
-**Perimetro**, **Fatto quando**. Il "Fatto quando" include sempre un test automatico che
-riproduce il problema, quando si può, e una nuova voce in MANUAL-CHECKS per riprovarlo a mano.
-La riga del ledger va in fondo alla sezione 12 e il target in `autoSequence` subito dopo il task
-in corso.
+Tasks added during the work, when a manual check finds a problem. Each one has the same shape as
+the others: a `### F.<n> — …` title, the check that gave rise to it, what happens and what should
+happen (in the owner's words), **Spec**, **What to do**, **Scope**, **Done when**. "Done when"
+always includes an automated test that reproduces the problem, when one is possible, and a new
+entry in MANUAL-CHECKS to try it again by hand. The ledger row goes at the end of section 12 and the
+target goes into `autoSequence` right after the task in progress.
