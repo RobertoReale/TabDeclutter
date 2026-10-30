@@ -1,0 +1,43 @@
+{
+  "name": "tabdeclutter",
+  "version": "0.1.0",
+  "description": "Suggests which tabs to close, organizes the rest into native tab groups and blocks duplicate tabs in real time. Everything stays on the device.",
+  "license": "MIT",
+  "author": "Roberto Reale",
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "lint": "eslint . && prettier --check .",
+    "lint:firefox": "web-ext lint -s .output/firefox-mv3",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "test": "vitest run",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@preact/signals": "2.11.4",
+    "preact": "11.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@preact/preset-vite": "2.10.6",
+    "@types/node": "24.19.2",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5",
+    "web-ext": "10.8.0",
+    "wxt": "0.21.5"
+  }
+}

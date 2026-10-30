@@ -19,3 +19,7 @@ blob-report/
 *.local
 .DS_Store
 Thumbs.db
+
+# web-ext
+web-ext-artifacts/
+*.tsbuildinfo

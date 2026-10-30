@@ -1,0 +1,20 @@
+node_modules/
+.output/
+.wxt/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+pnpm-lock.yaml
+.phasekit/
+
+# Prose written and read by people, outside the build. Reflowing it would churn
+# the diffs and move the line numbers the agents navigate PLAN.md by.
+PLAN.md
+TASKS.md
+PROMPTS.md
+AGENT-RULES.md
+RUNNING.md
+CLAUDE.md
+docs/
+phasekit.json
