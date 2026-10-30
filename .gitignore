@@ -1,0 +1,21 @@
+# dependencies and build output
+node_modules/
+.output/
+.wxt/
+stats*.html
+
+# test artifacts
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# phasekit runtime state (logs, pinned sessions, runner marks)
+.phasekit/
+
+# local
+.env
+.env.*
+*.local
+.DS_Store
+Thumbs.db

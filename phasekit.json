@@ -1,0 +1,81 @@
+{
+  "workingDir": ".",
+  "codeDir": ".",
+
+  "plan": "TASKS.md",
+  "prompts": "PROMPTS.md",
+  "logDir": ".phasekit/logs",
+
+  "model": "opus",
+  "effort": "high",
+
+  "mainBranch": "main",
+  "branchPrefix": "plan/phase-",
+  "requireCleanTree": true,
+  "autoCompact": 150000,
+  "notify": true,
+
+  "usageLimit": {
+    "maxRetries": 10,
+    "waitMinutes": 20,
+    "maxContextRestarts": 2
+  },
+
+  "gates": [
+    { "name": "install", "cwd": ".", "run": "pnpm install --frozen-lockfile" },
+    { "name": "lint", "cwd": ".", "run": "pnpm lint" },
+    { "name": "typecheck", "cwd": ".", "run": "pnpm typecheck" },
+    { "name": "unit tests", "cwd": ".", "run": "pnpm test" },
+    { "name": "build chrome", "cwd": ".", "run": "pnpm build" },
+    { "name": "build firefox", "cwd": ".", "run": "pnpm build:firefox" },
+    { "name": "web-ext lint", "cwd": ".", "run": "pnpm lint:firefox" }
+  ],
+
+  "autoSequence": [
+    { "target": "M0.1", "note": "creates the gates; nothing to verify before it" },
+    "M0.2",
+    "M0.3",
+    { "target": "M0.4", "note": "adds the e2e chromium gate" },
+    { "target": "M0.5", "note": "adds the e2e firefox gate" },
+    "M0.6",
+    "M1.1",
+    "M1.2",
+    "M1.3",
+    "M1.4",
+    { "target": "M1.5", "note": "labels written before scoring exists, on purpose" },
+    { "target": "M1.6", "effort": "xhigh", "note": "the core algorithm, precision and speed targets" },
+    "M1.7",
+    { "target": "M1.8", "effort": "xhigh", "note": "reconciliation across restarts and discards" },
+    "M2.1",
+    "M2.2",
+    "M2.3",
+    "M2.4",
+    "M2.5",
+    "M3.1",
+    "M3.2",
+    "M3.3",
+    "M3.4",
+    "M3.5",
+    { "target": "M3b.1", "effort": "xhigh", "note": "decision table, 30+ cases" },
+    { "target": "M3b.2", "effort": "xhigh", "note": "event races: exactly one tab must survive" },
+    "M3b.3",
+    "M3b.4",
+    "M3b.5",
+    "M4.1",
+    "M4.2",
+    "M4.3",
+    "M4.4",
+    "M5.1",
+    "M5.2",
+    "M6.1",
+    "M6.2",
+    "M6.3",
+    "M6.4",
+    "M7.1",
+    { "target": "M7.2", "note": "adds the bundle size gate" },
+    "M7.3",
+    "M7.4",
+    "M7.5",
+    "M7.6"
+  ]
+}
