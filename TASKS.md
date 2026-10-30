@@ -1017,7 +1017,7 @@ in the documents is contradicted by the code.
 Ticked **in the same commit** as the task, never before. `phasekit status` shows it next to the
 `git log`.
 
-- [ ] M0.1 Toolchain and project skeleton
+- [x] M0.1 Toolchain and project skeleton
 - [ ] M0.2 Per-browser manifest, capabilities and opening the panel
 - [ ] M0.3 i18n and a localized "Hello" panel
 - [ ] M0.4 Chromium E2E harness
