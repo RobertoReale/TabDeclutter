@@ -142,7 +142,7 @@ function Test-Daytime { $h = (Get-Date).Hour; return ($h -ge 9 -and $h -lt 22) }
 # Reading the state of the build
 # ---------------------------------------------------------------------------
 
-function Get-AgentLastWords([string] $Target) {
+function Get-TargetLastWords([string] $Target) {
     <#
         The agent's own final message for a target, from its newest log. A stop note says
         that the branch has no commits; this says why, in the agent's words - usually the
@@ -153,20 +153,8 @@ function Get-AgentLastWords([string] $Target) {
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $log) { return '' }
 
-    $result = ''
-    $lastText = ''
-    foreach ($line in (Get-Content -LiteralPath $log.FullName -Tail 400 -Encoding utf8)) {
-        if (-not $line.StartsWith('{')) { continue }
-        try { $e = $line | ConvertFrom-Json -Depth 20 } catch { continue }
-        if ($e.type -eq 'result' -and $e.result) { $result = [string] $e.result }
-        elseif ($e.type -eq 'assistant' -and $e.message.content) {
-            $texts = @($e.message.content | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.text })
-            if ($texts.Count) { $lastText = ($texts -join "`n") }
-        }
-    }
-    $words = if ($result) { $result } else { $lastText }
-    if ($words.Length -gt 6000) { $words = $words.Substring($words.Length - 6000) }
-    return $words.Trim()
+    # phasekit's own reader, the same one that writes the agent's words into the stop note.
+    return (Get-AgentLastWords -LogTail ((Get-Content -LiteralPath $log.FullName -Tail 400 -Encoding utf8) -join "`n"))
 }
 
 function Get-BuildState {
@@ -268,7 +256,7 @@ function Get-BuildState {
         pause         = $pause
         stopTarget    = $stopTarget
         stopNote      = $(if (Test-Path -LiteralPath $StopFile) { Get-Content -LiteralPath $StopFile -Raw -Encoding utf8 } else { '' })
-        lastWords     = $(if ($stopTarget) { Get-AgentLastWords -Target $stopTarget } else { '' })
+        lastWords     = $(if ($stopTarget) { Get-TargetLastWords -Target $stopTarget } else { '' })
         currentTarget = $currentTarget
         next          = $(if ($next) { $next[0] } else { $null })
         gaveUp        = (Test-Path -LiteralPath $GaveUpFile)
