@@ -166,3 +166,63 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   (invariant 5), so a probe that is wrong on one browser is worse than no probe. Caught by reading
   `.output/chrome-mv3/background.js`, not by a test: a mocked environment cannot show which global
   the real one comes from.
+
+## M0.3 — `wxt.config.ts` has to name `publicDir: 'src/public'`
+- **Context:** PLAN.md §5.3 puts `_locales/` in `src/public/`, and `srcDir` is already `'src'`, so
+  WXT looked like it would find it. It does not: `publicDir` defaults to `public` and is resolved
+  against the project **root**, not against `srcDir`
+  (`wxt/dist/internal/resolve-config.mjs`: `path.resolve(root, mergedConfig.publicDir ?? "public")`).
+  The first build came out with every `__MSG_*` in place and no `_locales/` directory at all — an
+  extension that cannot load, and a Firefox `web-ext lint` that would reject the unresolvable
+  placeholders.
+- **Decision:** `publicDir: 'src/public'` in `wxt.config.ts`. The directory keeps the place PLAN.md
+  gives it, and the icons will be copied from there as well.
+- **Why:** the alternative was a second public directory at the root, which would split the static
+  assets across two trees and contradict §5.3. The setting also feeds `.wxt/types/i18n.d.ts`, which
+  WXT generates from `publicDir/_locales/<default_locale>/messages.json`, so with the wrong
+  `publicDir` that file is generated empty and types nothing.
+
+## M0.3 — the typed `t` lives in `src/platform/i18n.ts`
+- **Context:** PLAN.md §5.3 lists no file for the i18n helper, and invariant 11 wants every visible
+  string to go through one. WXT already generates key-narrowed `browser.i18n.getMessage` overloads
+  in `.wxt/types/i18n.d.ts`, so `t` could have been skipped.
+- **Decision:** `src/platform/i18n.ts` exports `t`, `MessageKey`, `LOCALES`, `DEFAULT_LOCALE` and a
+  `translator(api)` factory. `MessageKey` is `keyof typeof enMessages` from a **type-only** import
+  of `src/public/_locales/en/messages.json`, so `t('nope')` is a compile error (checked: `TS2345`)
+  and the catalogue is not bundled — the browser loads `_locales/` itself.
+- **Why:** `platform/` is the layer allowed to touch browser APIs (invariant 5), and `src/core/`
+  must stay free of them, so the helper cannot live in `core/`. One named entry point is also what
+  makes invariant 11 reviewable, and `translator()` lets `tests/unit/i18n.test.ts` exercise the real
+  `messages.json` of both locales without an extension context. WXT's generated overloads are a
+  bonus check on the same keys, not a substitute: they do not exist for a plain unit test, and
+  nothing stops a caller from reaching past them to `browser.i18n`.
+
+## M0.3 — the panel sets its own `title` and `lang`, from `_locales`
+- **Context:** `__MSG_*` is substituted in `manifest.json` and in CSS, never in HTML
+  ([Chrome](https://developer.chrome.com/docs/extensions/reference/api/i18n#overview-predefined),
+  [MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Internationalization#internationalizing_manifest.json)).
+  But WXT copies the sidepanel entrypoint's `<title>` into Firefox's
+  `sidebar_action.default_title` (M0.2 above), where it *is* substituted, so the one string has to
+  serve both.
+- **Decision:** `index.html` keeps `<title>__MSG_extName__</title>`, for the manifest; `main.tsx`
+  then overwrites `document.title` with `t('extName')` and sets `document.documentElement.lang`
+  from `panelLanguage()`.
+- **Why:** it keeps a single source of truth for the sidebar title, which the existing
+  `tests/unit/manifest.test.ts` already compares against `build/manifest.ts`. The alternative, a
+  `<meta name="manifest.title">` override, works but states the title twice. Neither panel chrome
+  displays the document's own title — Chrome's side panel and Firefox's sidebar both label the
+  header from the manifest — so the placeholder should never be visible; the M0.3 manual check
+  looks for it anyway.
+
+## M0.3 — `lang` is derived from the UI language, not from the chosen locale
+- **Context:** `lang` should name the language the strings are actually in (PLAN.md §4.8: the panel
+  is navigable by screen reader). No API reports which directory out of `_locales/` the browser
+  picked.
+- **Decision:** `documentLanguage(uiLanguage)` repeats the browser's own rule: keep the tag from
+  `i18n.getUILanguage()` if we ship its primary subtag (`it-CH` → `it-CH`), fall back to
+  `default_locale` otherwise (`de` → `en`). An `@@ui_locale`-style underscore is normalised to the
+  hyphen a `lang` attribute needs (`en_GB` → `en-GB`).
+- **Why:** a wrong `lang` is worse than a coarse one — it makes a screen reader read Italian with
+  English phonetics — and this rule can only be wrong about the region, never about the language.
+  It is a pure function of its argument, so `tests/unit/i18n.test.ts` pins all of it. If the
+  locale set grows beyond `en`/`it`, `LOCALES` is the only place to change.

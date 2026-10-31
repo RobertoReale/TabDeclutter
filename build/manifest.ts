@@ -22,10 +22,21 @@ interface SidebarActionManifest {
 
 export type TabDeclutterManifest = UserManifest & SidebarActionManifest;
 
-const NAME = 'TabDeclutter';
+/**
+ * The localized keys of PLAN.md §5.4. The browser substitutes them from
+ * `src/public/_locales/<locale>/messages.json`; `tests/unit/i18n.test.ts`
+ * checks every one of them exists there.
+ */
+const MSG = {
+  name: '__MSG_extName__',
+  description: '__MSG_extDescription__',
+  actionTitle: '__MSG_actionTitle__',
+  closeDuplicates: '__MSG_cmdCloseDuplicates__',
+  toggleGuard: '__MSG_cmdToggleGuard__',
+} as const;
 
-const DESCRIPTION =
-  'Suggests which tabs to close, organizes the rest into native tab groups and blocks duplicate tabs in real time.';
+/** The locale `_locales` is complete in, and the fallback for every other one. */
+const DEFAULT_LOCALE = 'en';
 
 /** The panel entrypoint, as WXT names it in the output. */
 const PANEL_PATH = 'sidepanel.html';
@@ -38,8 +49,8 @@ const OPEN_PANEL_SHORTCUT = { suggested_key: { default: 'Alt+Shift+D' } };
  * shortcut page. Handled from M3b.
  */
 const ASSIGNABLE_COMMANDS = {
-  'close-all-duplicates': { description: 'Close all duplicate tabs' },
-  'toggle-duplicate-guard': { description: 'Pause or resume duplicate protection' },
+  'close-all-duplicates': { description: MSG.closeDuplicates },
+  'toggle-duplicate-guard': { description: MSG.toggleGuard },
 };
 
 /**
@@ -49,14 +60,15 @@ const ASSIGNABLE_COMMANDS = {
  */
 function commonKeys(): TabDeclutterManifest {
   return {
-    name: NAME,
-    description: DESCRIPTION,
+    name: MSG.name,
+    description: MSG.description,
+    default_locale: DEFAULT_LOCALE,
     // PLAN.md §5.4: requested only if the user turns on the "already
     // bookmarked" signal, so it must not be in `permissions`.
     optional_permissions: ['bookmarks'],
     // The archive and the activity map would leak between the two sessions.
     incognito: 'not_allowed',
-    action: { default_title: NAME },
+    action: { default_title: MSG.actionTitle },
   };
 }
 
@@ -106,7 +118,7 @@ function firefoxManifest(): TabDeclutterManifest {
     // files agree.
     sidebar_action: {
       default_panel: PANEL_PATH,
-      default_title: NAME,
+      default_title: MSG.name,
       // The panel is opened by a gesture, never on its own (PLAN.md §3.1).
       open_at_install: false,
     },
