@@ -573,3 +573,52 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   guard in auto mode, which is a mode the user has to have chosen. A default of `auto` would close a
   tab on the strength of a question nobody answered yet. The preselection in the onboarding UI is
   how the spec's preference is expressed; the stored default is not the place for it.
+
+## M1.2 — `own` is a page class of its own, and the origin is injected
+
+- **Context:** PLAN.md §6.3 lists eight classes and excludes "TabDeclutter's own pages" from
+  `browser-internal`, without saying what they are instead. §6.4 then protects them, so the scoring
+  has to be able to ask. `src/core/` may not call `browser.runtime.getURL()` (TASKS.md §2.4), and
+  the extension id differs per browser and per installation, so the origin cannot be a constant
+  either.
+- **Decision:** a ninth `PageType`, `own`, and `classify(tab, { ownOrigin })`, with `ownOrigin` in
+  the shape `browser.runtime.getURL('')` returns. Without it an own page classifies as
+  `browser-internal`, which is what it is to a context that does not know who it is. `isOwnPage()`
+  is exported as well, so the protection in M1.6 does not have to go through the class.
+- **Why:** the alternatives were a flag alongside the class or folding own pages into `content`, and
+  both make the caller remember a second thing to look at. One class means the exclusion §6.3 asks
+  for and the protection §6.4 asks for are the same fact. The origin is compared as a whole path
+  prefix, so an extension whose id merely starts like ours cannot inherit the protection.
+
+## M1.2 — matching by boundaries, not by substring
+
+- **Context:** §6.3 is written in prose: a path "containing `login`", a `/search` path, "a `q` /
+  `p` / `query` parameter". Taken literally, `/blogin` is an auth page, `/searchkit/searchkit` is a
+  search, `/sport/dp/B01` is Amazon's `/s`, and `google.com/maps?q=roma` is a result list. M1.2 asks
+  for false friends, so the prose has to be read as "a word", not "a sequence of characters".
+- **Decision:** auth tokens are matched between boundaries, where a boundary is any run of
+  characters that are not letters or digits (the path is folded to `-` separated tokens, so
+  `sign-in` matches `/users/sign_in` and `login` does not match `/blogin`); path prefixes match
+  whole segments (`/s` matches `/s` and `/s/x`, never `/sport`); and a search parameter only counts
+  on an engine's root path, which is where `duckduckgo.com/?q=` puts its results, so
+  `google.com/maps?q=` stays `content`.
+- **Why:** PLAN.md §6.5 says a false positive costs more than a false negative — a suggestion to
+  close a page the user is reading is the expensive mistake — and these rules feed the +25 of a
+  transient page (§6.4). Each rule is narrower than the prose and never wider, so nothing the spec
+  names is lost. The two it cannot tell apart are `/wiki/Login` and a title like "Not Found: a
+  novel", both of which need the page's content to resolve; they are left as known limits of a
+  classification that may not read the page.
+
+## M1.2 — the order of the rules: URL evidence before the title
+
+- **Context:** a page can satisfy two rules at once. A sign-in page on a search engine, a search
+  whose server answered 404, a local PDF (`file` or `media`), an own page under an extension scheme.
+  The spec gives a table, not a precedence.
+- **Decision:** `blank` → `own` → `browser-internal` → `file` → `media` → `auth` → `search` →
+  `error` → `content`. `auth` runs before `search` and reads only the host and the path, so a search
+  *for* the word "login" is still a search. `error` runs last of all.
+- **Why:** the order goes from the most certain evidence to the least. A scheme is a fact; an
+  extension in the path is nearly one; `auth` and `search` are host and path rules; `error` is a
+  pattern over a string the page itself chose, which is why §6.3 calls it low confidence and only a
+  secondary reason. Putting it last means a page whose URL we understand is never demoted to a guess
+  about its title.
