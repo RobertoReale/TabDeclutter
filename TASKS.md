@@ -1023,7 +1023,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M0.4 Chromium E2E harness
 - [x] M0.5 Firefox E2E harness
 - [x] M0.6 GitHub Actions CI
-- [ ] M1.1 Types and URL normalization
+- [x] M1.1 Types and URL normalization
 - [ ] M1.2 Page type classification
 - [ ] M1.3 Duplicate whitelist patterns
 - [ ] M1.4 Duplicate key and choosing the tab to keep

@@ -442,3 +442,134 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   a phase branch has to show something. Major tags rather than commit SHAs: these are GitHub's own
   and pnpm's own actions, the tag keeps their fixes coming, and the job has no secrets and no write
   permission to abuse.
+
+## M1.1 — `tldts-experimental` rather than `tldts`
+
+- **Context:** AGENT-RULES.md allows `tldts` "or a lighter variant", PLAN.md §11 excludes the
+  library from the panel's 60 KB budget but still says "consider the lightweight variant". The two
+  packages expose the same API over the same Public Suffix List; the experimental one trades a
+  smaller, differently encoded trie for API stability.
+- **Decision:** `tldts-experimental@7.4.19`, pinned exactly, as the only new runtime dependency.
+  `src/core/url.ts` imports `getDomain` from it and nothing else.
+- **Why:** measured, not assumed. Bundled and minified through the project's own bundler, `tldts`
+  is 267,577 B raw / 111,461 B gzip against `tldts-experimental`'s 107,801 B / 47,049 B — 64 KB of
+  gzip saved on a dependency that ships in the service worker as well as in the panel. The risk of
+  "experimental" is a different answer, so both were compared on 34 hand-picked hostnames (PSL
+  wildcards and exceptions, private suffixes, IDN, IPv4, IPv6, `localhost`, `about:`, `chrome://`,
+  `moz-extension://`, `file://`, malformed strings) and on 200,000 generated three-label hostnames,
+  with `allowPrivateDomains` both on and off: zero differences. The name refers to the data
+  encoding, not to the correctness of the lookup, and only the import path would change if that
+  ever stopped holding.
+
+## M1.1 — `registrableDomain` counts private suffixes as sites
+
+- **Context:** `getDomain` can treat the PSL's private section (`github.io`, `blogspot.com`,
+  `vercel.app`) either as a suffix or as an ordinary domain. The answer decides whether
+  `alice.github.io` and `bob.github.io` are one site or two, which in turn decides what "Proteggi
+  questo sito" protects and how tabs are grouped by site (PLAN.md §5.1).
+- **Decision:** `allowPrivateDomains: true`, so `alice.github.io` is its own registrable domain.
+- **Why:** the grouping has to match what the user sees. Two people's project pages have nothing to
+  do with each other, and protecting `github.io` because one of them is open would silently protect
+  every page hosted there. The opposite mistake — splitting one site into several — cannot happen
+  this way, because the private section only ever adds labels to the suffix.
+
+## M1.1 — a URL the parser rejects is its own key
+
+- **Context:** `normalizeUrl` is total: tab URLs include `''` (a tab that has not committed a
+  load), `about:blank`, `data:`, and on Firefox a user-typed string that never became a URL. The
+  spec does not say what the key of an unparseable URL is.
+- **Decision:** return it trimmed, lower-cased only if `ignoreCase` is set, and never throw.
+  Nothing else is attempted: no scheme is guessed and no prefix is added.
+- **Why:** the key only has to be stable and equal to itself, which a passthrough guarantees — two
+  tabs showing the same broken string still match, and a broken string never collides with a real
+  URL, having no scheme the parser accepts. Guessing a scheme would be the one way to make
+  `example.com` typed in the address bar look like a duplicate of a page the user is actually on,
+  and by invariant 2 a wrong duplicate is a tab wrongly closed.
+
+## M1.1 — what normalization does to a URL with no authority
+
+- **Context:** `about:reader?url=…`, `data:text/html,…`, `javascript:…` and `view-source:https://…`
+  have no host: everything after the scheme is one opaque string that `URL` reports as `pathname`.
+  Applying the host and path rules to it would rewrite the payload — `view-source:https://example.com/a/`
+  would lose a slash that belongs to the inner URL.
+- **Decision:** `normalizeUrl` tests `href` for `scheme://` and treats only those URLs as
+  hierarchical. For the rest the opaque remainder is kept verbatim: no trailing-slash rule, and
+  `ignorePath` is a no-op. `href` and not the raw input, because the parser forgives
+  `https:/example.com` and reports it as an ordinary authority URL. The query and the fragment are
+  still normalized, since `URL` separates those on every scheme.
+- **Why:** these strings are keys for comparison, and the payload is the whole identity of such a
+  page. Making `ignorePath` a no-op there is the conservative reading: with no host, "compare the
+  host only" would collapse every `about:` page into a single key, so the guard would call
+  `about:addons` a duplicate of `about:preferences`.
+
+## M1.1 — normalization is idempotent by construction
+
+- **Context:** the keys are stored, not only compared — `local:keeps` is keyed by normalized URL
+  (PLAN.md §10) — so a key can be read back and normalized again. A first draft stripped one `www.`
+  label and one trailing slash, which made `https://www.www.example.com/a` and
+  `https://example.com/a//` normalize to strings that normalize further: two keys for one page.
+- **Decision:** both rules loop — every leading `www.` label (while a dot remains, so that `www.com`
+  survives) and every trailing slash down to the root. A test asserts
+  `normalizeUrl(normalizeUrl(u)) === normalizeUrl(u)` over the whole table of cases.
+- **Why:** anything else makes a stored key depend on how many times it has been through the
+  function, which is the kind of bug that surfaces only as a keep that stopped working.
+
+## M1.1 — the fragment of an SPA route is kept verbatim
+
+- **Context:** `#/` on the root path is the address of the page rather than noise (PLAN.md §6.2), so
+  it survives `ignoreHash`. Such a route can carry its own query (`/#/inbox?id=7`), which `URL` puts
+  inside `hash` and not inside `search`.
+- **Decision:** the fragment is kept as it is. The query rules — sorting, dropping tracking
+  parameters, `ignoreAllParams` — apply to `search` only, so a `?` inside the route is untouched.
+- **Why:** parsing the inside of a fragment means guessing the router's convention (hash-bang, query
+  before route, encoded path), and guessing wrong changes a key for the worse. The visible cost is a
+  `utm_` parameter inside a hash route surviving, which is rare and harmless: it makes two tabs look
+  different, and never makes two different pages look the same.
+
+## M1.1 — tracking parameters are matched case-insensitively
+
+- **Context:** `ignoreCase` is off by default, so the rest of the URL keeps its case, and a link can
+  arrive with `UTM_SOURCE` or `FBCLID`.
+- **Decision:** `isTrackingParam` lower-cases the name before matching, whatever `ignoreCase` says.
+  `utm_` is matched as a prefix; the rest are an explicit set.
+- **Why:** the case of a campaign parameter is an accident of whoever built the link, and the
+  parameter is noise either way. That is a different question from whether two paths differing in
+  case are the same page, which is what `ignoreCase` is for and is left to the user.
+
+## M1.1 — coverage: `@vitest/coverage-v8`, on by default, `src/core/**` only
+
+- **Context:** M1.1 asks for a ≥ 95% threshold on `src/core/**` enforced by `pnpm test`, which is
+  the `test` gate. Vitest needs a coverage provider as a separate package, and coverage is off
+  unless asked for.
+- **Decision:** `@vitest/coverage-v8@5.0.5` as a dev dependency, pinned to the Vitest version, with
+  `coverage.enabled: true`, `include: ['src/core/**/*.ts']`, the `text-summary` reporter and the
+  thresholds `lines: 95, branches: 95` in `vitest.config.ts`. `coverage/` is already ignored by git.
+- **Why:** the v8 provider is the one Vitest ships and it needs no instrumentation step, so the gate
+  stays as fast as the tests. Enabled in the config rather than behind a `--coverage` flag, because
+  a threshold that depends on remembering a flag is not a gate. `include` is a list and not a filter
+  over whatever the tests happened to import: a core module nobody tests at all then shows up as 0%
+  and fails the run instead of being left out of the denominator — verified by adding an untested
+  core file, which took the run to 82.81% lines and exit 1.
+
+## M1.1 — `TabActivity.bootstrappedAt` instead of a `bootstrapped` flag
+
+- **Context:** PLAN.md §6.1 writes `bootstrapped: true` on the records invented at
+  `runtime.onInstalled`, and §6.4 protects such a tab for the first 24 hours. A boolean cannot say
+  when those 24 hours end, so the protection would need a second field or the install time.
+- **Decision:** `bootstrappedAt?: number` (ms epoch), absent on an observed record, plus
+  `BOOTSTRAP_GRACE_MS = DAY` in `src/core/types.ts`.
+- **Why:** one field answers both questions the spec asks of it — whether the history is guesswork,
+  and whether the grace has passed — and it expires by itself, so nothing has to go back and clear a
+  flag. `undefined` is the honest absence: a record that was observed has no such moment.
+
+## M1.1 — the stored default guard mode is `warn`, not `auto`
+
+- **Context:** PLAN.md §8.3 leaves the duplicate mode to the user and §17 preselects "Chiudila e
+  torna a quella esistente" in onboarding. `DEFAULT_GUARD_SETTINGS` is also what applies before
+  onboarding has run, and after a storage reset.
+- **Decision:** `mode: 'warn'` in `DEFAULT_GUARD_SETTINGS`. Onboarding writes `auto` when the user
+  confirms the preselected choice.
+- **Why:** invariant 2 — no tab is closed without an explicit gesture, and the exception is the
+  guard in auto mode, which is a mode the user has to have chosen. A default of `auto` would close a
+  tab on the strength of a question nobody answered yet. The preselection in the onboarding UI is
+  how the spec's preference is expressed; the stored default is not the place for it.
