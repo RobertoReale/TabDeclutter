@@ -1,0 +1,123 @@
+/**
+ * The generated manifest, PLAN.md §5.4.
+ *
+ * It lives here rather than inline in `wxt.config.ts` so that a unit test can
+ * assert the exact keys and permissions of both builds (invariant 8: the
+ * permissions are exactly those of PLAN.md §5.4, no `host_permissions`, no
+ * content scripts). WXT calls `buildManifest` once per build target.
+ */
+import type { UserManifest } from 'wxt';
+
+/**
+ * `sidebar_action` is Firefox's half of the panel. WXT derives `UserManifest`
+ * from Chrome's MV3 manifest type, which does not declare it.
+ */
+interface SidebarActionManifest {
+  sidebar_action?: {
+    default_panel: string;
+    default_title?: string;
+    open_at_install?: boolean;
+  };
+}
+
+export type TabDeclutterManifest = UserManifest & SidebarActionManifest;
+
+const NAME = 'TabDeclutter';
+
+const DESCRIPTION =
+  'Suggests which tabs to close, organizes the rest into native tab groups and blocks duplicate tabs in real time.';
+
+/** The panel entrypoint, as WXT names it in the output. */
+const PANEL_PATH = 'sidepanel.html';
+
+/** PLAN.md §4.1: `Alt+Shift+D` opens the panel. */
+const OPEN_PANEL_SHORTCUT = { suggested_key: { default: 'Alt+Shift+D' } };
+
+/**
+ * PLAN.md §4.1: no default key, the user assigns them from the browser's
+ * shortcut page. Handled from M3b.
+ */
+const ASSIGNABLE_COMMANDS = {
+  'close-all-duplicates': { description: 'Close all duplicate tabs' },
+  'toggle-duplicate-guard': { description: 'Pause or resume duplicate protection' },
+};
+
+/**
+ * The keys that are identical on both browsers. A function, not a constant, so
+ * that the literals are checked against `TabDeclutterManifest` (`incognito` is
+ * a union, not a `string`).
+ */
+function commonKeys(): TabDeclutterManifest {
+  return {
+    name: NAME,
+    description: DESCRIPTION,
+    // PLAN.md §5.4: requested only if the user turns on the "already
+    // bookmarked" signal, so it must not be in `permissions`.
+    optional_permissions: ['bookmarks'],
+    // The archive and the activity map would leak between the two sessions.
+    incognito: 'not_allowed',
+    action: { default_title: NAME },
+  };
+}
+
+function chromeManifest(): TabDeclutterManifest {
+  return {
+    ...commonKeys(),
+    // `Tab.lastAccessed`, which the whole tracker is built on.
+    minimum_chrome_version: '121',
+    permissions: [
+      'tabs',
+      'tabGroups',
+      'storage',
+      'sidePanel',
+      'alarms',
+      'favicon',
+      'sessions',
+      'contextMenus',
+    ],
+    side_panel: { default_path: PANEL_PATH },
+    commands: {
+      _execute_action: OPEN_PANEL_SHORTCUT,
+      ...ASSIGNABLE_COMMANDS,
+    },
+  };
+}
+
+function firefoxManifest(): TabDeclutterManifest {
+  return {
+    ...commonKeys(),
+    browser_specific_settings: {
+      gecko: {
+        // Provisional, and immutable once the add-on is on AMO
+        // (docs/DECISIONS.md, M0.2).
+        id: 'tabdeclutter@robertoreale',
+        // tabGroups landed in 139, the built-in data consent in 140.
+        strict_min_version: '140.0',
+        data_collection_permissions: { required: ['none'] },
+      },
+    },
+    // No `sidePanel` and no `favicon`: neither API exists on Firefox.
+    // `menus` is Firefox's name for `contextMenus`.
+    permissions: ['tabs', 'tabGroups', 'storage', 'alarms', 'sessions', 'menus'],
+    // WXT regenerates this key from the sidepanel entrypoint and overwrites
+    // what is written here, so `default_title` and `open_at_install` are
+    // really set in src/entrypoints/sidepanel/index.html. It is kept here so
+    // that PLAN.md §5.4 is stated in one place; the unit test checks the two
+    // files agree.
+    sidebar_action: {
+      default_panel: PANEL_PATH,
+      default_title: NAME,
+      // The panel is opened by a gesture, never on its own (PLAN.md §3.1).
+      open_at_install: false,
+    },
+    commands: {
+      _execute_sidebar_action: OPEN_PANEL_SHORTCUT,
+      ...ASSIGNABLE_COMMANDS,
+    },
+  };
+}
+
+/** @param browser WXT's build target (`import.meta.env.BROWSER`). */
+export function buildManifest(browser: string): TabDeclutterManifest {
+  return browser === 'firefox' ? firefoxManifest() : chromeManifest();
+}

@@ -3,6 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      WXT builds `sidebar_action` from this entrypoint and overwrites whatever
+      build/manifest.ts says, so Firefox's two extra keys have to be set here:
+      `default_title` from <title>, `open_at_install` from this meta tag. The
+      panel is opened by a gesture, never on its own (PLAN.md §3.1), and
+      Firefox's own default for it is true. tests/unit/manifest.test.ts keeps
+      the two files from drifting apart.
+    -->
+    <meta name="manifest.open_at_install" content="false" />
     <title>TabDeclutter</title>
   </head>
   <body>

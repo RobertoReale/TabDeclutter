@@ -1,0 +1,101 @@
+import { describe, expect, it } from 'vitest';
+
+import type { CapabilityEnv } from '../../src/platform/capabilities';
+import { detectCapabilities } from '../../src/platform/capabilities';
+
+/**
+ * The two environments of PLAN.md §5.5, mocked. Only the presence of a member
+ * matters, so an empty object stands for an available namespace.
+ */
+
+const chromeEnv: CapabilityEnv = {
+  targetBrowser: 'chrome',
+  chrome: { sidePanel: {} },
+  extensionApi: {
+    tabGroups: {},
+    // Chrome has `sessions`, but not `setTabValue`.
+    sessions: {},
+  },
+  globals: { LanguageModel: {} },
+};
+
+const firefoxEnv: CapabilityEnv = {
+  targetBrowser: 'firefox',
+  // Firefox defines `chrome` as well, as the callback-style alias.
+  chrome: {},
+  extensionApi: {
+    sidebarAction: {},
+    tabGroups: {},
+    contextualIdentities: {},
+    sessions: { setTabValue: () => undefined },
+  },
+  globals: {},
+};
+
+describe('detectCapabilities on Chrome', () => {
+  const caps = detectCapabilities(chromeEnv);
+
+  it('finds the side panel and not the sidebar', () => {
+    expect(caps.sidePanel).toBe(true);
+    expect(caps.sidebarAction).toBe(false);
+  });
+
+  it('finds the Chrome-only features', () => {
+    expect(caps.faviconApi).toBe(true);
+    expect(caps.promptApi).toBe(true);
+    expect(caps.duplicateCommandDetection).toBe(true);
+  });
+
+  it('finds tab groups but neither containers nor persistent tab values', () => {
+    expect(caps.tabGroups).toBe(true);
+    expect(caps.containers).toBe(false);
+    expect(caps.sessionTabValues).toBe(false);
+  });
+});
+
+describe('detectCapabilities on Firefox', () => {
+  const caps = detectCapabilities(firefoxEnv);
+
+  it('finds the sidebar and not the side panel', () => {
+    expect(caps.sidebarAction).toBe(true);
+    expect(caps.sidePanel).toBe(false);
+  });
+
+  it('finds the Firefox-only features', () => {
+    expect(caps.containers).toBe(true);
+    expect(caps.sessionTabValues).toBe(true);
+  });
+
+  it('finds tab groups, which Firefox 139 added', () => {
+    expect(caps.tabGroups).toBe(true);
+  });
+
+  it('rules out the Chrome-only features', () => {
+    expect(caps.faviconApi).toBe(false);
+    expect(caps.promptApi).toBe(false);
+    expect(caps.duplicateCommandDetection).toBe(false);
+  });
+});
+
+describe('detectCapabilities with nothing available', () => {
+  it('says no to everything rather than throwing', () => {
+    expect(detectCapabilities({ targetBrowser: undefined })).toEqual({
+      sidePanel: false,
+      sidebarAction: false,
+      faviconApi: false,
+      promptApi: false,
+      tabGroups: false,
+      containers: false,
+      sessionTabValues: false,
+      duplicateCommandDetection: false,
+    });
+  });
+
+  it('does not take a non-callable sessions.setTabValue for the real thing', () => {
+    const env: CapabilityEnv = {
+      targetBrowser: 'firefox',
+      extensionApi: { sessions: { setTabValue: 'nope' } },
+    };
+    expect(detectCapabilities(env).sessionTabValues).toBe(false);
+  });
+});
