@@ -21,6 +21,7 @@
     "lint:firefox": "web-ext lint -s .output/firefox-mv3",
     "typecheck": "wxt prepare && tsc --noEmit",
     "test": "vitest run",
+    "fixtures": "node --experimental-strip-types scripts/generate-fixtures.ts",
     "e2e": "wxt build && playwright test",
     "e2e:firefox": "wxt build -b firefox && vitest run --config vitest.firefox.config.ts",
     "gates": "node tools/gates.mjs",

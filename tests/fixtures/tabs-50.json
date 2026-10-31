@@ -1,0 +1,1438 @@
+{
+  "name": "tabs-50",
+  "seed": 1050,
+  "now": 1773653400000,
+  "staleDays": 7,
+  "labelled": false,
+  "windows": [
+    {
+      "id": 1,
+      "focused": true,
+      "forgotten": false
+    },
+    {
+      "id": 2,
+      "focused": false,
+      "forgotten": false
+    },
+    {
+      "id": 3,
+      "focused": false,
+      "forgotten": true
+    }
+  ],
+  "groups": [
+    {
+      "id": 11,
+      "windowId": 1,
+      "title": "Lavoro",
+      "color": "grey"
+    }
+  ],
+  "tabs": [
+    {
+      "tab": {
+        "id": 101,
+        "windowId": 1,
+        "index": 0,
+        "url": "https://www.intesasanpaolo.com/it/persone-e-famiglie/conti.html",
+        "title": "Il mio conto - Intesa Sanpaolo",
+        "pinned": true,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.intesasanpaolo.com/favicon.ico",
+        "lastAccessed": 1773578284249
+      },
+      "activity": {
+        "tabId": 101,
+        "url": "https://www.intesasanpaolo.com/it/persone-e-famiglie/conti.html",
+        "createdAt": 1772920564785,
+        "lastActiveAt": 1773578284249,
+        "activations": 14,
+        "foregroundMs": 1124184
+      },
+      "template": "webapp",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 102,
+        "windowId": 1,
+        "index": 1,
+        "url": "https://www.notion.so/spesa-della-settimana-2f1c4a",
+        "title": "Spesa-della-settimana",
+        "pinned": true,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.notion.so/favicon.ico",
+        "lastAccessed": 1773644012040
+      },
+      "activity": {
+        "tabId": 102,
+        "url": "https://www.notion.so/spesa-della-settimana-2f1c4a",
+        "createdAt": 1773497168241,
+        "lastActiveAt": 1773644012040,
+        "activations": 11,
+        "foregroundMs": 3134567
+      },
+      "template": "webapp",
+      "lang": "neutral"
+    },
+    {
+      "tab": {
+        "id": 103,
+        "windowId": 1,
+        "index": 2,
+        "url": "https://www.google.com/search?q=come+etichettare+dati+di+test",
+        "title": "come etichettare dati di test - Cerca con Google",
+        "pinned": false,
+        "audible": false,
+        "active": true,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.google.com/favicon.ico",
+        "lastAccessed": 1773653353580
+      },
+      "activity": {
+        "tabId": 103,
+        "url": "https://www.google.com/search?q=come+etichettare+dati+di+test",
+        "createdAt": 1772899531808,
+        "lastActiveAt": 1773653353580,
+        "activations": 10,
+        "foregroundMs": 1339756
+      },
+      "template": "active",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 104,
+        "windowId": 1,
+        "index": 3,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/lisbon_tram_1034.jpg",
+        "title": "Lisbon_tram_1034.jpg (JPEG Image)",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": 11,
+        "incognito": false,
+        "favIconUrl": "https://upload.wikimedia.org/favicon.ico",
+        "lastAccessed": 1773614730167
+      },
+      "activity": {
+        "tabId": 104,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/lisbon_tram_1034.jpg",
+        "createdAt": 1773606951375,
+        "lastActiveAt": 1773614730167,
+        "activations": 1,
+        "foregroundMs": 7000
+      },
+      "template": "file-media",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 105,
+        "windowId": 1,
+        "index": 4,
+        "url": "https://simonwillison.net/2026/Feb/18/things-i-learned-shipping-an-extension/",
+        "title": "things-i-learned-shipping-an-extension",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": 11,
+        "incognito": false,
+        "favIconUrl": "https://simonwillison.net/favicon.ico",
+        "lastAccessed": 1773619515576
+      },
+      "activity": {
+        "tabId": 105,
+        "url": "https://simonwillison.net/2026/Feb/18/things-i-learned-shipping-an-extension/",
+        "createdAt": 1773482041713,
+        "lastActiveAt": 1773619515576,
+        "activations": 1,
+        "foregroundMs": 27644
+      },
+      "template": "read-later",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 106,
+        "windowId": 1,
+        "index": 5,
+        "url": "https://developer.chrome.com/docs/extensions/reference/api/tabgroups",
+        "title": "chrome.tabGroups | Chrome Extensions",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": 11,
+        "incognito": false,
+        "favIconUrl": "https://developer.chrome.com/favicon.ico",
+        "lastAccessed": 1773527176652
+      },
+      "activity": {
+        "tabId": 106,
+        "url": "https://developer.chrome.com/docs/extensions/reference/api/tabgroups",
+        "createdAt": 1773212707901,
+        "lastActiveAt": 1773527176652,
+        "activations": 4,
+        "foregroundMs": 1748111
+      },
+      "template": "docs",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 107,
+        "windowId": 1,
+        "index": 6,
+        "url": "https://github.com/RobertoReale/phasekit/pull/1038",
+        "title": "Add a dynamic pacing mode by RobertoReale · Pull Request #1038 · RobertoReale/phasekit",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": 11,
+        "incognito": false,
+        "favIconUrl": "https://github.com/favicon.ico",
+        "lastAccessed": 1768858670813
+      },
+      "activity": {
+        "tabId": 107,
+        "url": "https://github.com/RobertoReale/phasekit/pull/1038",
+        "createdAt": 1768691629264,
+        "lastActiveAt": 1768858670813,
+        "activations": 2,
+        "foregroundMs": 64822
+      },
+      "template": "github",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 108,
+        "windowId": 1,
+        "index": 7,
+        "url": "https://www.raiplay.it/video/2026/03/report-puntata-del-9-marzo-1040.html",
+        "title": "Report puntata del 9 marzo - RaiPlay",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.raiplay.it/favicon.ico",
+        "lastAccessed": 1772872762568
+      },
+      "activity": {
+        "tabId": 108,
+        "url": "https://www.raiplay.it/video/2026/03/report-puntata-del-9-marzo-1040.html",
+        "createdAt": 1772864295041,
+        "lastActiveAt": 1772872762568,
+        "activations": 1,
+        "foregroundMs": 58340
+      },
+      "template": "video",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 109,
+        "windowId": 1,
+        "index": 8,
+        "url": "https://github.com/wxt-dev/wxt/issues/1043",
+        "title": "Firefox MV3 background type · Issue #1043 · wxt-dev/wxt",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://github.com/favicon.ico",
+        "lastAccessed": 1771667366048
+      },
+      "activity": {
+        "tabId": 109,
+        "url": "https://github.com/wxt-dev/wxt/issues/1043",
+        "createdAt": 1771582721035,
+        "lastActiveAt": 1771667366048,
+        "activations": 2,
+        "foregroundMs": 24056
+      },
+      "template": "github",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 110,
+        "windowId": 1,
+        "index": 9,
+        "url": "https://trello.com/b/8KxQw1048/casa",
+        "title": "casa | Trello",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://trello.com/favicon.ico",
+        "lastAccessed": 1770738818807
+      },
+      "activity": {
+        "tabId": 110,
+        "url": "https://trello.com/b/8KxQw1048/casa",
+        "createdAt": 1770728185205,
+        "lastActiveAt": 1770738818807,
+        "activations": 0,
+        "foregroundMs": 35307,
+        "bootstrappedAt": 1773332747613
+      },
+      "template": "bootstrapped",
+      "lang": "neutral"
+    },
+    {
+      "tab": {
+        "id": 111,
+        "windowId": 1,
+        "index": 10,
+        "url": "about:newtab",
+        "title": "Nuova scheda",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "lastAccessed": 1772218280814
+      },
+      "activity": {
+        "tabId": 111,
+        "url": "about:newtab",
+        "createdAt": 1772216204411,
+        "lastActiveAt": 1772218280814,
+        "activations": 0,
+        "foregroundMs": 274
+      },
+      "template": "blank",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 112,
+        "windowId": 1,
+        "index": 11,
+        "url": "https://www.ilpost.it/2026/03/09/quando-si-vota-alle-prossime-amministrative/",
+        "title": "Quando si vota alle prossime amministrative - Il Post",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.ilpost.it/favicon.ico",
+        "lastAccessed": 1772486105148
+      },
+      "activity": {
+        "tabId": 112,
+        "url": "https://www.ilpost.it/2026/03/09/quando-si-vota-alle-prossime-amministrative/",
+        "createdAt": 1772483562471,
+        "lastActiveAt": 1772486105148,
+        "activations": 1,
+        "foregroundMs": 45580
+      },
+      "template": "news",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 113,
+        "windowId": 1,
+        "index": 12,
+        "url": "https://accounts.google.com/signin/v2/identifier?service=mail&n=1057",
+        "title": "Accedi - Account Google",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://accounts.google.com/favicon.ico",
+        "lastAccessed": 1773509936018
+      },
+      "activity": {
+        "tabId": 113,
+        "url": "https://accounts.google.com/signin/v2/identifier?service=mail&n=1057",
+        "createdAt": 1773506308312,
+        "lastActiveAt": 1773509936018,
+        "activations": 2,
+        "foregroundMs": 32172
+      },
+      "template": "auth",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 114,
+        "windowId": 1,
+        "index": 13,
+        "url": "https://github.com/login?return_to=%2Fpreactjs/signals",
+        "title": "Sign in to GitHub · GitHub",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://github.com/favicon.ico",
+        "lastAccessed": 1773652970045
+      },
+      "activity": {
+        "tabId": 114,
+        "url": "https://github.com/login?return_to=%2Fpreactjs/signals",
+        "createdAt": 1773434312215,
+        "lastActiveAt": 1773652970045,
+        "activations": 3,
+        "foregroundMs": 85755
+      },
+      "template": "auth",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 115,
+        "windowId": 1,
+        "index": 14,
+        "url": "https://www.booking.com/hotel/pt/lisboa-centro-suites.it.html",
+        "title": "lisboa-centro-suites - Booking.com",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.booking.com/favicon.ico",
+        "lastAccessed": 1772068144725
+      },
+      "activity": {
+        "tabId": 115,
+        "url": "https://www.booking.com/hotel/pt/lisboa-centro-suites.it.html",
+        "createdAt": 1771933200911,
+        "lastActiveAt": 1772068144725,
+        "activations": 1,
+        "foregroundMs": 18907
+      },
+      "template": "read-later",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 116,
+        "windowId": 1,
+        "index": 15,
+        "url": "chrome://extensions/",
+        "title": "Estensioni",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "lastAccessed": 1772716993825
+      },
+      "activity": {
+        "tabId": 116,
+        "url": "chrome://extensions/",
+        "createdAt": 1772716803655,
+        "lastActiveAt": 1772716993825,
+        "activations": 3,
+        "foregroundMs": 77224
+      },
+      "template": "browser-internal",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 117,
+        "windowId": 1,
+        "index": 16,
+        "url": "https://github.com/mozilla/web-ext/pull/1065/files",
+        "title": "Report the lint rule id · Pull Request #1065 · mozilla/web-ext",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://github.com/favicon.ico",
+        "lastAccessed": 1767963230147
+      },
+      "activity": {
+        "tabId": 117,
+        "url": "https://github.com/mozilla/web-ext/pull/1065/files",
+        "createdAt": 1767857554351,
+        "lastActiveAt": 1767963230147,
+        "activations": 1,
+        "foregroundMs": 131362
+      },
+      "template": "github",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 118,
+        "windowId": 1,
+        "index": 17,
+        "url": "https://www.ansa.it/sito/notizie/cronaca/2026/03/09/maltempo-al-nord-allerta-arancione_1067.html",
+        "title": "Maltempo al Nord allerta arancione - Ansa.it",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.ansa.it/favicon.ico",
+        "lastAccessed": 1771790203679
+      },
+      "activity": {
+        "tabId": 118,
+        "url": "https://www.ansa.it/sito/notizie/cronaca/2026/03/09/maltempo-al-nord-allerta-arancione_1067.html",
+        "createdAt": 1771785562276,
+        "lastActiveAt": 1771790203679,
+        "activations": 1,
+        "foregroundMs": 22117
+      },
+      "template": "news",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 119,
+        "windowId": 2,
+        "index": 0,
+        "url": "https://app.slack.com/client/T024BE7LD/C024BE1031",
+        "title": "Slack | general | TabDeclutter",
+        "pinned": true,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://app.slack.com/favicon.ico",
+        "lastAccessed": 1773577717910
+      },
+      "activity": {
+        "tabId": 119,
+        "url": "https://app.slack.com/client/T024BE7LD/C024BE1031",
+        "createdAt": 1771785358264,
+        "lastActiveAt": 1773577717910,
+        "activations": 35,
+        "foregroundMs": 2778097
+      },
+      "template": "webapp",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 120,
+        "windowId": 2,
+        "index": 1,
+        "url": "https://jira.example.com/browse/TD-1046",
+        "title": "[TD-1046] Archive retention job - Jira",
+        "pinned": true,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://jira.example.com/favicon.ico",
+        "lastAccessed": 1773550259746
+      },
+      "activity": {
+        "tabId": 120,
+        "url": "https://jira.example.com/browse/TD-1046",
+        "createdAt": 1771957026878,
+        "lastActiveAt": 1773550259746,
+        "activations": 33,
+        "foregroundMs": 4209032
+      },
+      "template": "webapp",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 121,
+        "windowId": 2,
+        "index": 2,
+        "url": "https://www.ilpost.it/2026/03/16/cosa-succede-in-portogallo/",
+        "title": "Cosa succede in Portogallo - Il Post",
+        "pinned": false,
+        "audible": false,
+        "active": true,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.ilpost.it/favicon.ico",
+        "lastAccessed": 1773653385701
+      },
+      "activity": {
+        "tabId": 121,
+        "url": "https://www.ilpost.it/2026/03/16/cosa-succede-in-portogallo/",
+        "createdAt": 1772498089388,
+        "lastActiveAt": 1773653385701,
+        "activations": 15,
+        "foregroundMs": 474886
+      },
+      "template": "active",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 122,
+        "windowId": 2,
+        "index": 3,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1032",
+        "title": "Come funziona il Public Suffix List - YouTube",
+        "pinned": false,
+        "audible": true,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.youtube.com/favicon.ico",
+        "lastAccessed": 1773653332615
+      },
+      "activity": {
+        "tabId": 122,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1032",
+        "createdAt": 1773472417281,
+        "lastActiveAt": 1773653332615,
+        "activations": 2,
+        "foregroundMs": 2348310
+      },
+      "template": "video",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 123,
+        "windowId": 2,
+        "index": 4,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1033",
+        "title": "Come funziona il Public Suffix List - YouTube",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.youtube.com/favicon.ico",
+        "lastAccessed": 1773015453720
+      },
+      "activity": {
+        "tabId": 123,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1033",
+        "createdAt": 1772230045966,
+        "lastActiveAt": 1773015453720,
+        "activations": 8,
+        "foregroundMs": 391673
+      },
+      "template": "video",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 124,
+        "windowId": 2,
+        "index": 5,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1033",
+        "title": "Come funziona il Public Suffix List - YouTube",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.youtube.com/favicon.ico",
+        "lastAccessed": 1773435184610
+      },
+      "activity": {
+        "tabId": 124,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1033",
+        "createdAt": 1773428504038,
+        "lastActiveAt": 1773435184610,
+        "activations": 1,
+        "foregroundMs": 8990
+      },
+      "template": "video",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 125,
+        "windowId": 2,
+        "index": 6,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1033",
+        "title": "Come funziona il Public Suffix List - YouTube",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.youtube.com/favicon.ico",
+        "lastAccessed": 1773349038875
+      },
+      "activity": {
+        "tabId": 125,
+        "url": "https://www.youtube.com/watch?v=mB4vTq1033",
+        "createdAt": 1773334859291,
+        "lastActiveAt": 1773349038875,
+        "activations": 1,
+        "foregroundMs": 13592
+      },
+      "template": "video",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 126,
+        "windowId": 2,
+        "index": 7,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/lisbon_tram_1034.jpg",
+        "title": "Lisbon_tram_1034.jpg (JPEG Image)",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://upload.wikimedia.org/favicon.ico",
+        "lastAccessed": 1773487561592
+      },
+      "activity": {
+        "tabId": 126,
+        "url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/lisbon_tram_1034.jpg",
+        "createdAt": 1773108276822,
+        "lastActiveAt": 1773487561592,
+        "activations": 7,
+        "foregroundMs": 283905
+      },
+      "template": "file-media",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 127,
+        "windowId": 2,
+        "index": 8,
+        "url": "https://www.amazon.it/s?k=monitor+27+pollici&rh=p_36%3A1253504031",
+        "title": "Amazon.it: monitor 27 pollici",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.amazon.it/favicon.ico",
+        "lastAccessed": 1773396769307
+      },
+      "activity": {
+        "tabId": 127,
+        "url": "https://www.amazon.it/s?k=monitor+27+pollici&rh=p_36%3A1253504031",
+        "createdAt": 1772806486409,
+        "lastActiveAt": 1773396769307,
+        "activations": 4,
+        "foregroundMs": 624398
+      },
+      "template": "near-duplicate-shop",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 128,
+        "windowId": 2,
+        "index": 9,
+        "url": "https://www.amazon.it/s?k=monitor+27+pollici",
+        "title": "Amazon.it: monitor 27 pollici",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.amazon.it/favicon.ico",
+        "lastAccessed": 1773597438384
+      },
+      "activity": {
+        "tabId": 128,
+        "url": "https://www.amazon.it/s?k=monitor+27+pollici",
+        "createdAt": 1773584303577,
+        "lastActiveAt": 1773597438384,
+        "activations": 1,
+        "foregroundMs": 34159
+      },
+      "template": "near-duplicate-shop",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 129,
+        "windowId": 2,
+        "index": 10,
+        "url": "https://trello.com/b/8KxQw1035/casa",
+        "title": "casa | Trello",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://trello.com/favicon.ico",
+        "lastAccessed": 1770893282781
+      },
+      "activity": {
+        "tabId": 129,
+        "url": "https://trello.com/b/8KxQw1035/casa",
+        "createdAt": 1770890732003,
+        "lastActiveAt": 1770893282781,
+        "activations": 0,
+        "foregroundMs": 29494,
+        "bootstrappedAt": 1773252874745
+      },
+      "template": "bootstrapped",
+      "lang": "neutral"
+    },
+    {
+      "tab": {
+        "id": 130,
+        "windowId": 2,
+        "index": 11,
+        "url": "https://github.com/wxt-dev/wxt/issues/1039",
+        "title": "publicDir is ignored in dev · Issue #1039 · wxt-dev/wxt",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://github.com/favicon.ico",
+        "lastAccessed": 1773546273349
+      },
+      "activity": {
+        "tabId": 130,
+        "url": "https://github.com/wxt-dev/wxt/issues/1039",
+        "createdAt": 1772993704078,
+        "lastActiveAt": 1773546273349,
+        "activations": 8,
+        "foregroundMs": 845204
+      },
+      "template": "github",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 131,
+        "windowId": 2,
+        "index": 12,
+        "url": "https://www.corriere.it/economia/26_marzo_10/il-mercato-del-lavoro-nel-2026-1041.shtml",
+        "title": "Il mercato del lavoro nel 2026 - Corriere.it",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.corriere.it/favicon.ico",
+        "lastAccessed": 1773542356084
+      },
+      "activity": {
+        "tabId": 131,
+        "url": "https://www.corriere.it/economia/26_marzo_10/il-mercato-del-lavoro-nel-2026-1041.shtml",
+        "createdAt": 1773415917067,
+        "lastActiveAt": 1773542356084,
+        "activations": 2,
+        "foregroundMs": 397464
+      },
+      "template": "news",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 132,
+        "windowId": 2,
+        "index": 13,
+        "url": "https://it.wikipedia.org/wiki/lisbona",
+        "title": "Lisbona - Wikipedia",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://it.wikipedia.org/favicon.ico",
+        "lastAccessed": 1772483234373
+      },
+      "activity": {
+        "tabId": 132,
+        "url": "https://it.wikipedia.org/wiki/lisbona",
+        "createdAt": 1772424433821,
+        "lastActiveAt": 1772483234373,
+        "activations": 1,
+        "foregroundMs": 19832
+      },
+      "template": "read-later",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 133,
+        "windowId": 2,
+        "index": 14,
+        "url": "https://www.raiplay.it/video/2026/03/report-puntata-del-9-marzo-1044.html",
+        "title": "Report puntata del 9 marzo - RaiPlay",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.raiplay.it/favicon.ico",
+        "lastAccessed": 1773614787949
+      },
+      "activity": {
+        "tabId": 133,
+        "url": "https://www.raiplay.it/video/2026/03/report-puntata-del-9-marzo-1044.html",
+        "createdAt": 1773275088531,
+        "lastActiveAt": 1773614787949,
+        "activations": 4,
+        "foregroundMs": 832644
+      },
+      "template": "video",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 134,
+        "windowId": 2,
+        "index": 15,
+        "url": "https://www.amazon.it/s?k=lampada+da+scrivania+led",
+        "title": "Amazon.it: lampada da scrivania led",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.amazon.it/favicon.ico",
+        "lastAccessed": 1772078500084
+      },
+      "activity": {
+        "tabId": 134,
+        "url": "https://www.amazon.it/s?k=lampada+da+scrivania+led",
+        "createdAt": 1772050511192,
+        "lastActiveAt": 1772078500084,
+        "activations": 1,
+        "foregroundMs": 14238
+      },
+      "template": "search",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 135,
+        "windowId": 2,
+        "index": 16,
+        "url": "https://www.subito.it/annunci-lombardia/vendita/usato/?q=bici+da+corsa",
+        "title": "Annunci bici da corsa in Lombardia - Subito.it",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.subito.it/favicon.ico",
+        "lastAccessed": 1771193305037
+      },
+      "activity": {
+        "tabId": 135,
+        "url": "https://www.subito.it/annunci-lombardia/vendita/usato/?q=bici+da+corsa",
+        "createdAt": 1771186479904,
+        "lastActiveAt": 1771193305037,
+        "activations": 0,
+        "foregroundMs": 5668,
+        "bootstrappedAt": 1773356907967
+      },
+      "template": "bootstrapped",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 136,
+        "windowId": 2,
+        "index": 17,
+        "url": "https://www.theguardian.com/technology/2026/mar/05/the-slow-death-of-the-browser-bookmark",
+        "title": "The slow death of the browser bookmark | The Guardian",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.theguardian.com/favicon.ico",
+        "openerTabId": 134,
+        "lastAccessed": 1773341351960
+      },
+      "activity": {
+        "tabId": 136,
+        "url": "https://www.theguardian.com/technology/2026/mar/05/the-slow-death-of-the-browser-bookmark",
+        "createdAt": 1773033497940,
+        "lastActiveAt": 1773341351960,
+        "activations": 3,
+        "foregroundMs": 536942
+      },
+      "template": "news",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 137,
+        "windowId": 2,
+        "index": 18,
+        "url": "https://extensionworkshop.com/documentation/develop/test-permission-requests/",
+        "title": "test-permission-requests | Firefox Extension Workshop",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://extensionworkshop.com/favicon.ico",
+        "openerTabId": 134,
+        "lastAccessed": 1773590595091
+      },
+      "activity": {
+        "tabId": 137,
+        "url": "https://extensionworkshop.com/documentation/develop/test-permission-requests/",
+        "createdAt": 1773341922074,
+        "lastActiveAt": 1773590595091,
+        "activations": 5,
+        "foregroundMs": 2442770
+      },
+      "template": "docs",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 138,
+        "windowId": 2,
+        "index": 19,
+        "url": "https://github.com/mozilla/web-ext/pull/1053/files",
+        "title": "Report the lint rule id · Pull Request #1053 · mozilla/web-ext",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://github.com/favicon.ico",
+        "lastAccessed": 1773591197420
+      },
+      "activity": {
+        "tabId": 138,
+        "url": "https://github.com/mozilla/web-ext/pull/1053/files",
+        "createdAt": 1773212994907,
+        "lastActiveAt": 1773591197420,
+        "activations": 8,
+        "foregroundMs": 673809
+      },
+      "template": "github",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 139,
+        "windowId": 2,
+        "index": 20,
+        "url": "https://open.spotify.com/album/1ATL5GLyef1054",
+        "title": "Random Access Memories - album di Daft Punk | Spotify",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://open.spotify.com/favicon.ico",
+        "lastAccessed": 1773617804598
+      },
+      "activity": {
+        "tabId": 139,
+        "url": "https://open.spotify.com/album/1ATL5GLyef1054",
+        "createdAt": 1773408940568,
+        "lastActiveAt": 1773617804598,
+        "activations": 4,
+        "foregroundMs": 667106
+      },
+      "template": "video",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 140,
+        "windowId": 2,
+        "index": 21,
+        "url": "https://www.ecosia.org/search?q=plastic+free+shops+milano",
+        "title": "plastic free shops milano - Ecosia",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.ecosia.org/favicon.ico",
+        "lastAccessed": 1772990837739
+      },
+      "activity": {
+        "tabId": 140,
+        "url": "https://www.ecosia.org/search?q=plastic+free+shops+milano",
+        "createdAt": 1772975881217,
+        "lastActiveAt": 1772990837739,
+        "activations": 1,
+        "foregroundMs": 2174
+      },
+      "template": "search",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 141,
+        "windowId": 2,
+        "index": 22,
+        "url": "file:///C:/Users/Roberto/Downloads/fattura-2026-1059.pdf",
+        "title": "fattura-2026-1059.pdf",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "lastAccessed": 1770937935731
+      },
+      "activity": {
+        "tabId": 141,
+        "url": "file:///C:/Users/Roberto/Downloads/fattura-2026-1059.pdf",
+        "createdAt": 1770932572987,
+        "lastActiveAt": 1770937935731,
+        "activations": 2,
+        "foregroundMs": 17792
+      },
+      "template": "file-media",
+      "lang": "neutral"
+    },
+    {
+      "tab": {
+        "id": 142,
+        "windowId": 2,
+        "index": 23,
+        "url": "chrome://new-tab-page/",
+        "title": "New Tab",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "lastAccessed": 1772904446520
+      },
+      "activity": {
+        "tabId": 142,
+        "url": "chrome://new-tab-page/",
+        "createdAt": 1772902974810,
+        "lastActiveAt": 1772904446520,
+        "activations": 0,
+        "foregroundMs": 3730
+      },
+      "template": "blank",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 143,
+        "windowId": 2,
+        "index": 24,
+        "url": "https://www.youtube.com/watch?v=kQ7pR21064",
+        "title": "Building a browser extension from scratch - YouTube",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.youtube.com/favicon.ico",
+        "openerTabId": 140,
+        "lastAccessed": 1773625438340
+      },
+      "activity": {
+        "tabId": 143,
+        "url": "https://www.youtube.com/watch?v=kQ7pR21064",
+        "createdAt": 1773484358411,
+        "lastActiveAt": 1773625438340,
+        "activations": 4,
+        "foregroundMs": 857640
+      },
+      "template": "video",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 144,
+        "windowId": 2,
+        "index": 25,
+        "url": "https://it.react.dev/learn/pensare-in-react",
+        "title": "pensare-in-react – React",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://it.react.dev/favicon.ico",
+        "openerTabId": 140,
+        "lastAccessed": 1770011269458
+      },
+      "activity": {
+        "tabId": 144,
+        "url": "https://it.react.dev/learn/pensare-in-react",
+        "createdAt": 1770010514938,
+        "lastActiveAt": 1770011269458,
+        "activations": 1,
+        "foregroundMs": 18938
+      },
+      "template": "docs",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 145,
+        "windowId": 2,
+        "index": 26,
+        "url": "https://www.ilpost.it/2026/03/09/la-storia-del-tram-28-di-lisbona/",
+        "title": "La storia del tram 28 di Lisbona - Il Post",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.ilpost.it/favicon.ico",
+        "openerTabId": 140,
+        "lastAccessed": 1772025426521
+      },
+      "activity": {
+        "tabId": 145,
+        "url": "https://www.ilpost.it/2026/03/09/la-storia-del-tram-28-di-lisbona/",
+        "createdAt": 1772021657539,
+        "lastActiveAt": 1772025426521,
+        "activations": 1,
+        "foregroundMs": 36346
+      },
+      "template": "news",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 146,
+        "windowId": 3,
+        "index": 0,
+        "url": "https://www.transtejo.pt/en/fares/",
+        "title": "fares - Transtejo",
+        "pinned": false,
+        "audible": false,
+        "active": true,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.transtejo.pt/favicon.ico",
+        "lastAccessed": 1769440747137
+      },
+      "activity": {
+        "tabId": 146,
+        "url": "https://www.transtejo.pt/en/fares/",
+        "createdAt": 1769410272843,
+        "lastActiveAt": 1769440747137,
+        "activations": 3,
+        "foregroundMs": 71952
+      },
+      "template": "forgotten-trip",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 147,
+        "windowId": 3,
+        "index": 1,
+        "url": "https://www.lonelyplanet.com/portugal/lisbon",
+        "title": "lisbon travel guide - Lonely Planet",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.lonelyplanet.com/favicon.ico",
+        "lastAccessed": 1768528029978
+      },
+      "activity": {
+        "tabId": 147,
+        "url": "https://www.lonelyplanet.com/portugal/lisbon",
+        "createdAt": 1768383658760,
+        "lastActiveAt": 1768528029978,
+        "activations": 1,
+        "foregroundMs": 381861
+      },
+      "template": "forgotten-trip",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 148,
+        "windowId": 3,
+        "index": 2,
+        "url": "https://www.transtejo.pt/en/timetables/",
+        "title": "timetables - Transtejo",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.transtejo.pt/favicon.ico",
+        "lastAccessed": 1769615161317
+      },
+      "activity": {
+        "tabId": 148,
+        "url": "https://www.transtejo.pt/en/timetables/",
+        "createdAt": 1769603040208,
+        "lastActiveAt": 1769615161317,
+        "activations": 3,
+        "foregroundMs": 184920
+      },
+      "template": "forgotten-trip",
+      "lang": "en"
+    },
+    {
+      "tab": {
+        "id": 149,
+        "windowId": 3,
+        "index": 3,
+        "url": "https://www.rome2rio.com/it/s/lisbona/sintra",
+        "title": "Lisbona/Sintra - 4 modi per viaggiare - Rome2rio",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.rome2rio.com/favicon.ico",
+        "lastAccessed": 1770907812811
+      },
+      "activity": {
+        "tabId": 149,
+        "url": "https://www.rome2rio.com/it/s/lisbona/sintra",
+        "createdAt": 1770807211586,
+        "lastActiveAt": 1770907812811,
+        "activations": 2,
+        "foregroundMs": 137517
+      },
+      "template": "forgotten-trip",
+      "lang": "it"
+    },
+    {
+      "tab": {
+        "id": 150,
+        "windowId": 3,
+        "index": 4,
+        "url": "https://www.rome2rio.com/it/s/lisbona/cascais",
+        "title": "Lisbona/Cascais - 4 modi per viaggiare - Rome2rio",
+        "pinned": false,
+        "audible": false,
+        "active": false,
+        "discarded": false,
+        "hidden": false,
+        "groupId": -1,
+        "incognito": false,
+        "favIconUrl": "https://www.rome2rio.com/favicon.ico",
+        "lastAccessed": 1768345238596
+      },
+      "activity": {
+        "tabId": 150,
+        "url": "https://www.rome2rio.com/it/s/lisbona/cascais",
+        "createdAt": 1768237251917,
+        "lastActiveAt": 1768345238596,
+        "activations": 3,
+        "foregroundMs": 31249
+      },
+      "template": "forgotten-trip",
+      "lang": "it"
+    }
+  ]
+}

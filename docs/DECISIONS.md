@@ -757,3 +757,60 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   (the clock, or `lastAccessed`, which is the last visit and not the birth) would make the rule
   answer confidently with evidence it does not have; falling through to the next rule is what the
   user would expect from "the first rule that tells them apart wins".
+
+## M1.5 — the fixtures are generated from curated templates, and only `tabs-300` is labelled
+
+- **Context:** M1.5 asks for 50, 300 and 1000 tabs that can be regenerated identically, with a
+  hand-written `suggest`/`keep` label on the 300 (PLAN.md §6.5). Writing 1350 tabs by hand is not
+  maintainable, and labelling 1350 of them by hand is not honest.
+- **Decision:** `scripts/generate-fixtures.ts` combines a seeded PRNG (mulberry32) with curated
+  *templates*: a page source (site pattern × subjects) and a set of *situations*, each situation
+  carrying its own label and one-sentence rationale. `tabs-300.json` is the only labelled file
+  (`labelled: true`); `tabs-50` and `tabs-1000` are shape and volume fixtures and carry no labels.
+- **Why:** the judgement lives in the situations, where it is written once and can be read in one
+  place, and the PRNG only decides which curated page is in which curated situation. So the labels
+  are still human and reviewable (docs/MANUAL-CHECKS.md), while the files stay regenerable. A
+  template's pages are spent without replacement unless the URL carries a unique number, so no two
+  tabs are an accidental duplicate contradicting their own labels.
+
+## M1.5 — the generator takes only types from `src/core/`
+
+- **Context:** the generator has to run outside the bundler, and node's type stripping does not
+  resolve extensionless ESM specifiers, which is how `src/core/` imports itself
+  (`import { DAY } from './time'`). Importing `src/core/types.ts` for `NO_GROUP_ID` fails at
+  runtime.
+- **Decision:** `pnpm fixtures` runs `node --experimental-strip-types`; everything the generator
+  takes from `src/core/` is an `import type`, erased before node sees it. The three runtime values
+  it needs (`NO_GROUP_ID`, `DAY`, the default `staleDays`) are restated in
+  `tests/fixtures/schema.ts` as `UNGROUPED`, `DAY_MS` and `FIXTURE_STALE_DAYS`, and
+  `tests/unit/fixtures.test.ts` asserts each copy equals its original.
+- **Why:** the alternative was a dev dependency whose only job is to run one script
+  (AGENT-RULES.md: few dependencies). Three copied numbers guarded by three assertions cannot drift,
+  and the fixture schema stays the single description of the fixture shape, used by the generator
+  and by the test that validates the committed files.
+
+## M1.5 — the fixtures are Chrome-shaped
+
+- **Context:** `TabInfo.cookieStoreId` is Firefox's container (PLAN.md §5.5), and the same URL in
+  two containers is not a duplicate.
+- **Decision:** no fixture tab has `cookieStoreId`, and none is `incognito` or `hidden`.
+- **Why:** containers change what a duplicate *is*, so mixing them into the duplicate clusters
+  would make the hand-written labels ambiguous before anything can read them. The container case is
+  M2's, with its own fixture; a tab without `cookieStoreId` is exactly what Chrome reports.
+
+## M1.5 — the label distribution of `tabs-300.json`
+
+- **Context:** M1.5 asks for the distribution to be recorded, because PLAN.md §6.5 measures
+  precision against these labels and a later change to them must be visible.
+- **Decision:** 300 tabs, **165 `suggest` / 135 `keep`**, by template:
+  `search` 28/12, `github` 19/16, `docs` 9/24, `video` 20/12, `news` 18/7, `webapp` 0/22,
+  `auth` 11/5, `blank` 10/5, `file-media` 9/6, `read-later` 9/6, `forgotten-trip` 13/1,
+  `browser-internal` 6/1, `error` 6/1, `bootstrapped` 2/5, `active` 0/5, near-duplicate pairs 5/7.
+  Also: 6 windows (1 forgotten, 14 tabs), 5 groups over 11 tabs, 10 pinned, 5 audible, 3 discarded,
+  7 bootstrapped records, 62 openers, 14 URLs open more than once, 112 Italian and 162 English
+  titles.
+- **Why:** `keep` is deliberately over-represented against what a plain "old tab" rule would say
+  (`docs` and `bootstrapped` are mostly `keep` despite being idle for weeks) because a false
+  positive costs more than a false negative (PLAN.md §3.1). The labels were written before the
+  scoring of §6.4 exists, so these counts are the target the scoring has to meet, not a description
+  of it.
