@@ -1,0 +1,80 @@
+# The gates of phasekit.json, run on GitHub, so that a broken push is visible
+# here and not only on the machine that ran the sequence. phasekit.json stays
+# the only definition of "green" (TASKS.md §1.1): the steps below mirror its
+# `gates` array, in the same order, and a task that adds a gate adds a step.
+# Releases are a separate workflow (release.yml, PLAN.md §12.4).
+name: CI
+
+on:
+  # Every branch, but not tags: the tag push is what release.yml is for.
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A newer commit on the same branch makes the run in flight pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    # The suites launch real browsers, so a hang is possible; the whole
+    # sequence takes about five minutes locally.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # pnpm before Node, so setup-node finds it when it primes the store
+      # cache. No version here on purpose: the action reads it from
+      # `packageManager` in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Puppeteer does not download Firefox, and the E2E harness takes the
+      # binary from FIREFOX_PATH (tests/e2e-firefox/fixtures/panel.ts). The
+      # install prints `firefox@<buildId> <executable>` on stdout.
+      - name: Download Firefox for the Firefox E2E
+        run: |
+          installed="$(pnpm dlx @puppeteer/browsers@3.2.6 install firefox@stable --path "$RUNNER_TEMP/firefox")"
+          echo "$installed"
+          echo "FIREFOX_PATH=$(echo "$installed" | tail -1 | cut -d ' ' -f 2-)" >> "$GITHUB_ENV"
+
+      # From here down, one step per gate, named as in phasekit.json. The two
+      # E2E gates get `retries: 1` there and none here: the sequence retries to
+      # keep itself moving, while CI exists to show the flake.
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm lint
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: unit tests
+        run: pnpm test
+
+      - name: build chrome
+        run: pnpm build
+
+      - name: build firefox
+        run: pnpm build:firefox
+
+      - name: web-ext lint
+        run: pnpm lint:firefox
+
+      - name: e2e chromium
+        run: pnpm e2e
+
+      - name: e2e firefox
+        run: pnpm e2e:firefox

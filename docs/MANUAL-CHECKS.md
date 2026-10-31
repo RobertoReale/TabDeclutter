@@ -53,3 +53,10 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   3. Con la build di prova caricata, apri la barra laterale di TabDeclutter (clic sulla sua icona nella barra degli strumenti) e leggi la parola che c'è scritta dentro.
   4. Se al punto 2 hai cambiato lingua, rimetti quella di prima con lo stesso percorso e riavvia.
   Risultato atteso: nella barra laterale c'è scritto «Ciao», non «Hello» e non `__MSG_hello__`. Se vedi «Hello» con Firefox in italiano, scrivilo.
+
+- [ ] (M0.6) CI verde al primo push su GitHub
+  1. Questa verifica si fa solo quando il progetto è su GitHub: finché il codice sta solo sul tuo PC non c'è niente da guardare. Se non c'è ancora, chiedilo all'assistente («pubblica il repository su GitHub»): è l'unica cosa del progetto che esce dal PC, quindi serve che lo chieda tu.
+  2. Dopo il primo push, apri la pagina del repository su GitHub e clicca la linguetta «Actions» in alto.
+  3. Nell'elenco clicca la riga più recente, chiamata «CI», e poi il riquadro «gates»: compare la lista dei passaggi. Aspetta che finisca — tra cinque e venti minuti, perché scarica due browser e li avvia davvero.
+  4. Se accanto a un passaggio c'è una X rossa, clicca quel passaggio per aprire il registro e copia le ultime dieci righe.
+  Risultato atteso: la riga «CI» ha il segno di spunta verde e tutti i passaggi sono verdi (install, lint, typecheck, unit tests, build chrome, build firefox, web-ext lint, e2e chromium, e2e firefox). Gli stessi controlli passano sul tuo PC prima di ogni commit, quindi un rosso qui è quasi sempre una differenza dell'ambiente di GitHub e non un difetto del prodotto: riportalo con le righe che hai copiato e col nome del passaggio rosso.

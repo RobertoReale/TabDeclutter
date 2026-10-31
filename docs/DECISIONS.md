@@ -401,3 +401,44 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   Chromium suite already cover in both directions. What is genuinely Firefox-specific about it, that
   the sidebar shows the Italian string on an Italian Firefox, is something a person sees in ten
   seconds and no test sees cheaply.
+
+## M0.6 — CI is one Linux job, and it downloads Firefox with `@puppeteer/browsers`
+
+- **Context:** the gates launch two real browsers. The Chromium one comes with `pnpm install`
+  (`playwright install chromium` in `postinstall`), but Puppeteer downloads no Firefox, and the
+  harness takes the binary from `FIREFOX_PATH` (`tests/e2e-firefox/fixtures/panel.ts`, M0.5). The
+  runner's own Firefox would be a third thing to depend on, and the task forbids adding the
+  downloader to the dependencies.
+- **Decision:** a single `gates` job on `ubuntu-latest`, and one setup step before the gates:
+  `pnpm dlx @puppeteer/browsers@3.2.6 install firefox@stable --path "$RUNNER_TEMP/firefox"`, whose
+  stdout line `firefox@<buildId> <executable>` is cut into `FIREFOX_PATH` in `$GITHUB_ENV`. No
+  `apt` step, no `xvfb`, no second operating system.
+- **Why:** `@puppeteer/browsers` is already in the tree at 3.2.6 as `puppeteer-core`'s own
+  installer, so the download comes from the same tool that then drives the browser, and `dlx`
+  keeps it out of `package.json`. The version is pinned and the channel is not: the Firefox gate
+  exists to catch a Gecko change before the add-on's users do, and pinning a build is a one-word
+  edit if a release ever breaks it. The output format was verified by running the command (it
+  prints the result line on stdout and the progress on stderr, so the cut is safe). One Linux job
+  is enough because both harnesses launch headless — no display is needed — and the runner image
+  ships Chrome and Firefox, so the shared libraries they want are already installed; a second OS
+  would double the minutes to re-test what the sequence runs on Windows before every commit
+  anyway.
+
+## M0.6 — the workflow mirrors the gates and retries nothing
+
+- **Context:** `phasekit.json` gives the two E2E gates `retries: 1`, and the workflow could copy
+  that. PLAN.md §13 asks only for "CI green".
+- **Decision:** `.github/workflows/ci.yml` runs on a push to any branch (not on tags, which are
+  `release.yml`'s in M7.5) and on a pull request to `main`. One step per gate, named exactly as in
+  `phasekit.json` and in the same order, with no retries, a 30-minute job timeout, `contents: read`
+  and a concurrency group that cancels a superseded run on the same ref. The three actions are
+  pinned to their major tags (`actions/checkout@v5`, `actions/setup-node@v5`,
+  `pnpm/action-setup@v4`); Node comes from `.nvmrc` via `node-version-file`, pnpm from
+  `packageManager` (which is what `pnpm/action-setup` reads when given no version), and pnpm is set
+  up first so `setup-node`'s `cache: pnpm` can find the store.
+- **Why:** the retry in `phasekit.json` is there to keep an unattended sequence moving; CI is a
+  signal to a person, and a run that goes green on a second attempt would hide exactly the flake
+  worth seeing. Every branch, because the owner's check is "green at the first push" and a push to
+  a phase branch has to show something. Major tags rather than commit SHAs: these are GitHub's own
+  and pnpm's own actions, the tag keeps their fixes coming, and the job has no secrets and no write
+  permission to abuse.
