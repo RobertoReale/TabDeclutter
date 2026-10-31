@@ -10,9 +10,13 @@
       panel is opened by a gesture, never on its own (PLAN.md §3.1), and
       Firefox's own default for it is true. tests/unit/manifest.test.ts keeps
       the two files from drifting apart.
+
+      <title> is therefore the `__MSG_extName__` of PLAN.md §5.4: the browser
+      resolves it in the manifest, but not in this file, so main.tsx sets the
+      document's real title and language from `_locales/`.
     -->
     <meta name="manifest.open_at_install" content="false" />
-    <title>TabDeclutter</title>
+    <title>__MSG_extName__</title>
   </head>
   <body>
     <div id="app"></div>

@@ -1,0 +1,26 @@
+{
+  "extName": {
+    "message": "TabDeclutter",
+    "description": "The extension name, in the browser and in both stores. A product name, left untranslated."
+  },
+  "extDescription": {
+    "message": "Suggests which tabs to close, organizes the rest into native tab groups and blocks duplicate tabs in real time.",
+    "description": "The store description. Chrome Web Store allows at most 132 characters."
+  },
+  "actionTitle": {
+    "message": "TabDeclutter — open the panel",
+    "description": "Tooltip on the toolbar icon, whose click opens the panel."
+  },
+  "cmdCloseDuplicates": {
+    "message": "Close all duplicate tabs",
+    "description": "Name of the assignable keyboard shortcut, in the browser's shortcut page."
+  },
+  "cmdToggleGuard": {
+    "message": "Pause or resume duplicate protection",
+    "description": "Name of the assignable keyboard shortcut, in the browser's shortcut page."
+  },
+  "hello": {
+    "message": "Hello",
+    "description": "The placeholder greeting of the panel shell, until the real panel exists."
+  }
+}

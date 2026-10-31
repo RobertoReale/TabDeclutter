@@ -10,12 +10,9 @@ import { buildManifest } from '../../build/manifest';
  * rejection in review on both stores.
  */
 
-const DESCRIPTION =
-  'Suggests which tabs to close, organizes the rest into native tab groups and blocks duplicate tabs in real time.';
-
 const ASSIGNABLE_COMMANDS = {
-  'close-all-duplicates': { description: 'Close all duplicate tabs' },
-  'toggle-duplicate-guard': { description: 'Pause or resume duplicate protection' },
+  'close-all-duplicates': { description: '__MSG_cmdCloseDuplicates__' },
+  'toggle-duplicate-guard': { description: '__MSG_cmdToggleGuard__' },
 };
 
 describe('the Chrome manifest', () => {
@@ -23,8 +20,9 @@ describe('the Chrome manifest', () => {
 
   it('is exactly what PLAN.md §5.4 asks for', () => {
     expect(manifest).toEqual({
-      name: 'TabDeclutter',
-      description: DESCRIPTION,
+      name: '__MSG_extName__',
+      description: '__MSG_extDescription__',
+      default_locale: 'en',
       minimum_chrome_version: '121',
       permissions: [
         'tabs',
@@ -38,7 +36,7 @@ describe('the Chrome manifest', () => {
       ],
       optional_permissions: ['bookmarks'],
       incognito: 'not_allowed',
-      action: { default_title: 'TabDeclutter' },
+      action: { default_title: '__MSG_actionTitle__' },
       side_panel: { default_path: 'sidepanel.html' },
       commands: {
         _execute_action: { suggested_key: { default: 'Alt+Shift+D' } },
@@ -58,8 +56,9 @@ describe('the Firefox manifest', () => {
 
   it('is exactly what PLAN.md §5.4 asks for', () => {
     expect(manifest).toEqual({
-      name: 'TabDeclutter',
-      description: DESCRIPTION,
+      name: '__MSG_extName__',
+      description: '__MSG_extDescription__',
+      default_locale: 'en',
       browser_specific_settings: {
         gecko: {
           id: 'tabdeclutter@robertoreale',
@@ -70,10 +69,10 @@ describe('the Firefox manifest', () => {
       permissions: ['tabs', 'tabGroups', 'storage', 'alarms', 'sessions', 'menus'],
       optional_permissions: ['bookmarks'],
       incognito: 'not_allowed',
-      action: { default_title: 'TabDeclutter' },
+      action: { default_title: '__MSG_actionTitle__' },
       sidebar_action: {
         default_panel: 'sidepanel.html',
-        default_title: 'TabDeclutter',
+        default_title: '__MSG_extName__',
         open_at_install: false,
       },
       commands: {

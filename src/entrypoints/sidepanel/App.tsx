@@ -1,4 +1,7 @@
-// Placeholder shell. The localized greeting is M0.3, the real panel is M2.1.
+import { t } from '../../platform/i18n';
+
+// Placeholder shell: the real panel is M2.1. Every string goes through `t`
+// (invariant 11).
 export function App() {
-  return <main>TabDeclutter</main>;
+  return <main>{t('hello')}</main>;
 }
