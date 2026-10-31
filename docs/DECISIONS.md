@@ -93,3 +93,76 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
     (invariant 7). It cannot be removed without forking Preact.
 - **Why:** neither warning describes something this extension does; recording them here is what
   `docs/AMO_REVIEW.md` will cite at submission time.
+
+## M0.2 — The manifest is built by `build/manifest.ts`
+- **Context:** TASKS.md M0.2 asks for the manifest-building function in a testable module, and
+  PLAN.md §5.3 does not name a place for build-time code that is not part of `src/`.
+- **Decision:** `build/manifest.ts`, exporting `buildManifest(browser)`, which `wxt.config.ts`
+  calls from `manifest: ({ browser }) => …`. The Firefox-only `sidebar_action` key is declared
+  there too, because WXT derives `UserManifest` from Chrome's MV3 type and does not know it.
+- **Why:** it keeps PLAN.md §5.4 stated once, in a module `tests/unit/manifest.test.ts` can assert
+  key by key (invariant 8), while leaving `src/` to the extension's own code. `build/` sits next to
+  the other root-level build configuration (`wxt.config.ts`, `eslint.config.js`).
+
+## M0.2 — Provisional Firefox add-on id
+- **Context:** PLAN.md §5.4 leaves `gecko.id` as `tabdeclutter@<domain-or-username>`.
+- **Decision:** `tabdeclutter@robertoreale`, to be confirmed before the first AMO submission and
+  immutable afterwards. The owner's reminder is the `(setup)` entry in `docs/MANUAL-CHECKS.md`,
+  whose path now points at `build/manifest.ts`.
+- **Why:** AMO identifies the add-on by this string for the rest of its life, and a wrong one
+  cannot be corrected after the first upload
+  ([AMO](https://extensionworkshop.com/documentation/develop/extensions-and-the-add-on-id/)). The
+  build needs an id now, so the choice is made and flagged rather than postponed.
+
+## M0.2 — What WXT adds to or takes from the manifest of PLAN.md §5.4
+- **Context:** the "Done when" of M0.2 requires the two built manifests to be inspected and the
+  differences WXT imposes to be recorded. They were read from `.output/chrome-mv3/manifest.json`
+  and `.output/firefox-mv3/manifest.json` after `pnpm build` and `pnpm build:firefox`.
+- **Decision:** four differences are accepted, one is worked around.
+  - `version: "0.1.0"`: WXT copies it from `package.json`. A required key that §5.4 omits.
+  - `background`: WXT generates it from the entrypoint, `service_worker` on Chrome and
+    `scripts: ["background.js"]` on Firefox. §5.4 shows the Firefox form and leaves Chrome's
+    implicit.
+  - `action` is present on the Firefox build too. §5.4's Firefox block lists only the differences
+    from Chrome, and PLAN.md §4.1 needs `browser.action.onClicked` there to toggle the sidebar, so
+    the key has to exist.
+  - `sidebar_action` is **regenerated** by WXT from the sidepanel entrypoint, overwriting the one
+    in `build/manifest.ts`, which silently dropped `open_at_install`. Firefox's own default for it
+    is `true`
+    ([MDN](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/sidebar_action#syntax)),
+    i.e. the panel would open by itself at install, against PLAN.md §3.1. It is set where WXT
+    reads it, as `<meta name="manifest.open_at_install" content="false" />` in
+    `src/entrypoints/sidepanel/index.html` (`default_title` likewise comes from its `<title>`).
+    `tests/unit/manifest.test.ts` asserts the HTML and `build/manifest.ts` still agree.
+  - WXT adds the `sidePanel` permission for a sidepanel entrypoint on Chrome; §5.4 lists it, and
+    WXT does not duplicate it.
+- **Why:** none of the four changes what the extension may do. The fifth did, so it was fixed
+  rather than recorded.
+
+## M0.2 — `__MSG_*` and `default_locale` wait for M0.3
+- **Context:** PLAN.md §5.4 writes `name`, `description`, the action title and the two command
+  descriptions as `__MSG_*` placeholders with `default_locale: "en"`. `_locales/` is created by
+  M0.3, and `default_locale` without it makes the extension refuse to load, which would leave
+  M0.2's two manual checks impossible to perform.
+- **Decision:** English literals for now, and no `default_locale`. M0.3 replaces the five strings
+  with `__MSG_extName__`, `__MSG_extDescription__`, `__MSG_actionTitle__`,
+  `__MSG_cmdCloseDuplicates__`, `__MSG_cmdToggleGuard__`, adds `default_locale: "en"` and updates
+  `tests/unit/manifest.test.ts`. The Firefox `sidebar_action.default_title` lives in the
+  entrypoint's `<title>`, so M0.3 changes that too.
+- **Why:** a build nobody can load is worth less than a build in one language, and M0.3 is the
+  next task in the sequence. Invariant 11 (every visible string goes through i18n) is M0.3's to
+  enforce, with the `en`/`it` parity test.
+
+## M0.2 — `capabilities.ts` reads WXT's `browser`, not `globalThis.browser`
+- **Context:** PLAN.md §5.5 writes the probes as `!!browser.tabGroups`, `!!browser.sidebarAction`
+  and so on. Reading them off `globalThis` instead looked equivalent and avoids depending on an
+  auto-import, but Chrome does not define a `browser` global at all: every one of those
+  capabilities came out `false` in the Chrome bundle.
+- **Decision:** `currentEnv()` uses the `browser` WXT provides, which resolves to Firefox's
+  namespace or to `chrome` on Chrome, behind a `typeof` guard so that `detectCapabilities` can be
+  imported by a unit test where no auto-import exists. `chrome` itself is still read off
+  `globalThis`, as §5.5 does, because both browsers define it.
+- **Why:** the capability table is what the rest of the code asks instead of naming a browser
+  (invariant 5), so a probe that is wrong on one browser is worse than no probe. Caught by reading
+  `.output/chrome-mv3/background.js`, not by a test: a mocked environment cannot show which global
+  the real one comes from.
