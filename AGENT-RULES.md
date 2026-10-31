@@ -9,7 +9,7 @@ says what the product is, and this file says how to behave while doing it.
 |---|---|---|
 | `PLAN.md` | The product spec, ~74 KB. **Binding.** | Never read it whole. `grep -n '^#' PLAN.md` gives the section line numbers; read only the sections your task lists under **Spec**, plus §3 (design principles) the first time you touch product code in a session. |
 | `TASKS.md` | The execution plan: one section per task, the invariants (§2) and the ledger (§12). | Your task's section is quoted in your prompt. Grep for anything else (the ledger row, the invariants). |
-| `docs/DECISIONS.md` | Every choice the spec did not make for you. | Grep or read when a task touches an earlier decision. |
+| `docs/DECISIONS.md` | Every choice the spec did not make for you. | Never read it whole: it grows with every task. `grep -n '^## ' docs/DECISIONS.md` lists the titles with their line numbers; read only the entries your task touches, by line range. |
 | `docs/MANUAL-CHECKS.md` | What only a person can verify. | Append to it; never tick anything in it. |
 
 Code, identifiers, comments, commit messages and documentation are in **English**. User-facing
@@ -20,11 +20,21 @@ they are shown to the owner word for word (see Recording).
 
 ## The gates
 
-The gates are the `gates` array in `phasekit.json`, and only that array. Run every `run` command,
-from the repository root, in the order listed, **in the foreground**, and read the result. A gate is
-green when it exits 0.
+The gates are the `gates` array in `phasekit.json`, and only that array. A gate is green when its
+`run` command, from the repository root, exits 0.
 
-- Run them before every commit, not once at the end.
+Run them with **`pnpm gates`**, in the foreground: one call that runs that same array in order,
+stops at the first red gate, and prints one line per gate with its counts (tests, coverage), plus
+only the lines that explain a failure and the path of the full log. Do not run the gates one by one:
+every call costs the whole conversation again. phasekit runs the same array itself before it
+merges, so `pnpm gates` and the merge cannot disagree.
+
+- While you work, run only what you touched: one test file (`pnpm vitest run tests/unit/x.test.ts`),
+  or named gates (`pnpm gates lint typecheck "unit tests"`). Run the full `pnpm gates` once the change
+  is complete, and again only after changing something.
+- When a gate fails, read the printed lines first, then `grep` or `tail` the full log it names.
+  Do not rerun a gate to see its output again.
+- Run the full `pnpm gates` before every commit.
 - A task that introduces a new automated check (TASKS.md says so explicitly) adds it to the `gates`
   array **in the same commit**. Never edit any other field of `phasekit.json` (`autoSequence`, model,
   effort, paths).
@@ -76,6 +86,10 @@ is the most expensive thing you can do here.
 - **Why:** the reason, with a link to the official doc when an API was involved.
 ```
 
+Keep each entry short: a title that names the decision (it is how later tasks find it), and one or
+two sentences per bullet. No code listings, no narrative of what you tried. Every later task greps
+this file.
+
 `docs/MANUAL-CHECKS.md`: the owner is not a developer of this code, and a script shows him these
 entries word for word when the phase ends. So write each one **in Italian, as instructions he can
 follow without asking anything**: a one-line title, then numbered steps indented by two spaces,
@@ -116,8 +130,9 @@ A check whose phase id has no dot (for example `setup`) is shown only at release
   background, poll it to completion inside the same turn.
 - Never run anything that waits for input or never exits on its own (`pnpm dev`, `wxt dev`,
   `web-ext run`, a watch mode, an interactive prompt). Run E2E tests headless.
-- Keep the context small: read the part of a file you need, pipe long output through `tail`, never
-  read a lockfile.
+- Keep the context small: every tool call re-reads the whole conversation, so fewer, larger steps
+  cost less than many small ones. Read the part of a file you need, pipe long output through
+  `tail`, never read a lockfile, and do not re-read a file you have just written or edited.
 - The shell is Git Bash on Windows. Quote paths, because the repository path contains spaces. For
   deletions, never use `rm` with a glob right after a variable or on a command-substitution target;
   prefer a literal path, a `"${VAR:?}"` guard, or Node's `fs.rmSync`. Never delete outside the
@@ -129,7 +144,7 @@ End every run with:
 
 1. The commit you made: hash and subject.
 2. The exact gate results: per gate, numbers and not "all green" (tests passed/failed, coverage
-   percentage, error counts).
+   percentage, error counts), as the last `pnpm gates` printed them.
 3. The DECISIONS.md and MANUAL-CHECKS.md entries you added.
 4. Anything you noticed and did not act on.
 

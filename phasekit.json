@@ -13,6 +13,7 @@
   "branchPrefix": "plan/phase-",
   "requireCleanTree": true,
   "autoCompact": 150000,
+  "strictMcp": true,
   "notify": true,
 
   "usageLimit": {
