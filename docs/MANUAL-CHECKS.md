@@ -15,7 +15,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
 
 ## Fase M0 — Impalcatura
 
-- [ ] (M0.2) Il clic sull'icona apre il pannello, in Chrome e in Firefox
+- [x] (M0.2) Il clic sull'icona apre il pannello, in Chrome e in Firefox
   1. In Chrome, con la build di prova caricata, clicca il pezzo di puzzle 🧩 in alto a destra nella barra: nell'elenco che si apre trova TabDeclutter e clicca la puntina 📌 accanto al nome, così la sua icona resta visibile nella barra. L'icona è un quadratino grigio con una lettera: le icone disegnate arrivano più avanti.
   2. Clicca l'icona di TabDeclutter nella barra.
   3. Richiudi il pannello con la X in alto nel pannello stesso, poi riclicca l'icona: deve riaprirsi.
@@ -24,14 +24,14 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   6. Clicca di nuovo la stessa icona.
   Risultato atteso: in Chrome si apre un pannello sul lato destro della finestra con una sola parola scritta dentro, «Ciao» se il browser è in italiano o «Hello» se è in un'altra lingua, e nient'altro (è il segnaposto: il pannello vero arriva con la fase M2). In Firefox si apre la barra laterale a sinistra con la stessa parola, e il secondo clic sull'icona la richiude. In nessuno dei due browser deve comparire una finestrella (popup) invece del pannello.
 
-- [ ] (M0.2) La scorciatoia Alt+Shift+D apre il pannello, in Chrome e in Firefox
+- [x] (M0.2) La scorciatoia Alt+Shift+D apre il pannello, in Chrome e in Firefox
   1. In Chrome, con la build di prova caricata e il pannello di TabDeclutter chiuso, premi `Alt+Shift+D`.
   2. Se non succede nulla, apri `chrome://extensions/shortcuts`, cerca TabDeclutter e controlla che accanto a «Attiva l'estensione» ci sia scritto `Alt+Shift+D`; se la casella è vuota perché un'altra estensione usa già quel tasto, scrivilo lì a mano e riprova.
   3. In Firefox, con la build di prova caricata e la barra laterale chiusa, premi `Alt+Shift+D`.
   4. Premi `Alt+Shift+D` una seconda volta.
   Risultato atteso: in entrambi i browser il pannello di TabDeclutter si apre. In Firefox la seconda pressione lo richiude. Se in Chrome la casella della scorciatoia era già occupata da un'altra estensione non è un problema di TabDeclutter: segnalalo comunque.
 
-- [ ] (M0.3) Nessun testo rimane in codice, e sono nella lingua del browser
+- [x] (M0.3) Nessun testo rimane in codice, e sono nella lingua del browser
   1. In Chrome, con la build di prova caricata, apri `chrome://extensions/`: leggi il nome e la descrizione di TabDeclutter.
   2. Appoggia il puntatore sull'icona di TabDeclutter nella barra, senza cliccare, e aspetta che compaia il suggerimento giallo.
   3. Apri `chrome://extensions/shortcuts` e leggi i nomi delle tre scorciatoie di TabDeclutter.
@@ -39,7 +39,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   5. In Firefox, con la build di prova caricata, apri `about:addons` → «Estensioni» e leggi il nome e la descrizione di TabDeclutter; poi appoggia il puntatore sulla sua icona nella barra e leggi il suggerimento; poi apri la barra laterale e leggi la parola che c'è scritta dentro.
   Risultato atteso: il nome è sempre «TabDeclutter». Da nessuna parte — nome, descrizione, suggerimento, nomi delle scorciatoie, pannello — deve comparire qualcosa come `__MSG_extName__` o `__MSG_...__`: se lo vedi, è un errore. Se il browser è in italiano, la descrizione comincia con «Suggerisce quali schede chiudere», il suggerimento sull'icona dice «TabDeclutter — apri il pannello», le due scorciatoie in più si chiamano «Chiudi tutti i duplicati» e «Pausa/riprendi protezione duplicati», e nel pannello c'è scritto «Ciao». Se il browser è in inglese (o in qualsiasi altra lingua) le stesse voci sono in inglese: «Suggests which tabs to close…», «TabDeclutter — open the panel», «Close all duplicate tabs», «Pause or resume duplicate protection», «Hello».
 
-- [ ] (M0.3) L'altra lingua funziona anche lei
+- [x] (M0.3) L'altra lingua funziona anche lei
   1. Questa è la controprova della verifica precedente: serve a vedere l'altra delle due lingue. Fallo in un solo browser, quello che ti è più comodo, e poi rimetti la lingua di prima.
   2. In Chrome: apri `chrome://settings/languages`, aggiungi l'altra lingua se non c'è (inglese se Chrome è in italiano, italiano se è in inglese), apri il menù `⋮` accanto a quella lingua e scegli «Mostra Google Chrome in questa lingua», poi clicca «Riavvia».
   3. In Firefox: apri `about:preferences`, nella sezione «Lingua» clicca «Imposta alternative…», aggiungi e porta in cima l'altra lingua, conferma e riavvia Firefox quando te lo chiede.
@@ -47,7 +47,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   5. Rimetti la lingua che usavi prima, con lo stesso percorso, e riavvia.
   Risultato atteso: tutti quei testi sono passati all'altra lingua — «Ciao» diventa «Hello» o viceversa, e la descrizione cambia di conseguenza. Il nome resta «TabDeclutter» in entrambe. Se una sola di quelle voci resta nella lingua di prima, scrivi quale.
 
-- [ ] (M0.5) In Firefox la barra laterale è in italiano
+- [x] (M0.5) In Firefox la barra laterale è in italiano
   1. Il test automatico su Firefox controlla la barra laterale solo in inglese: per vedere l'italiano serve un Firefox in italiano, e un Firefox normale non sa cambiare lingua da solo. Se il tuo Firefox è già in italiano ti basta il punto 3.
   2. Apri `about:preferences`, nella sezione «Lingua» clicca «Imposta alternative…», aggiungi l'italiano e portalo in cima, conferma e riavvia Firefox quando te lo chiede.
   3. Con la build di prova caricata, apri la barra laterale di TabDeclutter (clic sulla sua icona nella barra degli strumenti) e leggi la parola che c'è scritta dentro.
