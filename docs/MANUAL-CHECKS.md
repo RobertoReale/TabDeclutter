@@ -46,3 +46,10 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   4. Ricontrolla le stesse cose del punto precedente: descrizione in `chrome://extensions/` o `about:addons`, suggerimento sull'icona, parola dentro il pannello.
   5. Rimetti la lingua che usavi prima, con lo stesso percorso, e riavvia.
   Risultato atteso: tutti quei testi sono passati all'altra lingua — «Ciao» diventa «Hello» o viceversa, e la descrizione cambia di conseguenza. Il nome resta «TabDeclutter» in entrambe. Se una sola di quelle voci resta nella lingua di prima, scrivi quale.
+
+- [ ] (M0.5) In Firefox la barra laterale è in italiano
+  1. Il test automatico su Firefox controlla la barra laterale solo in inglese: per vedere l'italiano serve un Firefox in italiano, e un Firefox normale non sa cambiare lingua da solo. Se il tuo Firefox è già in italiano ti basta il punto 3.
+  2. Apri `about:preferences`, nella sezione «Lingua» clicca «Imposta alternative…», aggiungi l'italiano e portalo in cima, conferma e riavvia Firefox quando te lo chiede.
+  3. Con la build di prova caricata, apri la barra laterale di TabDeclutter (clic sulla sua icona nella barra degli strumenti) e leggi la parola che c'è scritta dentro.
+  4. Se al punto 2 hai cambiato lingua, rimetti quella di prima con lo stesso percorso e riavvia.
+  Risultato atteso: nella barra laterale c'è scritto «Ciao», non «Hello» e non `__MSG_hello__`. Se vedi «Hello» con Firefox in italiano, scrivilo.
