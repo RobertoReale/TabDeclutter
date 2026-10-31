@@ -226,3 +226,69 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   English phonetics — and this rule can only be wrong about the region, never about the language.
   It is a pure function of its argument, so `tests/unit/i18n.test.ts` pins all of it. If the
   locale set grows beyond `en`/`it`, `LOCALES` is the only place to change.
+
+## M0.4 — Chromium for E2E, headless, and the extension loaded from the build
+- **Context:** an MV3 extension cannot be installed into an ordinary Playwright context: it needs a
+  persistent profile launched with `--load-extension`. Recent branded Chrome ignores that flag, and
+  Playwright's default headless binary is the *headless shell*, which has no extension support at
+  all (the extension simply never loads).
+- **Decision:** `@playwright/test` pinned at `1.64.1` as a dev dependency; every test launches its
+  own `chromium.launchPersistentContext` with `channel: 'chromium'` — the full Chromium browser —
+  loading `.output/chrome-mv3`, and **headless**: checked, and extensions do load. `headless` stays
+  Playwright's own option, so `pnpm e2e -- --headed` still works when a run has to be watched.
+  `playwright install chromium` runs from `postinstall`, not from the `e2e` script: it is a no-op
+  once the browser is cached, and the `install` gate is the place that is allowed to download.
+- **Why:** `channel: 'chromium'` is the only combination of the three that loads the extension at
+  all, and headless keeps the `e2e chromium` gate usable on a machine without a display. Pinning
+  matters more here than elsewhere: the browser build is tied to the Playwright version, so an
+  unpinned bump would change the browser under the gate without a commit.
+
+## M0.4 — the panel is tested as a tab, and the gate rebuilds before it runs
+- **Context:** `sidePanel.open()` requires a user gesture that no test can produce, so the real side
+  panel cannot be opened from Playwright. And E2E that reads `.output/` is only as honest as that
+  directory is fresh.
+- **Decision:** the `panel` fixture navigates an ordinary tab to
+  `chrome-extension://<id>/sidepanel.html`, the same document the side panel renders; the id comes
+  from the background service worker's URL. `"e2e": "wxt build && playwright test"`, so the gate
+  cannot pass against a stale build. The browser profile is seeded in `testInfo.outputPath()` and
+  `preserveOutput: 'failures-only'`, which leaves Playwright to create and remove it. The config
+  sets `retries: 0` (the gate already retries the command once) and `forbidOnly: true`.
+- **Why:** everything about the document — markup, i18n, styles, scripts — behaves identically in a
+  tab; what a tab cannot reproduce is the panel *chrome* around it, which is the browser's and is
+  covered by the M0.2 and M0.3 manual checks. Retrying inside Playwright as well as in phasekit
+  would hide a flaky test twice over, and a committed `.only` has to fail a gate rather than
+  silently shrink it.
+
+## M0.4 — the UI language has to be set twice, and that qualifies the M0.3 rule
+- **Context:** the first test asserts the panel greets in `en` and in `it`, which means driving the
+  browser's UI language. Measured, in the runner, with the extension loaded (7 variants):
+  `intl.app_locale` in the profile's `Local State` selects the `_locales/` catalogue
+  (`getMessage('hello')` → `Ciao`) but leaves `i18n.getUILanguage()` at `en-US`; Playwright's
+  `locale` context option moves `getUILanguage()` and `navigator.language` but not the catalogue
+  (`locale: 'it'` alone → `it` + `Hello`); `--lang=it-IT` selects the catalogue and nothing else.
+  The cause of the first surprise is the test runner: it defaults `locale` to `en-US`, so a context
+  that does not ask for one is pinned to English however the profile is configured.
+- **Decision:** the `uiLanguage` option drives both — `intl.app_locale` written into `Local State`
+  before launch, and `locale` passed to `launchPersistentContext` — and `--lang` is not used.
+- **Why:** only together do catalogue, `getUILanguage()` and `navigator.language` agree, which is
+  the state a real browser is in; either one alone fabricates a disagreement no user has. It is also
+  the counter-example to the M0.3 decision "`lang` is derived from the UI language": `lang` can be
+  wrong about the *language*, not only the region, when the browser resolves `_locales/` against
+  something other than `getUILanguage()`. The extension is right to trust `getUILanguage()` — it is
+  the only thing it can ask — but the claim that the two cannot disagree was too strong.
+
+## M0.4 — the two invariants are guarded for every test, and the guards are tested
+- **Context:** invariant 1 (no network from any extension context) and "no console errors"
+  (PLAN.md §14) are properties of every E2E run, not assertions a test should have to remember.
+  A guard that silently never fires is worse than no guard.
+- **Decision:** `tests/e2e/fixtures/recorder.ts` records console errors and uncaught exceptions from
+  extension pages and from the service worker, and every request whose initiator is an extension
+  context, attributing requests by `request.serviceWorker()` first and `request.frame()` second.
+  An automatic `health` fixture fails the test afterwards if either list is not empty. Reading a
+  list drains it, which is what lets `tests/e2e/recorder.spec.ts` provoke six real violations — a
+  `fetch` from a page, a `fetch` from the service worker, `console.error` from both, an uncaught
+  exception — take them, and still end clean.
+- **Why:** the guards are the reason the harness exists, so they are the part that most needs a
+  test. The probe URL is `http://127.0.0.1:1/…`: the request is refused immediately, the suite stays
+  offline, and reading the extension's own `manifest.json` is asserted *not* to be a violation so
+  the check cannot pass by being indiscriminate.

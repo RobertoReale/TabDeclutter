@@ -1020,7 +1020,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M0.1 Toolchain and project skeleton
 - [x] M0.2 Per-browser manifest, capabilities and opening the panel
 - [x] M0.3 i18n and a localized "Hello" panel
-- [ ] M0.4 Chromium E2E harness
+- [x] M0.4 Chromium E2E harness
 - [ ] M0.5 Firefox E2E harness
 - [ ] M0.6 GitHub Actions CI
 - [ ] M1.1 Types and URL normalization
