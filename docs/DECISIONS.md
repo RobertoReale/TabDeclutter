@@ -622,3 +622,65 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   pattern over a string the page itself chose, which is why §6.3 calls it low confidence and only a
   secondary reason. Putting it last means a page whose URL we understand is never demoted to a guess
   about its title.
+
+## M1.3 — Duplicate Tabs Closer's whitelist syntax, read off its source
+
+- **Context:** PLAN.md §8.3 asks for a whitelist "compatible with Duplicate Tabs Closer's syntax,
+  so the user can paste the whitelist they use today", and names only `*` and `/…/`. Compatibility
+  lives in what it does not say: whether a pattern is anchored, whether it is case-sensitive, which
+  regex flags survive. M1.3 asks for the exact semantics, so they were read in
+  [Peuj/duplicate-tabs-closer](https://github.com/Peuj/duplicate-tabs-closer) (`options.js`,
+  `whiteListToPattern`; `worker.js`, `isUrlWhiteListed`) rather than guessed.
+- **Decision:** `compile()` reproduces that function exactly. What it does, and what that implies:
+  - lines are split on `\n`, trimmed, and the empty ones dropped with no complaint;
+  - a line matching `/^\/(.+)\/([gimsuy]*)$/` is a **regular expression**: the body is used as
+    written, so it is **not anchored** and matches anywhere in the URL, with the flags the user
+    gave minus `g` and `y`. A flag letter outside that set (`/x/d`) makes the whole line a wildcard
+    pattern instead, and `//` is the literal pattern `//`, not an empty regex;
+  - any other line is a **wildcard** pattern: one trailing `/` is removed, `*` becomes `.*`, every
+    regex metacharacter is escaped, and the result is wrapped as `^…\/?$`. So it is **anchored at
+    both ends**, **case-sensitive**, and tolerant of a trailing slash on either side. The
+    consequence worth knowing is that a bare `example.com` whitelists *nothing*;
+  - the URL tested is the tab's **raw** URL, not the normalized duplicate key: that is what
+    `isUrlWhiteListed` is given, and what the user wrote the pattern against. `chrome://newtab`
+    therefore only covers Chrome's `chrome://newtab/` because of the optional trailing slash.
+- **Why:** every one of these is a case where a reasonable implementation would differ (anchoring
+  and case especially), and a pasted whitelist that silently matches less than it used to would
+  close a tab the user had protected — the one mistake PLAN.md §3.1 promises not to make. The
+  agreement is checked and not assumed: the expectations in `tests/unit/patterns.test.ts` were
+  produced by running that extension's own `whiteListToPattern`/`isUrlWhiteListed` over the same
+  pattern/URL pairs and comparing (35 patterns × 37 URLs, no disagreement).
+
+## M1.3 — a reported line, not a silently dropped one, and a code next to the message
+
+- **Context:** PLAN.md §8.3 asks for "live line-by-line validation: invalid regexes are highlighted
+  with the error message and ignored (never a crash)" and a 500-character limit per pattern, and
+  M1.3 fixes the shape `errors: { line, message }[]`. Two things were open. Duplicate Tabs Closer
+  also caps a wildcard pattern at five `*` and drops the line **silently**; and §2.11 requires every
+  visible string to go through i18n, which an English `message` cannot.
+- **Decision:** three failures are reported — `too-long` (over 500 characters, measured after
+  trimming), `too-many-wildcards` (the reference extension's cap of 5, kept) and `invalid-regex` —
+  each as `{ line, code, message }`, with the line 1-based over every line of the input, blank ones
+  included. `code` is the addition to the shape M1.3 gave: the UI renders the localized sentence
+  from it and shows `message` (two numbers, or what the engine said) as the detail beside it. A
+  reported line is ignored and the rest of the list still matches.
+- **Why:** keeping the wildcard cap keeps a pasted list behaving identically, and `.*` repeated in
+  one anchored pattern is the one way a 500-character line can cost real time on a long URL;
+  reporting it instead of dropping it costs nothing and answers §8.3's "never a crash" with "and
+  never a silence" — a pattern that does nothing, with nothing said about it, is the kind of thing
+  the user would blame on the extension. The `code` is what makes the message translatable at all;
+  without it the panel would have to show the core's English.
+
+## M1.3 — `compile` takes a text block or lines, and the browser defaults are two exported lists
+
+- **Context:** storage holds the whitelist as one string (the line editor of §8.3 is a textarea),
+  the editor works on lines, and §8.3 also wants a per-line preview ("matches 3 open tabs"). §8.3
+  prefills a different list on each browser.
+- **Decision:** `compile` accepts `string | readonly string[]` and splits a string on `\n`; the
+  per-line preview is a `compile` of that one line, so there is no second API for it. The defaults
+  are exported as `DEFAULT_WHITELIST_CHROME` and `DEFAULT_WHITELIST_FIREFOX`, with no function to
+  choose between them.
+- **Why:** both callers get the form they already have, with no `join`/`split` at the call site, and
+  one code path compiles everything. Choosing the list is the only part that depends on which
+  browser this is, and TASKS.md §2.4 and §2.5 put that outside `src/core/`: `src/platform/` picks
+  one when it writes the storage defaults (M1.7).
