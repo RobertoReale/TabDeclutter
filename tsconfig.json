@@ -14,6 +14,7 @@
     "tests/**/*",
     "wxt.config.ts",
     "vitest.config.ts",
+    "vitest.firefox.config.ts",
     "playwright.config.ts"
   ]
 }

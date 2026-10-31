@@ -292,3 +292,112 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   test. The probe URL is `http://127.0.0.1:1/…`: the request is refused immediately, the suite stays
   offline, and reading the extension's own `manifest.json` is asserted *not* to be a violation so
   the check cannot pass by being indiscriminate.
+
+## M0.5 — Puppeteer over WebDriver BiDi for Firefox, and a configurable binary
+
+- **Context:** PLAN.md §5.1 names Puppeteer over WebDriver BiDi as the Firefox E2E tool, because it
+  is the only thing that can install an extension into a real Firefox from a directory
+  (`webExtension.install`). Installing is the only route: an unsigned directory cannot be loaded any
+  other way in a release build. And `puppeteer-core` never downloads a browser, so a binary has to
+  be found.
+- **Decision:** `puppeteer-core` 25.16.0, a dev dependency pinned exactly, driven through
+  `puppeteer.launch({ browser: 'firefox', headless: true })` — which uses BiDi by default — and
+  `browser.installExtension('.output/firefox-mv3')`, whose return value is asserted to be
+  `tabdeclutter@robertoreale`. The binary comes from `FIREFOX_PATH`, and when that is unset, from
+  the first well-known location that exists: `C:\Program Files\Mozilla Firefox\firefox.exe` and the
+  x86 variant on Windows, `/Applications/Firefox.app/…` on macOS, `/usr/bin`, `/usr/local/bin`,
+  `/snap/bin` on Linux. With neither, it throws naming `FIREFOX_PATH` and everywhere it looked.
+  Locally that resolves to the installed Firefox 157; CI will set `FIREFOX_PATH` to what it fetched.
+- **Why:** the full `puppeteer` package would pull a Chrome download on every install, and Chromium
+  is already covered by Playwright, so `puppeteer-core` is the smaller half of the same library. The
+  exact pin matters more here than usual, because the harness has to touch one API that is not
+  public (see below). Asserting the installed id is what guards the UUID pin: were the manifest id
+  ever to change, the tests would otherwise navigate to an origin serving nothing and fail
+  unintelligibly.
+
+## M0.5 — Vitest in a second config, not a second test runner
+
+- **Context:** the task leaves the runner open. Playwright, which runs the Chromium suite, cannot be
+  reused: it drives its own browsers and has no way to talk to a Puppeteer session.
+- **Decision:** `vitest.firefox.config.ts`, run by `"e2e:firefox": "wxt build -b firefox && vitest
+  run --config vitest.firefox.config.ts"`, with `include: ['tests/e2e-firefox/**/*.spec.ts']`,
+  `fileParallelism: false`, `retry: 0`, `allowOnly: false` and `passWithNoTests: false`. The root
+  `vitest.config.ts` keeps `include: ['tests/unit/**/*.test.ts']`, so `pnpm test` cannot pick up a
+  browser test and stays a fast unit run. The new config is listed in `tsconfig.json`, so
+  `pnpm typecheck` covers it.
+- **Why:** Vitest is already a gate dependency, so this adds a runner in name only; a third
+  framework would need something Vitest cannot do, and there is nothing here. `retry: 0` and
+  `allowOnly: false` are the same policy as `playwright.config.ts`: the gate already retries the
+  command once, so retrying here too would hide a flaky test twice over, and a committed `.only` has
+  to fail the gate rather than silently shrink it. `fileParallelism: false` because each file
+  launches its own Firefox. The small `message()` reader is duplicated from
+  `tests/e2e/fixtures/extension.ts` rather than shared: moving it would edit the Chromium harness,
+  which is outside this task's scope, and the two suites are better off not importing each other's
+  test framework.
+
+## M0.5 — three things Firefox needs that Chromium does not
+
+- **Context:** measured on Firefox 157.0.1 against the real build. Three plain approaches do not
+  work, and without a way round each the harness would be either broken or dishonest.
+- **Decision:** (1) the internal UUID is pinned with `extensions.webextensions.uuids`
+  (`{ "tabdeclutter@robertoreale": "4f2bb1ea-…-3f1bb0f2a001" }`, a JSON *string*, which is how
+  Firefox stores that pref), so the panel's URL is known before the browser starts. (2)
+  `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1` is set in the browser's environment. (3) navigation goes
+  through `page.mainFrame().browsingContext.navigate(url, 'complete')` rather than `page.goto`.
+- **Why:** (1) Firefox assigns a random UUID per profile, and its background page is not a WebDriver
+  target there, so reading the id off the service worker's URL — the Chromium trick — has no
+  equivalent; the pref is the only way to know the origin in advance. (2) without it,
+  `browsingContext.navigate` answers `unsupported operation: Navigation to "moz-extension://…" is
+  not allowed in this context`: Gecko gates privileged URLs on `RemoteAgent.allowSystemAccess`, and
+  that variable (equivalently `--remote-allow-system-access`) is the documented switch for it. The
+  alternative, listing `sidepanel.html` in `web_accessible_resources`, would widen the shipped
+  manifest for the tests' benefit and hand the panel to every web page. (3) `page.goto` never
+  resolves against the panel: it waits on navigation events Gecko does not emit for a privileged
+  document — verified by firing it without awaiting and polling the document, which sat at the panel
+  URL and `complete` for ten consecutive polls while `page.url()` still said `about:blank` and no
+  `framenavigated` ever arrived. The browsing context underneath does resolve. It is not public API,
+  which is why the version is pinned exactly rather than ranged.
+
+## M0.5 — "no console errors" on Firefox comes out of the browser's own output
+
+- **Context:** PLAN.md §14 asks for no console errors, and the M0.4 recorder gets them from
+  Playwright. On Firefox nothing in WebDriver reports them. Measured with a throwaway extension
+  whose page logs and throws while loading: `page.on('console')` and `page.on('pageerror')` stay
+  empty, and so does a raw unfiltered `log.entryAdded` subscription on the BiDi session — Gecko
+  emits no log entry for a `moz-extension://` document at all. `evaluateOnNewDocument`
+  (`script.addPreloadScript`) never runs there either, so no collector can be injected ahead of the
+  page's own scripts. The same probe found both the `console.error` and the uncaught exception on the
+  browser process's stdout and stderr.
+- **Decision:** the launch sets `devtools.console.stdout.content: true` and
+  `devtools.console.stdout.chrome: false`, and the harness reads `browser.process()`'s stdout and
+  stderr line by line, recording `console.error: …` lines and `JavaScript error:
+  moz-extension://<uuid>/…` lines. Reading drains, as in M0.4. It throws if the streams are not
+  piped, so the check cannot quietly become a no-op, and `tests/e2e-firefox/console.spec.ts`
+  provokes one of each, takes them, and ends clean.
+- **Why:** it is the only mechanism that sees anything, and it sees *more* than the BiDi one would:
+  it is already listening before the first script runs, so an error thrown while the panel boots is
+  caught — which is the failure a smoke test exists for. The two prefs are what make it usable:
+  Gecko's own internals log a steady stream of errors (`resource://gre/modules/…`, remote settings,
+  shutdown races), and all of it rides on `.chrome`, which stays off. `console.error` lines carry no
+  origin, so they are scoped by being content-only: the suite opens nothing but the panel, and
+  counting a stray page's error as the extension's would fail loudly rather than pass silently.
+  Uncaught exceptions do carry the script's URL, so those are matched on the extension's own origin.
+  Warnings are not recorded, which is what `takeConsoleErrors` does on the Chromium side.
+
+## M0.5 — the Firefox smoke test asserts English only
+
+- **Context:** the Chromium suite checks the panel in both `en` and `it`. Firefox resolves
+  `_locales/` against its application locale, which it negotiates against the langpacks actually
+  installed. Measured: with `intl.locale.requested: 'it'`, `i18n.getUILanguage()` stays `en-US`,
+  `getMessage('hello')` stays `Hello` and `<html lang>` stays `en-US` — a stock build ships no
+  Italian langpack, so the request negotiates straight back to English.
+- **Decision:** the Firefox test asserts the `en` catalogue, read from
+  `src/public/_locales/en/messages.json`, and asserts that `getUILanguage()` and `lang` agree with
+  it. A manual check covers the Italian sidebar.
+- **Why:** the task asks for "a localized Hello", and reading the greeting out of the shipped
+  catalogue is what makes the assertion localized rather than a hard-coded word. Driving the other
+  language would mean downloading and installing a langpack inside the gate — network, a second
+  moving part, a second thing to pin — to re-test a mapping `tests/unit/i18n.test.ts` and the
+  Chromium suite already cover in both directions. What is genuinely Firefox-specific about it, that
+  the sidebar shows the Italian string on an Italian Firefox, is something a person sees in ten
+  seconds and no test sees cheaply.

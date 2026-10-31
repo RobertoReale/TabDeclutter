@@ -29,7 +29,8 @@
     { "name": "build chrome", "cwd": ".", "run": "pnpm build" },
     { "name": "build firefox", "cwd": ".", "run": "pnpm build:firefox" },
     { "name": "web-ext lint", "cwd": ".", "run": "pnpm lint:firefox" },
-    { "name": "e2e chromium", "cwd": ".", "run": "pnpm e2e", "retries": 1 }
+    { "name": "e2e chromium", "cwd": ".", "run": "pnpm e2e", "retries": 1 },
+    { "name": "e2e firefox", "cwd": ".", "run": "pnpm e2e:firefox", "retries": 1 }
   ],
 
   "autoSequence": [
