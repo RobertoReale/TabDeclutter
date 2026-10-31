@@ -1026,7 +1026,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M1.1 Types and URL normalization
 - [x] M1.2 Page type classification
 - [x] M1.3 Duplicate whitelist patterns
-- [ ] M1.4 Duplicate key and choosing the tab to keep
+- [x] M1.4 Duplicate key and choosing the tab to keep
 - [ ] M1.5 Labelled fixtures (before the scoring)
 - [ ] M1.6 Uselessness score
 - [ ] M1.7 Typed, versioned storage

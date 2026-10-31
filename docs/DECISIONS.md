@@ -684,3 +684,76 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   one code path compiles everything. Choosing the list is the only part that depends on which
   browser this is, and TASKS.md §2.4 and §2.5 put that outside `src/core/`: `src/platform/` picks
   one when it writes the storage defaults (M1.7).
+
+## M1.4 — the two options that decide a duplicate but are not comparison options
+
+- **Context:** M1.4 fixes the signature `duplicateKey(url, matchOptions, cookieStoreId?)`, and
+  `MatchOptions` is the "URL comparison" table of PLAN.md §8.3 — six options, exactly the six rows
+  the settings page shows. But two more things change what a duplicate is, and both live in the
+  "Priority and exclusions" table instead: "Prefer the HTTPS tab **(and treat `http`/`https` as
+  equivalent)**" and "Treat containers as separate".
+- **Decision:** `MatchOptions` is left as it is, and `duplicates.ts` declares
+  `DuplicateOptions extends MatchOptions` with `treatHttpAsHttps?` and `containersAreSeparate?`,
+  both defaulting to `true` when absent (as in `DEFAULT_GUARD_SETTINGS`). `duplicateOptions(settings)`
+  derives them from `settings.match` + `settings.guard`, and is the one place that knows which
+  checkbox feeds which.
+- **Why:** `MatchOptions` is a stored shape and the settings UI's own table; growing it with fields
+  that have no row there would make the two drift. Deriving the wider options in one exported
+  function is what keeps "duplicate" meaning one thing (TASKS.md §2.9): Declutter and the guard
+  cannot pass different flags without saying so.
+
+## M1.4 — `http` and `https` collapse to one scheme, but a port written out does not
+
+- **Context:** with "Prefer the HTTPS tab" on, `http://x/a` and `https://x/a` must be one page.
+  `normalizeUrl` drops a port only when it is the scheme's own default, so collapsing the scheme
+  before normalizing would turn `http://x:80` into `https://x:80` and keep the port.
+- **Decision:** normalize first, then replace a leading `http://` or `https://` with the token
+  `http(s)://`. So `http://x:80/a` and `https://x:443/a` are one key, while `http://x:443/a` and
+  `https://x:443/a` stay two.
+- **Why:** the key is opaque — only equality is ever asked of it — so a token that is not a scheme
+  is the cheapest way to say "either of the two" without a second normalization pass. The port that
+  survives is the honest answer: `http` on 443 is a different endpoint from `https` on 443, and
+  neither is the ordinary form of the other, so calling them one page would be a guess.
+
+## M1.4 — the tab id is the last priority rule
+
+- **Context:** PLAN.md §8.4.3 lists five rules, and they can all stay silent: two tabs of one set,
+  neither pinned, neither navigated, same scheme, no `TabActivity` record yet (the tracker is M1.8,
+  and a record can be missing after a restart), same window. The comparator then returns 0, and
+  which tab survives would depend on the order the tabs happen to be in — that is, on the order the
+  events arrived in, since PLAN.md §8.2 fires the guard from several of them.
+- **Decision:** a sixth rule after the five: the lower tab id wins, reversed to the higher one when
+  the age rule is "Più recente". `compareKeepPriority` is therefore a total order and returns 0 only
+  for one tab compared with itself.
+- **Why:** M3b.2 has to guarantee that exactly one tab survives, which needs an answer that does not
+  change between two evaluations of the same pair. A tab id grows with time in both browsers, so
+  this rule agrees with the age rule it stands in for whenever the tracker has nothing to compare —
+  it is the same intention, decided on the only evidence left.
+
+## M1.4 — `findDuplicateSets` leaves out facts, not policies
+
+- **Context:** PLAN.md §8.3 also lists "Ignore empty tabs", "Ignore login/OAuth pages" and
+  "Allow duplicates created intentionally", and §8.4.1 adds incognito, exemptions and the guard's
+  mode. M1.4 asks only for a grouping that "excludes `hidden` tabs".
+- **Decision:** `findDuplicateSets` excludes a `hidden` tab and a whitelisted URL, and nothing else.
+  Every other exclusion of §8.3 and §8.4.1 is an exit filter of `resolveDuplicate` (M3b.1), and what
+  Declutter leaves out of its list is Declutter's own business (M2.2).
+- **Why:** those two are not opinions: a `hidden` tab is not on screen at all (PLAN.md §5.5), and a
+  whitelisted URL is by definition allowed to have duplicates. The rest are settings, and a setting
+  applied twice — once while grouping, once while deciding — is how the list the user reads and the
+  tab the guard closes start to disagree.
+
+## M1.4 — ages are injected as a map, and an age nobody knows decides nothing
+
+- **Context:** rule 4 of §8.4.3 compares the tabs' age, and `TabInfo` has no `createdAt`:
+  `TabActivity.createdAt` is the tracker's (PLAN.md §6.1), which M1.8 builds. `src/core/` may not
+  read storage (TASKS.md §2.4).
+- **Decision:** `KeepContext.createdAt` is an injected `Record<tabId, ms epoch>`, optional. When
+  either tab is missing from it, the age rule returns "cannot tell them apart" and the next rule
+  decides. A tab whose URL is still loading is keyed on its `pendingUrl` (`tabUrl()`), so the
+  newly created tabs of Chrome are not all "the empty page".
+- **Why:** a map is the smallest thing the comparator needs, and it lets the panel pass the activity
+  store and the guard pass the two records it has in hand. Inventing an age for a tab without one
+  (the clock, or `lastAccessed`, which is the last visit and not the birth) would make the rule
+  answer confidently with evidence it does not have; falling through to the next rule is what the
+  user would expect from "the first rule that tells them apart wins".
