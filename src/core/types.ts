@@ -239,6 +239,22 @@ export const DEFAULT_KEEP_MS = 7 * DAY;
 /** `local:activity` (PLAN.md §10), keyed by tab id. */
 export type ActivityStore = Record<number, TabActivity>;
 
+/**
+ * The foreground clock: which tab is being charged for the time passing, and since when
+ * (PLAN.md §6.1).
+ *
+ * It cannot live in a variable. Chrome stops the service worker after about 30 s
+ * (invariant 6), and the next activation would otherwise have no idea that a tab had
+ * been in the foreground for an hour, so this is kept in `storage.session`: it outlives
+ * the worker and dies with the browser, which is exactly what a foreground period does.
+ */
+export interface ForegroundPeriod {
+  tabId: number;
+  windowId: number;
+  /** ms epoch at which the tab came to the foreground. */
+  since: number;
+}
+
 /** A tab the guard must leave alone for a while (PLAN.md §8.6). */
 export interface GuardExemption {
   tabId?: number;

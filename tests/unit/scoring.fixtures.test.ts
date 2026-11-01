@@ -6,57 +6,18 @@
  * with a careful user and not merely with themselves. Precision on the `close` bucket is
  * what matters: a wrong suggestion costs the user more than a missing one (PLAN.md §3).
  *
- * The thousand-tab fixture is the budget of PLAN.md §11.
+ * The time budget of PLAN.md §11 is measured in `tests/perf/`, not here: a wall-clock
+ * number means nothing in a run that is instrumented for coverage and spread over
+ * parallel workers (docs/DECISIONS.md, M1.8).
  */
-
-import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { fixturePath } from '../../scripts/generate-fixtures';
-import { scoreTabs, type ScoringContext, type ScoringResult } from '../../src/core/scoring';
-import {
-  DEFAULT_SETTINGS,
-  type ActivityStore,
-  type Settings,
-  type TabInfo,
-} from '../../src/core/types';
-import type { FixtureLabel, TabsFixture } from '../fixtures/schema';
-
-function load(name: string): TabsFixture {
-  return JSON.parse(readFileSync(fixturePath(name), 'utf8')) as TabsFixture;
-}
-
-interface Input {
-  readonly tabs: readonly TabInfo[];
-  readonly activity: ActivityStore;
-  readonly settings: Settings;
-  readonly now: number;
-  readonly context: ScoringContext;
-}
-
-/**
- * The fixture as the function takes it. No whitelist, no protected sites, no bookmarks
- * and no keeps: the fixture does not carry any, and the labels were written without them.
- */
-function inputOf(fixture: TabsFixture): Input {
-  const activity: ActivityStore = {};
-  for (const entry of fixture.tabs) activity[entry.activity.tabId] = entry.activity;
-  return {
-    tabs: fixture.tabs.map((entry) => entry.tab),
-    activity,
-    settings: { ...DEFAULT_SETTINGS, staleDays: fixture.staleDays },
-    now: fixture.now,
-    context: { focusedWindowId: fixture.windows.find((window) => window.focused)?.id },
-  };
-}
-
-function score(input: Input): ScoringResult {
-  return scoreTabs(input.tabs, input.activity, input.settings, input.now, input.context);
-}
+import { inputOf, loadFixture, score } from '../fixtures/scoring-input';
+import type { FixtureLabel } from '../fixtures/schema';
 
 describe('tabs-300, the hand-labelled fixture', () => {
-  const fixture = load('tabs-300');
+  const fixture = loadFixture('tabs-300');
   const input = inputOf(fixture);
   const result = score(input);
   const labels = new Map<number, FixtureLabel | undefined>(
@@ -122,44 +83,5 @@ describe('tabs-300, the hand-labelled fixture', () => {
 
   it('is a function of its arguments and nothing else', () => {
     expect(score(input)).toEqual(result);
-  });
-});
-
-/**
- * The budget is 15 ms for a thousand tabs (PLAN.md §11), and the honest way to measure
- * it is with coverage off:
- *
- *   npx vitest run tests/unit/scoring.fixtures.test.ts --coverage.enabled=false
- *
- * `vitest.config.ts` leaves coverage on for every normal run, and V8 precise coverage
- * makes this loop about two and a half times slower (10 ms becomes 25 ms), so the gate
- * cannot be held to the user-facing number. What it can do is catch a regression of the
- * kind that matters — a rule that starts parsing a URL again per tab, or a quadratic
- * pass — which is why the assertion here allows for the instrumentation and the measured
- * figures live in docs/DECISIONS.md.
- */
-const BUDGET_MS = 15;
-const COVERAGE_ALLOWANCE = 3;
-
-describe('the time budget (PLAN.md §11)', () => {
-  it('scores a thousand tabs well inside the budget', () => {
-    const input = inputOf(load('tabs-1000'));
-    expect(input.tabs).toHaveLength(1000);
-
-    // Warm-up first: the first runs pay for the JIT and for every regex in `rules.ts`.
-    for (let run = 0; run < 5; run += 1) score(input);
-
-    const samples: number[] = [];
-    for (let run = 0; run < 11; run += 1) {
-      const started = performance.now();
-      score(input);
-      samples.push(performance.now() - started);
-    }
-    samples.sort((a, b) => a - b);
-    const median = samples[(samples.length - 1) / 2] ?? Number.POSITIVE_INFINITY;
-
-    expect(median, `median ${median.toFixed(2)} ms of ${samples.length} runs`).toBeLessThanOrEqual(
-      BUDGET_MS * COVERAGE_ALLOWANCE,
-    );
   });
 });

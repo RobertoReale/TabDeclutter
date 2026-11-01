@@ -16,6 +16,7 @@
     "wxt.config.ts",
     "vitest.config.ts",
     "vitest.firefox.config.ts",
+    "vitest.perf.config.ts",
     "playwright.config.ts"
   ]
 }

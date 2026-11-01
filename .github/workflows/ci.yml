@@ -64,6 +64,9 @@ jobs:
       - name: unit tests
         run: pnpm test
 
+      - name: perf budgets
+        run: pnpm perf
+
       - name: build chrome
         run: pnpm build
 

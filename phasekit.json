@@ -27,6 +27,7 @@
     { "name": "lint", "cwd": ".", "run": "pnpm lint" },
     { "name": "typecheck", "cwd": ".", "run": "pnpm typecheck" },
     { "name": "unit tests", "cwd": ".", "run": "pnpm test" },
+    { "name": "perf budgets", "cwd": ".", "run": "pnpm perf" },
     { "name": "build chrome", "cwd": ".", "run": "pnpm build" },
     { "name": "build firefox", "cwd": ".", "run": "pnpm build:firefox" },
     { "name": "web-ext lint", "cwd": ".", "run": "pnpm lint:firefox" },

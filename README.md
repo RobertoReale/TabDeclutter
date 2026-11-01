@@ -41,6 +41,7 @@ pnpm dev:firefox     # Firefox
 pnpm lint            # eslint + prettier --check
 pnpm typecheck       # wxt prepare + tsc --noEmit
 pnpm test            # unit tests (vitest)
+pnpm perf            # the time budgets of PLAN.md §11, alone and without coverage
 pnpm lint:firefox    # web-ext lint on the Firefox build (run pnpm build:firefox first)
 ```
 

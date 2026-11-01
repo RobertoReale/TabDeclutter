@@ -14,7 +14,8 @@ leave them all green, and phasekit runs them again before every merge into `main
 
 At the start they are: install (`--frozen-lockfile`), lint, typecheck, unit tests, Chrome build,
 Firefox build, `web-ext lint`. They grow as the project gains new checks: M0.4 adds the Chromium
-E2E, M0.5 the Firefox E2E, M7.2 the bundle budget. A gate is never removed or weakened.
+E2E, M0.5 the Firefox E2E, M1.8 the time budgets (`pnpm perf`, which measures them alone and
+without coverage), M7.2 the bundle budget. A gate is never removed or weakened.
 
 M0.1 is the only task that starts without gates (it creates them).
 
@@ -1030,7 +1031,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M1.5 Labelled fixtures (before the scoring)
 - [x] M1.6 Uselessness score
 - [x] M1.7 Typed, versioned storage
-- [ ] M1.8 Tab activity tracker
+- [x] M1.8 Tab activity tracker
 - [ ] M2.1 Design tokens, panel shell and reactive state
 - [ ] M2.2 Rows, sections and reasons
 - [ ] M2.3 Keyboard navigation and ARIA
