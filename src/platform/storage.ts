@@ -32,6 +32,7 @@ import { keepKey } from '../core/scoring';
 import type {
   ActivityStore,
   ArchivedTab,
+  ForegroundPeriod,
   GuardExemption,
   GuardState,
   Keeps,
@@ -83,6 +84,15 @@ export const settingsItem = defineVersioned<Settings>('local:settings', DEFAULT_
 
 /** The duplicate whitelist, as raw patterns, exactly as the user wrote them. */
 export const duplicateWhitelistItem = defineVersioned<string[]>('local:duplicateWhitelist', []);
+
+/**
+ * Which tab the foreground clock is running for, `null` when no window has focus.
+ *
+ * `storage.session`, because a period belongs to this run of the browser: it must outlive
+ * the service worker (invariant 6) and must not outlive the browser, or a restart would
+ * charge a tab for the night.
+ */
+export const foregroundItem = defineVersioned<ForegroundPeriod | null>('session:foreground', null);
 
 /** The guard's volatile state. `storage.session` is cleared when the browser restarts. */
 export const guardStateItem = defineVersioned<GuardState>('session:guardState', {

@@ -929,10 +929,9 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   search pages are the price of the +25 transient rule, and the labels were written to disagree in
   exactly that direction. `tests/unit/scoring.fixtures.test.ts` keeps both numbers under test, with
   a recall floor so that a later tuning cannot buy precision by suggesting almost nothing. The
-  benchmark lives in that file too, but `vitest.config.ts` leaves V8 coverage on for every normal
-  run and it makes the loop about 2.4× slower (24.1 ms), so the assertion there allows three times
-  the budget and the user-facing number is measured with
-  `npx vitest run tests/unit/scoring.fixtures.test.ts --coverage.enabled=false`.
+  benchmark started out in that file, measured inside a run that keeps V8 coverage on, with an
+  assertion that allowed three times the budget to absorb the instrumentation; M1.8 moved it to
+  `tests/perf/` and holds it to the 15 ms instead (see the M1.8 entry below).
 
 ## M1.7 — two vitest projects, because one global `browser` fake would hide a real case
 - **Context:** `fakeBrowser` is needed to test `src/platform/`, but WXT installs it with
@@ -999,3 +998,80 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   belong to the background's housekeeping.
 - **Why:** the alarm needs `browser.alarms` and the background entry point, neither of which exists
   yet; reads here never write, so the collection can be added later without changing any caller.
+
+## M1.8 — tabs are matched to saved records by exact URL, as a multiset
+- **Context:** tab ids do not survive a restart, so PLAN.md §6.1 asks for a match by URL; two tabs
+  on the same page make it ambiguous.
+- **Decision:** `src/core/reconcile.ts` groups the records by their exact URL and hands them out to
+  the tabs in window/index/id order, oldest record first. An empty URL matches nothing.
+- **Why:** the exact URL, not `keepKey`, because the normalisation the user can configure must not
+  change which history a tab inherits; ordering both sides makes the result stable from one restart
+  to the next, so two tabs on the same page cannot swap histories. A tab whose URL the browser has
+  not reported yet is not "the same page" as another one in the same state.
+
+## M1.8 — an unmatched tab is given a record, an unmatched record is dropped
+- **Context:** §6.1 says to initialise tabs that have no record and to mark them `bootstrapped`, and
+  says nothing about records no tab claims.
+- **Decision:** a tab with no record gets one dated `min(tab.lastAccessed, now)` or `now`, carrying
+  `bootstrappedAt: now`; records no tab claimed are not kept. Same rule on `onInstalled`, which
+  matches by id because ids are still valid there and an update must keep what was observed.
+- **Why:** the store then always describes the tabs that exist, so every later event has something
+  to update and nothing accumulates. `bootstrappedAt` rather than a `bootstrapped: true` flag
+  because the grace period of §6.4 has to end, and a moment can say when; a flag could not.
+
+## M1.8 — writes are debounced by 1 s, with a best-effort flush on `onSuspend`
+- **Context:** §6.1 allows a 1–2 s debounce and §16 asks for a flush on `onSuspend`, but Chrome
+  documents `onSuspend` for the event page and warns that work started there may not finish, and
+  MDN records that Firefox only fires it from 106.
+- **Decision:** 1 s, the short end of the range, and the `onSuspend` listener is registered on both
+  browsers as a best effort rather than a guarantee.
+- **Why:** on an MV3 service worker the flush cannot be relied on, so the quantity that actually
+  bounds the loss is the debounce window; a second still turns a restored session of twenty tabs
+  into one write.
+
+## M1.8 — the foreground period is kept in `session:foreground`
+- **Context:** charging a tab for its foreground time needs "which tab, since when", and invariant 6
+  forbids holding that in a variable in the background.
+- **Decision:** a new `session:foreground` item (`ForegroundPeriod | null`), not listed among the
+  keys of PLAN.md §10 because it is not state the product keeps.
+- **Why:** `storage.session` outlives the service worker and dies with the browser, which is exactly
+  the lifetime of a foreground period: a period left over from the previous run would otherwise
+  charge a tab for the whole night.
+
+## M1.8 — on Firefox each record is also written next to its tab
+- **Context:** §5.5 prefers `sessions.setTabValue`/`getTabValue` on Firefox, which restores the value
+  with the tab and is better than matching by URL.
+- **Decision:** the records are saved tab by tab inside the debounced write, only for the tabs that
+  changed, and read back first at start-up, where they win over the URL match. A read or a write
+  that fails is logged and skipped. Reads accept an object or a JSON string, because MDN documents
+  that `setTabValue` stringifies anything that is not a string.
+- **Why:** keeping the session values inside the same write is what stops them from becoming one
+  call per event; a tab can close between an event and the write, so a failure there is normal and
+  must not lose the rest of the store.
+
+## M1.8 — the budget tests run alone, without coverage, against the real budget
+- **Context:** the 1000-tab benchmark of M1.6 passed whenever it ran on its own (~10 ms per scoring
+  run) and failed in three of three pre-merge runs of the full gate list (60-100 ms per run). It
+  measures wall-clock time inside `pnpm test`, where V8 coverage instruments `src/core/` and the
+  other test files run in parallel workers; the two files M1.8 added were enough to tip it over.
+  Nothing about `score()` changed.
+- **Decision:** every wall-clock budget of PLAN.md §11 gets a run of its own — `tests/perf/`,
+  `vitest.perf.config.ts` (coverage off, `fileParallelism: false`, `retry: 0`, the verbose reporter
+  so the measured number reaches the gate's log), `pnpm perf`, and a `perf budgets` gate right
+  after `unit tests` in phasekit.json and in `.github/workflows/ci.yml`. The assertion is the
+  plan's own number, 15 ms, with no allowance on top. The measuring code is one helper,
+  `tests/perf/budget.ts`, because the budgets still to come use it too (M2.5's panel opening,
+  M4.1's clustering): the median of 11 runs after 20 warm-up runs, the whole measurement repeated
+  up to three times, failing only when every attempt is over budget, and every median printed. The
+  precision assertions stay in `tests/unit/scoring.fixtures.test.ts`; both files now build their
+  input from `tests/fixtures/scoring-input.ts`.
+- **Why:** a budget measured while something else uses the CPU is not a measurement of this code,
+  and the way to keep that gate honest is to make the measurement trustworthy rather than to widen
+  the limit: 45 ms was already three times what the user is promised and it still flaked. Five
+  warm-up runs turned out not to be a warm-up — the first attempt measured 17-21 ms and the next
+  ones 12-14, V8 still tiering up the same code — while twenty put the first attempt at the steady
+  state. Repeating the whole measurement costs a second on a machine that was busy for a moment and
+  cannot hide a regression, since work that really got slower is over budget in all three attempts.
+  Measured here, alone and without coverage: **median 11.0-11.3 ms** over three consecutive `pnpm
+  perf` runs, and **11.55, 11.68, 13.53 and 13.69 ms** inside four consecutive runs of the whole
+  gate list, each on the first attempt (M1.6 recorded 10.1 ms).

@@ -59,7 +59,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   2. Dopo il primo push, apri la pagina del repository su GitHub e clicca la linguetta «Actions» in alto.
   3. Nell'elenco clicca la riga più recente, chiamata «CI», e poi il riquadro «gates»: compare la lista dei passaggi. Aspetta che finisca — tra cinque e venti minuti, perché scarica due browser e li avvia davvero.
   4. Se accanto a un passaggio c'è una X rossa, clicca quel passaggio per aprire il registro e copia le ultime dieci righe.
-  Risultato atteso: la riga «CI» ha il segno di spunta verde e tutti i passaggi sono verdi (install, lint, typecheck, unit tests, build chrome, build firefox, web-ext lint, e2e chromium, e2e firefox). Gli stessi controlli passano sul tuo PC prima di ogni commit, quindi un rosso qui è quasi sempre una differenza dell'ambiente di GitHub e non un difetto del prodotto: riportalo con le righe che hai copiato e col nome del passaggio rosso.
+  Risultato atteso: la riga «CI» ha il segno di spunta verde e tutti i passaggi sono verdi (install, lint, typecheck, unit tests, perf budgets, build chrome, build firefox, web-ext lint, e2e chromium, e2e firefox). Gli stessi controlli passano sul tuo PC prima di ogni commit, quindi un rosso qui è quasi sempre una differenza dell'ambiente di GitHub e non un difetto del prodotto: riportalo con le righe che hai copiato e col nome del passaggio rosso.
 
 - [ ] (M1.5) Controllo a campione di 30 etichette delle schede di prova
   1. Questa verifica non si fa nel browser e non serve installare niente: dentro il progetto ci sono 300 schede finte, e per ognuna è già stata scritta a mano la risposta alla domanda «un utente attento la chiuderebbe?». Serve il tuo giudizio su 30 di quelle risposte.
@@ -76,3 +76,32 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   3. Parti dal secondo elenco, che è il prodotto normale: leggi una riga alla volta e chiediti se, vedendo quella riga con quella ragione accanto, cliccheresti «chiudi» senza pensarci. Segna le righe che ti sembrano sbagliate.
   4. Poi guarda il primo elenco: sono sei pagine di risultati di ricerca lasciate aperte da giorni. Qui va bene anche dare ragione al punteggio e non all'etichetta — dillo all'assistente, perché sono le etichette il bersaglio del punteggio e vanno corrette prima che qualcosa ci venga costruito sopra. Dieci minuti in tutto.
   Risultato atteso: nel secondo elenco al massimo due righe su venti ti sembrano sbagliate, e nessuna è una scheda che ti dispiacerebbe non ritrovare. Se una lo è, riportala con una parola sul perché: vale più di dieci righe giuste.
+
+- [ ] (M1.8) Riavviando Chrome l'età delle schede si conserva
+  1. Ci vogliono dieci minuti, quasi tutti di attesa. L'estensione ha cominciato a tenere il conto di quando usi ogni scheda, ma il pannello che lo mostrerà arriva con la fase M2: per adesso quei dati si guardano in una finestra di Chrome, con i passi qui sotto. Se non hai la build di prova, chiedila all'assistente («voglio provare l'estensione»).
+  2. Con la build di prova caricata in Chrome, apri tre schede su tre siti diversi e lasciale aperte almeno cinque minuti, tornando a guardarne una o due ogni tanto.
+  3. Apri `chrome://extensions/`, attiva l'interruttore «Modalità sviluppatore» in alto a destra, trova il riquadro di TabDeclutter e clicca la scritta blu «service worker» (a volte è «service worker (inattivo)»): si apre la finestra degli strumenti per sviluppatori.
+  4. In quella finestra clicca la linguetta «Application» in alto (se non la vedi è nascosta dietro il simbolo `»`), poi nella colonna di sinistra apri «Extension storage» → «Local» e clicca la riga `activity`.
+  5. In basso compare una voce per ogni scheda aperta. Scegline una e annota su un foglio l'indirizzo scritto accanto a `url` e i due numeri scritti accanto a `createdAt` e `foregroundMs`.
+  6. Chiudi Chrome del tutto, con tutte le sue finestre, e riaprilo. Se non ti ripropone le schede di prima, riaprile tu sugli stessi tre siti.
+  7. Rifai i passi 3 e 4 e cerca, tra le voci, quella con l'indirizzo che avevi annotato.
+  Risultato atteso: quella voce c'è ancora, `createdAt` è lo stesso numero di prima e `foregroundMs` non è tornato a zero: l'estensione ha riconosciuto la scheda anche se Chrome le ha dato un numero nuovo. Se invece la voce ha una riga in più chiamata `bootstrappedAt` e `createdAt` è un numero più grande di quello che avevi annotato, l'età è stata dimenticata al riavvio: scrivilo, con i due numeri.
+
+- [ ] (M1.8) Riavviando Firefox l'età delle schede si conserva
+  1. Come la verifica precedente, in Firefox, dieci minuti quasi tutti di attesa. Qui c'è una complicazione: la build di prova si carica come componente aggiuntivo «temporaneo», e Firefox lo rimuove quando si chiude, quindi dopo il riavvio va ricaricato a mano (passo 6) e i dati potrebbero essere stati buttati via con lui. Interessa sapere quale dei due casi succede.
+  2. Con la build di prova caricata in Firefox, apri tre schede su tre siti diversi e lasciale aperte almeno cinque minuti, tornando a guardarne una o due ogni tanto.
+  3. Apri `about:debugging#/runtime/this-firefox`, trova TabDeclutter nell'elenco e clicca «Ispeziona»: si apre la finestra degli strumenti per sviluppatori.
+  4. In quella finestra clicca la linguetta «Archivio» («Storage» se Firefox è in inglese), poi nella colonna di sinistra apri «Extension Storage» → la voce che comincia con `moz-extension://` e clicca la riga `activity`.
+  5. Scegli una delle voci che compaiono e annota su un foglio l'indirizzo scritto accanto a `url` e i numeri scritti accanto a `createdAt` e `foregroundMs`.
+  6. Chiudi Firefox del tutto e riaprilo. Riapri le tre schede sugli stessi siti se non torna da sola, poi apri `about:debugging#/runtime/this-firefox`, clicca «Carica componente aggiuntivo temporaneo…» e scegli il file `manifest.json` nella cartella `%USERPROFILE%\TabDeclutter-prova\firefox`.
+  7. Rifai i passi 3 e 4 e guarda le voci.
+  Risultato atteso: uno di questi due, e va bene anche il secondo — serve sapere quale. Primo caso: c'è la voce con l'indirizzo che avevi annotato, con lo stesso `createdAt`, ed è quello che vogliamo. Secondo caso: le voci ci sono ma hanno tutte una riga `bootstrappedAt` e un `createdAt` nuovo, oppure l'elenco è vuoto: è quello che Firefox fa con un componente aggiuntivo temporaneo, non è un difetto del prodotto, e la verifica andrà rifatta sulla versione firmata prima della pubblicazione. Scrivi quale dei due hai visto.
+
+- [ ] (M1.8) Una scheda sospesa da `chrome://discards` conserva il suo record
+  1. Cinque minuti, in Chrome. Quando la memoria è poca Chrome «sospende» una scheda: la pagina viene scaricata e, al ritorno, ricaricata con un numero nuovo. L'estensione deve seguirla, altrimenti una scheda vecchia sembrerebbe appena aperta. Questa verifica provoca la sospensione a mano.
+  2. Con la build di prova caricata, apri due schede su due siti diversi e tienile aperte qualche minuto.
+  3. Guarda cosa ha registrato l'estensione con i passi 3 e 4 della verifica «Riavviando Chrome l'età delle schede si conserva», e annota l'indirizzo e il `createdAt` della prima delle due schede.
+  4. Apri una terza scheda su `chrome://discards`: è un elenco di tutte le schede aperte. Trova la riga della scheda che hai annotato (la riconosci dal titolo) e, in fondo a destra in quella riga, clicca «Urgent Discard».
+  5. Torna sulla scheda sospesa: Chrome la ricarica da sola.
+  6. Riguarda i dati come al passo 3.
+  Risultato atteso: per quell'indirizzo c'è una sola voce, non due, e il suo `createdAt` è lo stesso numero che avevi annotato, senza la riga `bootstrappedAt`. Se invece ci sono due voci con lo stesso indirizzo, o il `createdAt` è cambiato, scrivilo.
