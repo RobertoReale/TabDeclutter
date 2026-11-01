@@ -1,0 +1,98 @@
+/*
+ * The design tokens of PLAN.md §4.7: every colour, size, space and duration the
+ * panel uses has a name here and nowhere else, so the theme is one file and a
+ * component never hard-codes a value.
+ *
+ * Light and dark are the same token names with different values, picked by
+ * `prefers-color-scheme` — there is no theme switch, because §4.7 asks for the
+ * browser's own choice. `color-scheme` tells the browser to match its own
+ * widgets (scrollbars, form controls, the canvas before the CSS loads).
+ *
+ * The accent is the single blue §4.7 names. The semantic colours are declared
+ * here but used sparingly: red only for "Elimina definitivamente", amber only
+ * for "Da valutare". Every text/background pair below is at least WCAG AA
+ * (4.5:1) for body text.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Neutrals: Chrome's own greys, which is what §4.7 means by "close to the
+     native UI". --surface is the panel, --raised the header and sticky bars. */
+  --td-surface: #ffffff;
+  --td-raised: #f8f9fa;
+  --td-hover: rgba(32, 33, 36, 0.06);
+  --td-border: #dadce0;
+  --td-text: #202124;
+  --td-text-muted: #5f6368;
+
+  --td-accent: #1a73e8;
+  --td-accent-contrast: #ffffff;
+  /* The accent at the weight a selected background needs. */
+  --td-accent-subtle: rgba(26, 115, 232, 0.1);
+  /* §4.7 asks for WCAG AA, and #1a73e8 on white is 4.0:1 — enough for a border
+     or an icon, not for 13 px text. Accented *text* uses the darker shade. */
+  --td-accent-text: #0b57d0;
+
+  /* "Da valutare" (PLAN.md §4.3), and nothing else. */
+  --td-warning: #996300;
+  /* "Elimina definitivamente" (PLAN.md §4.5), and nothing else. */
+  --td-danger: #c5221f;
+
+  /* The 4 px scale of §4.7: 4/8/12/16/24. */
+  --td-space-1: 4px;
+  --td-space-2: 8px;
+  --td-space-3: 12px;
+  --td-space-4: 16px;
+  --td-space-5: 24px;
+
+  --td-font: system-ui, sans-serif;
+  --td-text-meta: 12px;
+  --td-text-base: 13px;
+  --td-text-section: 15px;
+  --td-line: 1.4;
+
+  --td-radius-sm: 4px;
+  --td-radius: 8px;
+  --td-radius-pill: 999px;
+
+  /* §4.8: click targets of at least 24 px. */
+  --td-target: 24px;
+
+  /* §4.7: 150 ms ease-out. The curve is Material's "standard decelerate",
+     which is what Chrome's own surfaces use. */
+  --td-duration: 150ms;
+  --td-ease: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --td-surface: #202124;
+    --td-raised: #292a2d;
+    --td-hover: rgba(232, 234, 237, 0.08);
+    --td-border: #3c4043;
+    --td-text: #e8eaed;
+    --td-text-muted: #9aa0a6;
+
+    --td-accent: #8ab4f8;
+    /* The dark accent is light, so what sits on it has to be dark. */
+    --td-accent-contrast: #202124;
+    --td-accent-subtle: rgba(138, 180, 248, 0.16);
+    /* On a dark surface the accent itself already clears AA. */
+    --td-accent-text: #8ab4f8;
+
+    --td-warning: #fdd663;
+    --td-danger: #f28b82;
+  }
+}
+
+/*
+ * §4.7: all motion disabled with `prefers-reduced-motion`. Taking the duration
+ * to zero here covers everything that animates through the token;
+ * `base.css` adds the blanket rule for anything that does not.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --td-duration: 0ms;
+  }
+}

@@ -7,6 +7,12 @@ import type { PanelSession, PanelState } from './fixtures/panel';
  * The Firefox smoke test: the real extension, installed from the build the
  * script has just produced, driven through WebDriver BiDi (PLAN.md §5.1, §14).
  *
+ * The shell is what is asserted — the header counts, the navigation, the title
+ * — and not the exact numbers: a headless Firefox opens what it likes, and the
+ * count that has to be right to the tab is Chromium's test, which can open and
+ * close windows (`tests/e2e/shell.spec.ts`). What this proves is that the panel
+ * reads `browser.tabs` on Firefox at all and renders from it.
+ *
  * Only the `en` catalogue is asserted. Firefox resolves `_locales/` against its
  * application locale, which it negotiates against the locales it actually has
  * installed: measured, `intl.locale.requested: 'it'` leaves both
@@ -30,8 +36,18 @@ test('the panel is the extension page the sidebar renders', () => {
   expect(panel.url).toBe(PANEL_URL);
 });
 
-test('the panel greets in the browser language and says so in lang', () => {
-  expect(panel.main).toBe(message('en', 'hello'));
+test('the header counts what Firefox has open', () => {
+  // At least the tab the panel is in, so at least one of each.
+  expect(panel.counts).toMatch(/\d/);
+  expect(panel.counts).not.toMatch(/\$/);
+});
+
+test('the navigation offers the three views, in the browser language', () => {
+  expect(panel.nav).toEqual([
+    message('en', 'navDeclutter'),
+    message('en', 'navOrganize'),
+    message('en', 'navArchive'),
+  ]);
   expect(panel.uiLanguage).toMatch(/^en\b/);
   expect(panel.lang).toMatch(/^en\b/);
 });

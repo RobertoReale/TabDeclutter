@@ -77,14 +77,27 @@ function argumentCount(entry: Message): number {
 }
 
 describe('the message catalogues', () => {
-  it('carries the keys M0.3 requires, in en', () => {
+  it('carries exactly the keys the shipped code asks for, in en', () => {
     expect(Object.keys(en).sort()).toEqual([
       'actionTitle',
+      'archiveEmpty',
       'cmdCloseDuplicates',
       'cmdToggleGuard',
+      'countTabsOne',
+      'countTabsOther',
+      'countWindowsOne',
+      'countWindowsOther',
+      'declutterEmpty',
       'extDescription',
       'extName',
-      'hello',
+      'healthReview',
+      'navArchive',
+      'navDeclutter',
+      'navLabel',
+      'navOrganize',
+      'navSettings',
+      'organizeEmpty',
+      'panelCounts',
     ]);
   });
 
@@ -135,31 +148,31 @@ describe('the message catalogues', () => {
 
 describe('t', () => {
   it('returns the message of the locale it is bound to', () => {
-    expect(translator(fakeI18n(en))('hello')).toBe('Hello');
-    expect(translator(fakeI18n(catalogue('it')))('hello')).toBe('Ciao');
+    expect(translator(fakeI18n(en))('navDeclutter')).toBe('Declutter');
+    expect(translator(fakeI18n(catalogue('it')))('navDeclutter')).toBe('Riordina');
   });
 
   it('passes the substitutions on, in the order they were given', () => {
     const api = { getMessage: vi.fn(() => 'whatever') };
-    translator(api)('hello', 'first', 'second');
-    expect(api.getMessage).toHaveBeenCalledWith('hello', ['first', 'second']);
+    translator(api)('panelCounts', 'first', 'second');
+    expect(api.getMessage).toHaveBeenCalledWith('panelCounts', ['first', 'second']);
   });
 
   it('substitutes a named placeholder with its argument', () => {
     const withPlaceholder: Catalogue = {
-      hello: {
-        message: 'Hello $WHO$ and $OTHER$',
-        placeholders: { who: { content: '$1' }, other: { content: '$2' } },
+      panelCounts: {
+        message: '$TABS$ and $WINDOWS$',
+        placeholders: { tabs: { content: '$1' }, windows: { content: '$2' } },
       },
     };
-    expect(translator(fakeI18n(withPlaceholder))('hello', 'Ada', 'Grace')).toBe(
-      'Hello Ada and Grace',
+    expect(translator(fakeI18n(withPlaceholder))('panelCounts', 'Ada', 'Grace')).toBe(
+      'Ada and Grace',
     );
   });
 
   it('substitutes a bare $1 in the message', () => {
-    const direct: Catalogue = { hello: { message: 'Hello $1' } };
-    expect(translator(fakeI18n(direct))('hello', 'Ada')).toBe('Hello Ada');
+    const direct: Catalogue = { healthReview: { message: 'Hello $1' } };
+    expect(translator(fakeI18n(direct))('healthReview', 'Ada')).toBe('Hello Ada');
   });
 
   it.each(LOCALES)('%s: leaves no placeholder unresolved in any message', (locale) => {
@@ -175,7 +188,7 @@ describe('t', () => {
   it('gives an empty string outside an extension context, rather than throwing', async () => {
     // The real `t`, whose api is `browser.i18n`: there is no `browser` here.
     const { t } = await import('../../src/platform/i18n');
-    expect(t('hello')).toBe('');
+    expect(t('extName')).toBe('');
   });
 });
 

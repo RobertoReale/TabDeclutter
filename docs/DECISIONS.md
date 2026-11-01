@@ -1075,3 +1075,100 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   Measured here, alone and without coverage: **median 11.0-11.3 ms** over three consecutive `pnpm
   perf` runs, and **11.55, 11.68, 13.53 and 13.69 ms** inside four consecutive runs of the whole
   gate list, each on the first attempt (M1.6 recorded 10.1 ms).
+
+## M2.1 — two stylesheets, tokens and base, and nothing else
+
+- **Context:** PLAN.md §5.3 lists exactly `styles/tokens.css` and `styles/base.css` for the panel,
+  and §4.7 asks for tokens, a light/dark theme, a spacing scale and reduced motion.
+- **Decision:** `tokens.css` declares custom properties only — one `:root` block, one
+  `prefers-color-scheme: dark` override, one `prefers-reduced-motion` override of `--td-duration`;
+  `base.css` has the reset, the typography, the focus ring and the shell classes, and reads values
+  only through `var(--td-…)`. `main.tsx` imports tokens first.
+- **Why:** a theme that lives in one file cannot drift from the file that uses it, and later tasks
+  add components without touching either theme. No CSS-in-JS and no third stylesheet for three
+  screens' worth of chrome (§3: the simplest thing that works).
+
+## M2.1 — `--td-accent-text` exists because the accent is not AA on white
+
+- **Context:** §4.7 fixes the accent at `#1a73e8` (light) and `#8ab4f8` (dark) and also requires
+  WCAG AA, but `#1a73e8` on `#ffffff` is about 4.0:1 — under 4.5:1, which 13 px text needs.
+- **Decision:** the accent stays exactly as specified for borders, fills and focus rings;
+  accent-coloured *text* uses `--td-accent-text` (`#0b57d0` light, `#8ab4f8` dark, both AA).
+- **Why:** both halves of §4.7 are then satisfied without repainting the accent. `#0b57d0` is the
+  same hue one step darker, so nothing looks like a second accent.
+
+## M2.1 — the navigation is buttons with `aria-current`, not a tablist
+
+- **Context:** §4.2 wants Riordina / Organizza / Archivio navigation; the obvious ARIA pattern is
+  `role="tablist"`.
+- **Decision:** a `<nav aria-label>` of plain buttons carrying `aria-current="page"`, with `<main>`
+  as the landmark for the view.
+- **Why:** a conforming tablist owes the user arrow-key navigation and a roving tabindex, which is
+  M2.3's work; claiming the role before the behaviour exists is worse for a screen reader than not
+  claiming it. Buttons are correct at every stage, and the pattern survives M2.3 unchanged.
+
+## M2.1 — what Riordina and the gear show before their own tasks land
+
+- **Context:** the task says Organizza and Archivio get "a simple empty state" but does not say what
+  Riordina shows before M2.2 builds the list, nor where the ⚙ leads before M6.1.
+- **Decision:** Riordina shows `declutterEmpty` when the score suggests nothing and the
+  `healthReview` section title ("N da rivedere") when it does; the gear is an `aria-pressed` toggle
+  revealing a Settings heading. All four strings are PLAN.md's own words.
+- **Why:** the header counts and the score are already live, so showing the number proves the state
+  is wired end to end, and a control that leads nowhere is worse than one that leads to a heading
+  M6.1 fills in. No `views/` or `components/` directory yet: the scope is "App, styles, state", and
+  `EmptyState` is explicitly M2.2's.
+
+## M2.1 — counted nouns come from four keys and `Intl.PluralRules`
+
+- **Context:** "N schede · M finestre" needs agreement in both languages, and Chrome's i18n has no
+  plural support at all (`i18n.getMessage` only substitutes `$1`…`$9`).
+- **Decision:** `countTabsOne/Other` and `countWindowsOne/Other` in both catalogues, selected with
+  `Intl.PluralRules(language)` and formatted with `Intl.NumberFormat(language)`, in a pure
+  `sidepanel/format.ts` that takes `t` and the language as arguments.
+- **Why:** both languages need only `one`/`other`, so four keys cover them, and the choice stays
+  testable without a browser — which is why `format.ts` imports `../../platform/i18n` relatively:
+  the `unit` vitest project runs without WXT's plugin and so without the `@/` alias. Noted while
+  testing: Italian's CLDR sets `minimumGroupingDigits: 2`, so `1234` is deliberately ungrouped.
+
+## M2.1 — the Tab-to-`TabInfo` mapping lives in the panel's state for now
+
+- **Context:** `core/` may not touch `chrome.*` (invariant 4) and only `platform/` may (invariant
+  5), but `platform/tabs.ts` does not exist yet: M3.1 creates it with the actions.
+- **Decision:** `sidepanel/state/tabs.ts` queries `browser.tabs` and maps the result to `TabInfo`
+  itself; the window count is derived from the tabs' distinct `windowId`s rather than from a second
+  `windows.getAll()`.
+- **Why:** PLAN.md §5.2 has the panel call `chrome.tabs` directly, so the panel is a platform
+  caller by design, and one read is cheaper and cannot disagree with itself. M3.1 can lift the
+  mapper into `platform/tabs.ts` when it needs it there too.
+
+## M2.1 — one debounce window per burst, started by the first event
+
+- **Context:** §5.2 asks for a 150 ms debounce on `tabs.on*`; a restartable debounce would postpone
+  the read for as long as events keep arriving.
+- **Decision:** the first event opens the window (`timer ??= setTimeout`) and the read happens when
+  it closes; reads are queued so two cannot interleave, and a failed read does not block the queue.
+- **Why:** it bounds the latency the user sees (a restored window of 30 tabs costs one read, 150 ms
+  after the first tab, not after the last) and it is what `background/tracker.ts` already does.
+
+## M2.1 — the `hello` key is gone
+
+- **Context:** M0.3 added `hello` as the placeholder panel's only string, its own description
+  saying "until the real panel exists".
+- **Decision:** removed from both catalogues; the i18n parity test now asserts the exact key list
+  the shipped code asks for, and the manual checks that read «Ciao» now read the navigation labels.
+- **Why:** a key no code reads is a translation that cannot be wrong, which makes the parity test
+  weaker rather than stronger.
+
+## M2.1 — `fakeBrowser`'s gaps are worked around in the test, not in the code
+
+- **Context:** three limitations of `@webext-core/fake-browser` 2.0.1 surfaced while testing the
+  panel state: `tabs.onMoved/onAttached/onDetached/onReplaced.addListener` throw "not implemented";
+  `reset()` leaves one tab behind; `tabs.remove` reads `windows.get(tabId)` and so only works when
+  a tab's id happens to equal its window's.
+- **Decision:** the test stubs those four `addListener`s and fires the captured listener itself,
+  drains the leftover tabs in `beforeEach`, and replays a close as the panel sees it (the
+  `onRemoved` event plus a `tabs.query` that no longer lists it).
+- **Why:** the panel subscribes to all seven events because a real browser fires them; bending the
+  product to the fake would be weakening a gate. The stubs turned the gap into coverage — there is
+  now a test per event asserting it triggers exactly one read.

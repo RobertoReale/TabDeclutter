@@ -155,6 +155,9 @@ Every string goes through a typed helper, and a test prevents `en` and `it` from
 **Done when.** The parity tests pass. The built manifest uses `__MSG_*__` and the build resolves the
 keys. The panel renders the localized string, verified in E2E from M0.4.
 
+> M2.1 replaced the placeholder panel with the real shell and removed the `hello` key: the
+> localization is now checked against the header and the navigation labels instead.
+
 ### M0.4 — Chromium E2E harness
 
 E2E tests become a gate: after this task every merge checks the real extension, loaded in
@@ -1032,7 +1035,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M1.6 Uselessness score
 - [x] M1.7 Typed, versioned storage
 - [x] M1.8 Tab activity tracker
-- [ ] M2.1 Design tokens, panel shell and reactive state
+- [x] M2.1 Design tokens, panel shell and reactive state
 - [ ] M2.2 Rows, sections and reasons
 - [ ] M2.3 Keyboard navigation and ARIA
 - [ ] M2.4 Badge on the icon

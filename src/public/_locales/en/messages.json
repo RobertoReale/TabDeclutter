@@ -19,8 +19,64 @@
     "message": "Pause or resume duplicate protection",
     "description": "Name of the assignable keyboard shortcut, in the browser's shortcut page."
   },
-  "hello": {
-    "message": "Hello",
-    "description": "The placeholder greeting of the panel shell, until the real panel exists."
+  "panelCounts": {
+    "message": "$TABS$ · $WINDOWS$",
+    "description": "The header line that says how much is open, as in \"87 tabs · 4 windows\". Only the separator is translatable: both halves are already-formatted phrases.",
+    "placeholders": {
+      "tabs": { "content": "$1", "example": "87 tabs" },
+      "windows": { "content": "$2", "example": "4 windows" }
+    }
+  },
+  "countTabsOne": {
+    "message": "$1 tab",
+    "description": "How many tabs are open, when there is exactly one. $1 is the formatted number."
+  },
+  "countTabsOther": {
+    "message": "$1 tabs",
+    "description": "How many tabs are open, for every other count. $1 is the formatted number."
+  },
+  "countWindowsOne": {
+    "message": "$1 window",
+    "description": "How many windows are open, when there is exactly one. $1 is the formatted number."
+  },
+  "countWindowsOther": {
+    "message": "$1 windows",
+    "description": "How many windows are open, for every other count. $1 is the formatted number."
+  },
+  "navLabel": {
+    "message": "Views",
+    "description": "Accessible name of the panel's navigation bar, never shown on screen."
+  },
+  "navDeclutter": {
+    "message": "Declutter",
+    "description": "Navigation tab for the view that suggests which tabs to close."
+  },
+  "navOrganize": {
+    "message": "Organize",
+    "description": "Navigation tab for the view that groups the remaining tabs."
+  },
+  "navArchive": {
+    "message": "Archive",
+    "description": "Navigation tab for the view that lists the tabs TabDeclutter closed."
+  },
+  "navSettings": {
+    "message": "Settings",
+    "description": "The gear button in the header, which opens the settings. Also its heading."
+  },
+  "healthReview": {
+    "message": "$1 to review",
+    "description": "How many tabs the score suggests looking at, next to the health bar. $1 is the formatted number."
+  },
+  "declutterEmpty": {
+    "message": "All tidy. No tabs to review.",
+    "description": "Shown in the Declutter view when the score suggests nothing."
+  },
+  "organizeEmpty": {
+    "message": "No groups to suggest.",
+    "description": "Shown in the Organize view when there is nothing to group."
+  },
+  "archiveEmpty": {
+    "message": "No archived tabs.",
+    "description": "Shown in the Archive view when nothing has been closed through TabDeclutter."
   }
 }
