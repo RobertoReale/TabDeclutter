@@ -814,3 +814,122 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   positive costs more than a false negative (PLAN.md §3.1). The labels were written before the
   scoring of §6.4 exists, so these counts are the target the scoring has to meet, not a description
   of it.
+
+## M1.6 — the headline reason is its own vocabulary
+
+- **Context:** PLAN.md §6.4 gives a priority list for the "primary reason" — duplicate, blank,
+  transient, stale-unread, stale — which is coarser than the signals the score collects, and says
+  nothing about tabs with no reason at all or about protected ones.
+- **Decision:** `PrimaryReason` is a separate union from `ReasonCode`: `transient` stands for any
+  already-consulted page (search, sign-in, browser page), `stale-unread` for the pair "old and
+  never read", plus `protected` for step 1 and `review` for a tab that scored only on small
+  additions. `primaryReasonOf` is the only place that priority is written down, and step 2 asks it
+  too instead of naming its own. An `error` page adds its points but is never the headline.
+- **Why:** the headline is one sentence in the row (§6.5) and the reasons are the "why" panel; they
+  answer different questions, and forcing one type on both would have put `bookmarked` or
+  `discarded` into the priority list, where the spec never puts them. "This page failed to load" is
+  not a reason to close a tab, so `error` stays out of the sentence.
+
+## M1.6 — the score answers for the windows in the same pass
+
+- **Context:** §4.3 asks for a card like "Finestra con 12 schede non toccata da 3 settimane", and
+  the condition it gives is "all the tabs of a window are to close".
+- **Decision:** `scoreTabs` returns `{ tabs, windows }`, and each `ScoredWindow` carries
+  `tabCount`, `closeCount`, `idleMs` and `forgotten`. `forgotten` is "every tab of the window has
+  been untouched for longer than `staleDays`", which is also the condition of the
+  `forgotten-window` addition; `closeCount` and `tabCount` are what the sentence needs.
+- **Why:** taken literally the spec's condition can never hold — every window has an active tab and
+  step 1 protects it — so the card needed a condition that can. Returning the roll-up from the same
+  call keeps it O(n) and means the card and the per-tab reason can never disagree, which they would
+  if the panel worked the window's state out for itself.
+
+## M1.6 — an empty tab is nobody's duplicate
+
+- **Context:** several `about:blank` or `about:newtab` tabs share one URL, so the duplicate rule
+  would call them duplicates of each other (95 points, "another tab is showing this page").
+- **Decision:** tabs classified `blank` are left out of both the duplicate and the near-duplicate
+  rules, and are reached by the "empty and inactive" rule instead.
+- **Why:** it is the exception the real-time guard already makes (`ignoreEmptyTabs`, PLAN.md §8.2),
+  and "a duplicate of another tab" is the wrong thing to tell the user about a new tab page: three
+  empty tabs are three empty tabs, not two copies of one.
+
+## M1.6 — "empty and inactive" means the hour has passed
+
+- **Context:** PLAN.md §6.4 words the rule as "empty and inactive tab = 90", without saying what
+  inactive means for a tab with no page in it.
+- **Decision:** the rule needs `idleMs` over `transientMinIdleMs` (1 hour), the same threshold the
+  transient pages use. A younger empty tab falls through to step 3.
+- **Why:** an empty tab the user opened minutes ago is the tab they are typing in. The labels agree:
+  the `blank` tabs of `tabs-300.json` labelled `keep` are hours old but were used minutes ago. And
+  reusing the transient threshold avoids inventing a second number for the same idea.
+
+## M1.6 — step 2 sets the score and stops
+
+- **Context:** PLAN.md §6.4 presents the strong rules as setting a score ("= 95", "= 90") and the
+  additions as a sum, but does not say whether a strong rule then takes the group discount or picks
+  up the small additions as well.
+- **Decision:** neither. A duplicate scores exactly `duplicatePoints` and an abandoned empty tab
+  exactly `blankPoints`, with that one reason and `multiplier: 1`.
+- **Why:** both numbers were chosen to mean "certainly closeable", and a duplicate inside a group is
+  still the same page open twice. Letting the additions pile on top would also break the promise of
+  §6.5 that the reasons shown add up to the score.
+
+## M1.6 — every tab group counts as the user's
+
+- **Context:** the ×0.6 discount of §6.4 is for tabs the user filed in a group on purpose, but
+  `TabInfo` only reports `groupId`: nothing says who created the group.
+- **Decision:** any `groupId` other than `NO_GROUP_ID` earns the discount.
+- **Why:** it is the only information available, and it errs the right way — a tab in a group is
+  suggested less eagerly (PLAN.md §3.1). When M3 starts creating groups itself, it files tabs the
+  user accepted a suggestion for, so the same reading still holds.
+
+## M1.6 — `keepKey` uses the default comparison options
+
+- **Context:** "Mantieni" (§10) and the optional bookmark signal are stores keyed by URL, while the
+  user can change what counts as the same URL (`ignoreHash`, `ignoreAllParams`, …) at any time.
+- **Decision:** `keepKey` normalises with `DEFAULT_MATCH_OPTIONS`, never with the user's settings,
+  and is exported so that whoever writes those stores keys them the same way.
+- **Why:** a keep is a promise about one page, and changing a comparison setting must not silently
+  forget it, nor quietly widen it to a dozen other pages. The duplicate rules keep using the user's
+  options, where the setting is what the user is actually asking about.
+
+## M1.6 — a tab nothing is known about counts as touched now
+
+- **Context:** `factsOf` reads the last use from the activity record and from the browser's
+  `lastAccessed` (§6.1). A tab can have neither: no record yet, and a browser that does not report
+  it.
+- **Decision:** `lastActive` falls back to `now`, so the tab is idle for 0 ms and the grace period
+  protects it.
+- **Why:** the alternative, epoch 0, reads as "untouched since 1970" and would put a tab the
+  extension simply has not seen yet at the top of the list — the expensive mistake of §3.1.
+
+## M1.6 — protected sites match by domain, and the host is parsed only when there are any
+
+- **Context:** §4.6 writes protected sites as domains, with examples such as `*.atlassian.net`, and
+  does not define the matching.
+- **Decision:** a pattern matches the domain itself and everything under it (`atlassian.net` covers
+  `team.atlassian.net`), a leading `*.` is accepted and means the same, and an empty pattern or a
+  URL with no host matches nothing. The URL is parsed only for a user who has protected sites at
+  all.
+- **Why:** suffix matching on the whole string would make `notatlassian.net` a match for
+  `atlassian.net`. Parsing lazily saves a thousand URL parses per run for everyone who never opens
+  that setting, which would be a sizeable part of the §11 budget spent on nothing.
+
+## M1.6 — the measured precision and the time budget
+
+- **Context:** M1.6 asks for precision ≥ 0.9 on the `close` bucket of `tabs-300.json` and a median
+  under 15 ms for a thousand tabs, both recorded here.
+- **Decision:** with `DEFAULT_SCORING_CONFIG` exactly as PLAN.md §6.4 specifies it — no tuning was
+  needed — the score puts **100** of the 300 labelled tabs in `close`, **94** of them labelled
+  `suggest`: **precision 0.940**, recall 0.570 (94 of the 165 `suggest` labels). All six
+  disagreements are search-result pages the labels keep. The median of 11 runs over
+  `tabs-1000.json`, after 5 warm-up runs, is **10.1 ms** (fastest 9.7).
+- **Why:** the recall is deliberately the lower number: inactivity alone caps at 55 and so can never
+  reach the `close` bucket by itself, which is what keeps the precision up (PLAN.md §3.1). The six
+  search pages are the price of the +25 transient rule, and the labels were written to disagree in
+  exactly that direction. `tests/unit/scoring.fixtures.test.ts` keeps both numbers under test, with
+  a recall floor so that a later tuning cannot buy precision by suggesting almost nothing. The
+  benchmark lives in that file too, but `vitest.config.ts` leaves V8 coverage on for every normal
+  run and it makes the loop about 2.4× slower (24.1 ms), so the assertion there allows three times
+  the budget and the user-facing number is measured with
+  `npx vitest run tests/unit/scoring.fixtures.test.ts --coverage.enabled=false`.
