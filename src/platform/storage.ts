@@ -1,0 +1,283 @@
+/**
+ * Everything the extension persists, PLAN.md §10.
+ *
+ * One module, one item per key, each typed, versioned and with a default, so that no
+ * caller invents a key or a shape. `storage.local` for what must survive a restart,
+ * `storage.session` for the guard's volatile state, which PLAN.md §10 wants lost on
+ * restart. The 10 MB `local` quota is enough: no `unlimitedStorage`.
+ *
+ * **Adding a migration.** Every item starts at `version: 1`. When a stored shape changes,
+ * bump that item's version and add the function that turns the old value into the new one:
+ *
+ * ```ts
+ * defineVersioned<Settings>('local:settings', DEFAULT_SETTINGS, {
+ *   version: 2,
+ *   migrations: { 2: (old) => ({ ...(old as SettingsV1), newField: 0 }) },
+ * });
+ * ```
+ *
+ * WXT records the stored version in the item's metadata and runs the missing migrations
+ * in order when the extension updates, so a user who skips a release is migrated step by
+ * step.
+ *
+ * **The value you read is not yours to mutate.** The fallbacks are shared objects, so
+ * every write goes through the helpers below, which build a new value instead of editing
+ * the one they read.
+ */
+
+import { storage } from 'wxt/utils/storage';
+import type { StorageItemKey } from 'wxt/utils/storage';
+
+import { keepKey } from '../core/scoring';
+import type {
+  ActivityStore,
+  ArchivedTab,
+  GuardExemption,
+  GuardState,
+  Keeps,
+  Settings,
+} from '../core/types';
+import {
+  ARCHIVE_CAP,
+  DEFAULT_GUARD_SETTINGS,
+  DEFAULT_GUARD_STATE,
+  DEFAULT_KEEP_MS,
+  DEFAULT_MATCH_OPTIONS,
+  DEFAULT_SETTINGS,
+  EXEMPTION_TTL_MS,
+} from '../core/types';
+
+/** How an item declares a shape change. See the module comment. */
+interface VersionedOptions {
+  readonly version: number;
+  readonly migrations: Record<number, (oldValue: unknown) => unknown>;
+}
+
+function defineVersioned<T>(key: StorageItemKey, fallback: T, options?: VersionedOptions) {
+  return storage.defineItem<T>(key, {
+    fallback,
+    version: options?.version ?? 1,
+    // Migrations make WXT read the item as soon as it is defined, to compare the stored
+    // version with this one. At version 1 there is nothing it could migrate from, so
+    // there are none and the panel starts without seven extra reads. WXT reads an item
+    // with no recorded version as version 1, which is the value the first migration
+    // added here will be handed.
+    migrations: options?.migrations,
+  });
+}
+
+/** `Record<tabId, TabActivity>`, what the tracker remembers (PLAN.md §6.1). */
+export const activityItem = defineVersioned<ActivityStore>('local:activity', {});
+
+/** Normalized URL → when the keep runs out, `null` for "Sempre". */
+export const keepsItem = defineVersioned<Keeps>('local:keeps', {});
+
+/** "Siti protetti" (PLAN.md §4.6): domain patterns such as `*.atlassian.net`. */
+export const protectedDomainsItem = defineVersioned<string[]>('local:protectedDomains', []);
+
+/** The closed tabs, newest first, capped at `ARCHIVE_CAP`. Write with `addToArchive`. */
+export const archiveItem = defineVersioned<ArchivedTab[]>('local:archive', []);
+
+/** Read with `readSettings`, which fills in the keys an older release did not store. */
+export const settingsItem = defineVersioned<Settings>('local:settings', DEFAULT_SETTINGS);
+
+/** The duplicate whitelist, as raw patterns, exactly as the user wrote them. */
+export const duplicateWhitelistItem = defineVersioned<string[]>('local:duplicateWhitelist', []);
+
+/** The guard's volatile state. `storage.session` is cleared when the browser restarts. */
+export const guardStateItem = defineVersioned<GuardState>('session:guardState', {
+  ...DEFAULT_GUARD_STATE,
+  exemptions: [],
+});
+
+/**
+ * One read-modify-write at a time per key.
+ *
+ * Two closes a few milliseconds apart would otherwise both read the same archive and the
+ * second write would lose the first one's entries. The extension runs in several contexts
+ * (PLAN.md §5.2), so this only orders the writes made by one of them; it is what makes
+ * "one write per action" safe for the actions a single context can start at once.
+ */
+const queues = new Map<string, Promise<unknown>>();
+
+function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T> {
+  const previous = queues.get(key) ?? Promise.resolve();
+  // `action` runs whether the operation before it resolved or rejected: one failed write
+  // must not block the key forever.
+  const next = previous.then(action, action);
+  queues.set(
+    key,
+    next.catch(() => undefined),
+  );
+  return next;
+}
+
+/**
+ * The whole settings object, with every default filled in.
+ *
+ * A release that adds a setting finds the objects older releases stored without it, so
+ * the defaults are merged in on every read rather than through a migration per field.
+ * The result is a fresh object: the caller may edit it and hand it back to `saveSettings`.
+ */
+export async function readSettings(): Promise<Settings> {
+  const stored = await settingsItem.getValue();
+  return {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    guard: { ...DEFAULT_GUARD_SETTINGS, ...stored.guard },
+    match: { ...DEFAULT_MATCH_OPTIONS, ...stored.match },
+  };
+}
+
+/** Stores the settings as one value, which is how the panel edits them. */
+export async function saveSettings(next: Settings): Promise<void> {
+  await settingsItem.setValue(next);
+}
+
+/**
+ * Archives a whole action's tabs in **one** write (PLAN.md §10), newest first.
+ *
+ * The batch keeps the order it was given and goes in front of everything older. Over
+ * `ARCHIVE_CAP` the oldest entries are dropped, which is the FIFO cap of §10.
+ */
+export function addToArchive(entries: readonly ArchivedTab[]): Promise<void> {
+  return serialize(archiveItem.key, async () => {
+    if (entries.length === 0) return;
+    const stored = await archiveItem.getValue();
+    await archiveItem.setValue([...entries, ...stored].slice(0, ARCHIVE_CAP));
+  });
+}
+
+/** Removes entries by `ArchivedTab.id`, in one write: a restore ends here (PLAN.md §9). */
+export function removeFromArchive(ids: readonly string[]): Promise<void> {
+  return serialize(archiveItem.key, async () => {
+    if (ids.length === 0) return;
+    const wanted = new Set(ids);
+    const stored = await archiveItem.getValue();
+    const kept = stored.filter((entry) => !wanted.has(entry.id));
+    // Nothing matched: do not rewrite the same array.
+    if (kept.length === stored.length) return;
+    await archiveItem.setValue(kept);
+  });
+}
+
+/** A keep is over when its moment has come: the scoring reads it the same way. */
+function isExpired(until: number | null, now: number): boolean {
+  return until !== null && until <= now;
+}
+
+/**
+ * "Mantieni" (PLAN.md §9): `durationMs` defaults to the 7 days of §6.4, `null` is "Sempre".
+ *
+ * The URL is keyed with `keepKey`, never with the user's comparison options, so changing
+ * one of those settings cannot silently forget a keep (DECISIONS, M1.6).
+ */
+export function addKeep(
+  url: string,
+  now: number,
+  durationMs: number | null = DEFAULT_KEEP_MS,
+): Promise<void> {
+  return serialize(keepsItem.key, async () => {
+    const stored = await keepsItem.getValue();
+    const until = durationMs === null ? null : now + durationMs;
+    await keepsItem.setValue({ ...stored, [keepKey(url)]: until });
+  });
+}
+
+/** Forgets a keep, whether it had expired or not. */
+export function removeKeep(url: string): Promise<void> {
+  return serialize(keepsItem.key, async () => {
+    const key = keepKey(url);
+    const stored = await keepsItem.getValue();
+    if (!(key in stored)) return;
+    const next = { ...stored };
+    delete next[key];
+    await keepsItem.setValue(next);
+  });
+}
+
+/** The keeps still standing at `now`. A read never writes: `pruneKeeps` does that. */
+export async function readKeeps(now: number): Promise<Keeps> {
+  const stored = await keepsItem.getValue();
+  const active: Keeps = {};
+  for (const [key, until] of Object.entries(stored)) {
+    if (!isExpired(until, now)) active[key] = until;
+  }
+  return active;
+}
+
+export async function isKept(url: string, now: number): Promise<boolean> {
+  const stored = await keepsItem.getValue();
+  const key = keepKey(url);
+  return key in stored && !isExpired(stored[key] ?? null, now);
+}
+
+/**
+ * Drops the expired keeps in one write and says how many went.
+ *
+ * This is the `keeps` half of the 6 h cleanup of PLAN.md §10; the alarm that calls it
+ * comes with the background's housekeeping.
+ */
+export function pruneKeeps(now: number): Promise<number> {
+  return serialize(keepsItem.key, async () => {
+    const stored = await keepsItem.getValue();
+    const next: Keeps = {};
+    for (const [key, until] of Object.entries(stored)) {
+      if (!isExpired(until, now)) next[key] = until;
+    }
+    const dropped = Object.keys(stored).length - Object.keys(next).length;
+    if (dropped > 0) await keepsItem.setValue(next);
+    return dropped;
+  });
+}
+
+/** A tab the guard must leave alone, by id or by URL (PLAN.md §8.6). */
+export type ExemptionTarget = Pick<GuardExemption, 'tabId' | 'url'>;
+
+/**
+ * Exempts a tab the extension itself opened or restored, for `EXEMPTION_TTL_MS` by
+ * default (PLAN.md §8.6).
+ *
+ * The same write drops the exemptions that have already run out, so the set cannot grow
+ * without an alarm to collect it.
+ */
+export function addExemption(
+  target: ExemptionTarget,
+  now: number,
+  ttlMs: number = EXEMPTION_TTL_MS,
+): Promise<void> {
+  return serialize(guardStateItem.key, async () => {
+    const state = await guardStateItem.getValue();
+    await guardStateItem.setValue({
+      ...state,
+      exemptions: [...activeOf(state.exemptions, now), { ...target, until: now + ttlMs }],
+    });
+  });
+}
+
+function activeOf(exemptions: readonly GuardExemption[], now: number): GuardExemption[] {
+  return exemptions.filter((exemption) => exemption.until > now);
+}
+
+/** The exemptions still standing at `now`. */
+export async function readExemptions(now: number): Promise<GuardExemption[]> {
+  const state = await guardStateItem.getValue();
+  return activeOf(state.exemptions, now);
+}
+
+/**
+ * Whether the guard must leave this tab alone.
+ *
+ * The id and the URL are two ways of recognising the same tab, so either is enough: a
+ * restored tab gets a new id, and a tab that navigated keeps its id. URLs are compared
+ * with `keepKey`, like every other store keyed by URL.
+ */
+export async function isExempt(target: ExemptionTarget, now: number): Promise<boolean> {
+  const exemptions = await readExemptions(now);
+  const url = target.url === undefined ? undefined : keepKey(target.url);
+  return exemptions.some(
+    (exemption) =>
+      (exemption.tabId !== undefined && exemption.tabId === target.tabId) ||
+      (exemption.url !== undefined && url !== undefined && keepKey(exemption.url) === url),
+  );
+}
