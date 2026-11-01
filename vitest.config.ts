@@ -1,9 +1,10 @@
 import { defineConfig } from 'vitest/config';
+import { WxtVitest } from 'wxt/testing/vitest-plugin';
 
 export default defineConfig({
   test: {
-    include: ['tests/unit/**/*.test.ts'],
-    // A green run with no tests at all would make the gate meaningless.
+    // A green run with no tests at all would make the `test` gate meaningless. Vitest
+    // only accepts this for the whole run, not per project.
     passWithNoTests: false,
     coverage: {
       provider: 'v8',
@@ -22,5 +23,28 @@ export default defineConfig({
         branches: 95,
       },
     },
+    // Two suites in one `pnpm test` run, because what they may assume about the
+    // environment is the opposite.
+    projects: [
+      {
+        test: {
+          // No extension API at all: these tests prove the code also behaves outside
+          // an extension context (`typeof browser === 'undefined'`), which a global
+          // fake would hide.
+          name: 'unit',
+          include: ['tests/unit/**/*.test.ts'],
+        },
+      },
+      {
+        // `WxtVitest` stubs `browser` and `chrome` with `fakeBrowser` and resolves
+        // WXT's imports, which is what the `src/platform/` modules that talk to the
+        // browser need (TASKS.md M1.7).
+        plugins: [WxtVitest()],
+        test: {
+          name: 'extension',
+          include: ['tests/ext/**/*.test.ts'],
+        },
+      },
+    ],
   },
 });

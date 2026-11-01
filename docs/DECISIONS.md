@@ -933,3 +933,69 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   run and it makes the loop about 2.4× slower (24.1 ms), so the assertion there allows three times
   the budget and the user-facing number is measured with
   `npx vitest run tests/unit/scoring.fixtures.test.ts --coverage.enabled=false`.
+
+## M1.7 — two vitest projects, because one global `browser` fake would hide a real case
+- **Context:** `fakeBrowser` is needed to test `src/platform/`, but WXT installs it with
+  `vi.stubGlobal('browser', fakeBrowser)` for the whole run, and `tests/unit/i18n.test.ts` proves
+  `t()` returns `''` when there is no `browser` at all. In WXT 0.21.5 the entry points are
+  `wxt/testing/fake-browser` and `wxt/testing/vitest-plugin`; there is no `wxt/testing`.
+- **Decision:** `vitest.config.ts` declares two projects. `unit` (`tests/unit/**`) runs with no
+  extension API, as before; `extension` (`tests/ext/**`) carries `WxtVitest()`. Tests that need the
+  fake go in `tests/ext/`. Coverage and its thresholds stay at the root, over the whole run.
+- **Why:** the alternative was to weaken the "outside an extension context" test, which the gates
+  exist to prevent. `passWithNoTests: false` can only be set for the whole run, so it lives at the
+  root too.
+
+## M1.7 — every item starts at `version: 1` with no `migrations`
+- **Context:** `storage.defineItem` reads the item as soon as it is defined when `migrations` is
+  passed, to compare the stored version with the declared one — seven extra reads at startup here.
+- **Decision:** every item declares `version: 1` and no `migrations`, through one local helper,
+  `defineVersioned`, which the module comment documents as the single place a future migration is
+  added.
+- **Why:** `@wxt-dev/storage` reads an item with no recorded version as version 1, so a value
+  written now is exactly what a future `migrations: { 2: … }` will be handed; declaring the version
+  today costs nothing and keeps that door open, while declaring an empty migration map costs a read
+  per item per context.
+
+## M1.7 — the archive is newest first, and the cap drops the tail
+- **Context:** PLAN.md §10 caps the archive at 1000 entries (FIFO) and asks for one write per
+  action, but does not say in which order the entries are stored.
+- **Decision:** `addToArchive` puts the action's tabs in front of everything older, keeping the
+  order it was given, then `slice(0, ARCHIVE_CAP)`. A batch larger than the cap keeps its own head.
+- **Why:** the panel shows the most recently closed tabs first (PLAN.md §9), so the stored order is
+  the displayed order and no sort is needed on read; cutting the tail is what makes the cap FIFO.
+
+## M1.7 — one read-modify-write at a time per key
+- **Context:** "one write per action" is only safe if two actions in the same context cannot both
+  read the same archive and have the second write lose the first one's entries.
+- **Decision:** a small per-key promise queue in `src/platform/storage.ts` serializes the helpers
+  that read then write (archive, keeps, exemptions). A failed operation does not block its key.
+- **Why:** no new dependency for something this small, and it covers the case that actually happens
+  — two closes a few milliseconds apart in the background. Writes made by different contexts
+  (PLAN.md §5.2) are not ordered by it, and no helper here is called from two contexts at once.
+
+## M1.7 — keeps and exemptions are keyed with `keepKey`
+- **Context:** both stores are keyed by URL, and the user can change the comparison options.
+- **Decision:** `keepKey` from `src/core/scoring.ts` is the key function for `local:keeps` and the
+  comparison for an exemption's URL. An exemption matches on tab id **or** URL.
+- **Why:** the keys must not depend on a setting the user can change, or a keep would be silently
+  forgotten (DECISIONS, M1.6). Either half of an exemption is enough because a restored tab comes
+  back with a new id, while a tab that merely navigated keeps its id (PLAN.md §8.6).
+
+## M1.7 — the settings are read with the defaults merged in, not migrated
+- **Context:** a release that adds a setting finds the objects older releases stored without it.
+- **Decision:** `readSettings` spreads `DEFAULT_SETTINGS`, `DEFAULT_GUARD_SETTINGS` and
+  `DEFAULT_MATCH_OPTIONS` under the stored value and returns a fresh object; the panel saves the
+  whole object back.
+- **Why:** adding a setting is the common shape change, and a version bump plus a migration for each
+  one is more machinery than it is worth; a reader that merges defaults cannot see `undefined`.
+  Returning a fresh object also keeps the shared `DEFAULT_*` constants from being edited in place.
+
+## M1.7 — the cleanup alarm is not part of this module
+- **Context:** PLAN.md §10 asks for a 6 h alarm that drops expired archive entries, expired keeps
+  and orphaned activity records.
+- **Decision:** M1.7 ships `pruneKeeps` only, because "keeps with an expiry" is in its scope and an
+  uncollected expiry grows without bound. Archive retention, orphaned activity and the alarm itself
+  belong to the background's housekeeping.
+- **Why:** the alarm needs `browser.alarms` and the background entry point, neither of which exists
+  yet; reads here never write, so the collection can be added later without changing any caller.
