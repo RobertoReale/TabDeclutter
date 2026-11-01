@@ -96,23 +96,39 @@ Keep each entry short: a title that names the decision (it is how later tasks fi
 two sentences per bullet. No code listings, no narrative of what you tried. Every later task greps
 this file.
 
-`docs/MANUAL-CHECKS.md`: the owner is not a developer of this code, and a script shows him these
-entries word for word when the phase ends. So write each one **in Italian, as instructions he can
-follow without asking anything**: a one-line title, then numbered steps indented by two spaces,
-then the expected result. Use the test build he is given (`%USERPROFILE%\TabDeclutter-prova\chrome`
-and `...\firefox`, loaded as the page he sees explains); never ask him to build, run a command or
-open the repository. Say how long it takes if it is more than a few minutes. Before writing a step,
-make sure it is actually possible: for example, a Firefox *temporary* add-on disappears when
-Firefox closes, so a check that needs a restart must say how to do it. Add new entries at the end of
-the file, after the existing ones and outside the "Before publishing" section unless that is
-where they belong.
+`docs/MANUAL-CHECKS.md`: the owner is not a developer of this code, his time is the scarcest
+resource of the project, and a script shows him these entries word for word when the phase ends.
+
+**Add a manual check only when it is indispensable**: something a person must see or judge in the
+real browser (a visible result, a real restart, whether a suggestion makes sense) and no automated
+test can cover. Before adding one, ask whether a unit or E2E test could check it instead; if so,
+write that test and no entry. Never write a check that needs developer tools, reading stored values,
+copying numbers, `chrome://` internals, or a conversation with Claude to inspect data. If the
+behaviour is not visible in the UI yet, do not write the check now: write it under the later task
+that makes it visible (its id in the parentheses), so it is shown when he can just look at it.
+Merge checks that share a setup. Most tasks add no entry at all; a phase should end with at most
+two or three.
+
+Each entry is **in Italian, short, and needs no explanation**:
+
+- a title of at most 12 words saying what he should see;
+- a line `⏱ <minutes> · <where>`;
+- at most 4 numbered steps of one short sentence each, using the test build he is given
+  (`%USERPROFILE%\TabDeclutter-prova\chrome` and `...\firefox`, loaded as his page explains);
+  never ask him to build, run a command or open the repository;
+- one sentence of expected result, saying what to write to Claude if it is not so.
+
+Before writing a step, make sure it is actually possible: a Firefox *temporary* add-on disappears
+when Firefox closes, so a check that needs a Firefox restart belongs to "Before publishing" (the
+signed build). Add new entries at the end of the file, outside the "Before publishing" section
+unless that is where they belong.
 
 ```markdown
-- [ ] (M1.8) L'età delle schede sopravvive al riavvio di Chrome
-  1. Con la build di prova installata, apri 3 schede qualsiasi e lasciale aperte almeno 10 minuti.
-  2. Chiudi Chrome del tutto e riaprilo (con "Continua da dove eri rimasto" attivo).
-  3. Apri il pannello di TabDeclutter.
-  Risultato atteso: le 3 schede non risultano "appena aperte"; l'età è quella di prima.
+- [ ] (M2.2) Dopo il riavvio di Chrome le schede non tornano «nuove»
+  ⏱ 2 minuti · Chrome
+  1. Apri il pannello e guarda l'età di due o tre schede.
+  2. Chiudi Chrome del tutto, riaprilo con le stesse schede e riapri il pannello.
+  Risultato atteso: le stesse schede mostrano la stessa età di prima, non «appena aperta».
 ```
 
 A check whose phase id has no dot (for example `setup`) is shown only at release time.

@@ -328,13 +328,13 @@ function Get-Todo($S) {
         $p = @($S.phases | Where-Object { $_.key -eq $phase })[0]
         $own = @($pending | Where-Object { $_.phase -eq $phase })
         $steps = [System.Collections.Generic.List[string]]::new()
-        $steps.Add("Installa (o aggiorna) la build di prova: istruzioni in fondo alla pagina. La trovi in $TestBuild.")
+        $steps.Add("Aggiorna la build di prova (istruzioni in fondo alla pagina).")
         foreach ($c in $own) {
-            $text = "[$($c.id)] $($c.title)"
+            $text = $c.title
             if ($c.body.Count) { $text += "`n" + ($c.body -join "`n") }
             $steps.Add($text)
         }
-        $steps.Add("Quando hai finito, apri Claude Code nella cartella TabDeclutter e scrivi: «Ho fatto le verifiche della fase $phase» e racconta cosa non andava, anche a parole tue. Claude spunta le verifiche e, se serve, aggiunge un task di correzione che l'agente farà subito.")
+        $steps.Add("Poi scrivi a Claude: «Ho fatto le verifiche della fase $phase», e cosa non andava.")
         & $say 'checks' ("Fase {0} ({1}) completata: {2} verifiche da fare" -f $phase, $p.title, $own.Count) $steps.ToArray()
     }
 
@@ -393,10 +393,18 @@ function Write-Page($S, $Items) {
     $h = { param($t) ConvertTo-Html $t }
     $cards = foreach ($i in $Items) {
         $steps = ($i.steps | ForEach-Object {
-            $lines = $_ -split "`n"
+            # A check reads as one line: its title and how long it takes. The steps are
+            # there when he starts it, folded until then, so the list stays a list.
+            $lines = @($_ -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
             $first = & $h $lines[0]
-            $rest = if ($lines.Count -gt 1) { '<div class="sub">' + (($lines[1..($lines.Count - 1)] | ForEach-Object { & $h $_ }) -join '<br>') + '</div>' } else { '' }
-            "<li>$first$rest</li>"
+            $rest = @($lines | Select-Object -Skip 1)
+            $meta = ''
+            if ($rest.Count -and $rest[0].StartsWith('⏱')) {
+                $meta = '<div class="sub">' + (& $h $rest[0]) + '</div>'
+                $rest = @($rest | Select-Object -Skip 1)
+            }
+            $more = if ($rest.Count) { '<details><summary>Come si fa</summary><div class="sub">' + (($rest | ForEach-Object { & $h $_ }) -join '<br>') + '</div></details>' } else { '' }
+            "<li>$first$meta$more</li>"
         }) -join "`n"
         $detail = if ($i.detail) {
             "<details open><summary>$(& $h $i.detailTitle)</summary><pre>$(& $h $i.detail.Trim())</pre></details>"
