@@ -67,3 +67,12 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   3. Leggi una riga alla volta e chiediti solo questo: se fosse una tua scheda, la chiuderesti senza pensarci? Se sì, la risposta giusta è «da chiudere»; se ci pensi anche solo un attimo, è «da tenere».
   4. Dì all'assistente i numeri delle righe su cui non sei d'accordo, con una parola sul perché. Ci vogliono circa quindici minuti.
   Risultato atteso: su 30 esempi sei d'accordo almeno 27 volte. Soprattutto: nessuna scheda marcata «da chiudere» ti sembra una che poi ti dispiacerebbe non ritrovare. È quello l'errore che conta, perché il prodotto preferisce lasciar aperta una scheda inutile piuttosto che chiuderne una utile.
+
+## Fase M1 — Il motore delle regole
+
+- [ ] (M1.6) Le schede che il punteggio propone di chiudere ti convincono
+  1. Questa verifica non si fa nel browser: il punteggio adesso funziona, ma non ha ancora una finestra in cui guardarlo. Serve il tuo giudizio su quello che propone, perché l'unico errore che conta davvero — proporre una scheda che poi ti dispiacerebbe non ritrovare — lo riconosce solo una persona.
+  2. Scrivi all'assistente: «mostrami cosa propone il punteggio su tabs-300». Ti risponde con due elenchi. Nel primo le 6 schede che il punteggio propone di chiudere mentre l'etichetta scritta a mano le teneva; nel secondo venti schede prese a caso tra le altre che propone di chiudere. Per ognuna: titolo, indirizzo, da quanto non viene guardata e la ragione in una riga, come la vedresti nel pannello.
+  3. Parti dal secondo elenco, che è il prodotto normale: leggi una riga alla volta e chiediti se, vedendo quella riga con quella ragione accanto, cliccheresti «chiudi» senza pensarci. Segna le righe che ti sembrano sbagliate.
+  4. Poi guarda il primo elenco: sono sei pagine di risultati di ricerca lasciate aperte da giorni. Qui va bene anche dare ragione al punteggio e non all'etichetta — dillo all'assistente, perché sono le etichette il bersaglio del punteggio e vanno corrette prima che qualcosa ci venga costruito sopra. Dieci minuti in tutto.
+  Risultato atteso: nel secondo elenco al massimo due righe su venti ti sembrano sbagliate, e nessuna è una scheda che ti dispiacerebbe non ritrovare. Se una lo è, riportala con una parola sul perché: vale più di dieci righe giuste.
