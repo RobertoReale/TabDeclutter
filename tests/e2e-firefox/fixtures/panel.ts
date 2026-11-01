@@ -159,7 +159,11 @@ export interface PanelState {
   /** `<html lang>`, which the panel sets itself (PLAN.md §4.8). */
   lang: string;
   title: string;
-  /** The panel's only visible text, or `null` if it has not rendered. */
+  /** The header's "N tabs · M windows", or `null` if it has not rendered. */
+  counts: string | null;
+  /** The labels of the navigation, in order. */
+  nav: string[];
+  /** The text of whichever view is showing. */
   main: string | null;
   /** `i18n.getUILanguage()`, the language the catalogue was resolved against. */
   uiLanguage: string | null;
@@ -177,10 +181,12 @@ export async function panelState(page: Page): Promise<PanelState> {
       url: location.href,
       lang: document.documentElement.lang,
       title: document.title,
+      counts: document.querySelector('.td-counts')?.textContent ?? null,
+      nav: [...document.querySelectorAll('.td-nav-item')].map((item) => item.textContent ?? ''),
       main: document.querySelector('main')?.textContent ?? null,
       uiLanguage: typeof browser === 'undefined' ? null : browser.i18n.getUILanguage(),
     }));
-    if (state.url === PANEL_URL && state.main !== null && state.main !== '') break;
+    if (state.url === PANEL_URL && state.counts !== null && state.counts !== '') break;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   if (state === undefined) throw new Error('never read the panel');

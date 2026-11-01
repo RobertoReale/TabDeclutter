@@ -46,24 +46,24 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   1. In Chrome, con la build di prova caricata, apri `chrome://extensions/`: leggi il nome e la descrizione di TabDeclutter.
   2. Appoggia il puntatore sull'icona di TabDeclutter nella barra, senza cliccare, e aspetta che compaia il suggerimento giallo.
   3. Apri `chrome://extensions/shortcuts` e leggi i nomi delle tre scorciatoie di TabDeclutter.
-  4. Apri il pannello (clic sull'icona) e leggi la parola che c'è scritta dentro.
-  5. In Firefox, con la build di prova caricata, apri `about:addons` → «Estensioni» e leggi il nome e la descrizione di TabDeclutter; poi appoggia il puntatore sulla sua icona nella barra e leggi il suggerimento; poi apri la barra laterale e leggi la parola che c'è scritta dentro.
-  Risultato atteso: il nome è sempre «TabDeclutter». Da nessuna parte — nome, descrizione, suggerimento, nomi delle scorciatoie, pannello — deve comparire qualcosa come `__MSG_extName__` o `__MSG_...__`: se lo vedi, è un errore. Se il browser è in italiano, la descrizione comincia con «Suggerisce quali schede chiudere», il suggerimento sull'icona dice «TabDeclutter — apri il pannello», le due scorciatoie in più si chiamano «Chiudi tutti i duplicati» e «Pausa/riprendi protezione duplicati», e nel pannello c'è scritto «Ciao». Se il browser è in inglese (o in qualsiasi altra lingua) le stesse voci sono in inglese: «Suggests which tabs to close…», «TabDeclutter — open the panel», «Close all duplicate tabs», «Pause or resume duplicate protection», «Hello».
+  4. Apri il pannello (clic sull'icona) e leggi i nomi delle tre voci in alto.
+  5. In Firefox, con la build di prova caricata, apri `about:addons` → «Estensioni» e leggi il nome e la descrizione di TabDeclutter; poi appoggia il puntatore sulla sua icona nella barra e leggi il suggerimento; poi apri la barra laterale e leggi i nomi delle tre voci in alto.
+  Risultato atteso: il nome è sempre «TabDeclutter». Da nessuna parte — nome, descrizione, suggerimento, nomi delle scorciatoie, pannello — deve comparire qualcosa come `__MSG_extName__` o `__MSG_...__`: se lo vedi, è un errore. Se il browser è in italiano, la descrizione comincia con «Suggerisce quali schede chiudere», il suggerimento sull'icona dice «TabDeclutter — apri il pannello», le due scorciatoie in più si chiamano «Chiudi tutti i duplicati» e «Pausa/riprendi protezione duplicati», e nel pannello le tre voci sono «Riordina», «Organizza» e «Archivio». Se il browser è in inglese (o in qualsiasi altra lingua) le stesse voci sono in inglese: «Suggests which tabs to close…», «TabDeclutter — open the panel», «Close all duplicate tabs», «Pause or resume duplicate protection», «Declutter», «Organize», «Archive».
 
 - [x] (M0.3) L'altra lingua funziona anche lei
   1. Questa è la controprova della verifica precedente: serve a vedere l'altra delle due lingue. Fallo in un solo browser, quello che ti è più comodo, e poi rimetti la lingua di prima.
   2. In Chrome: apri `chrome://settings/languages`, aggiungi l'altra lingua se non c'è (inglese se Chrome è in italiano, italiano se è in inglese), apri il menù `⋮` accanto a quella lingua e scegli «Mostra Google Chrome in questa lingua», poi clicca «Riavvia».
   3. In Firefox: apri `about:preferences`, nella sezione «Lingua» clicca «Imposta alternative…», aggiungi e porta in cima l'altra lingua, conferma e riavvia Firefox quando te lo chiede.
-  4. Ricontrolla le stesse cose del punto precedente: descrizione in `chrome://extensions/` o `about:addons`, suggerimento sull'icona, parola dentro il pannello.
+  4. Ricontrolla le stesse cose del punto precedente: descrizione in `chrome://extensions/` o `about:addons`, suggerimento sull'icona, voci in alto nel pannello.
   5. Rimetti la lingua che usavi prima, con lo stesso percorso, e riavvia.
-  Risultato atteso: tutti quei testi sono passati all'altra lingua — «Ciao» diventa «Hello» o viceversa, e la descrizione cambia di conseguenza. Il nome resta «TabDeclutter» in entrambe. Se una sola di quelle voci resta nella lingua di prima, scrivi quale.
+  Risultato atteso: tutti quei testi sono passati all'altra lingua — «Riordina» diventa «Declutter» o viceversa, e la descrizione cambia di conseguenza. Il nome resta «TabDeclutter» in entrambe. Se una sola di quelle voci resta nella lingua di prima, scrivi quale.
 
 - [x] (M0.5) In Firefox la barra laterale è in italiano
   1. Il test automatico su Firefox controlla la barra laterale solo in inglese: per vedere l'italiano serve un Firefox in italiano, e un Firefox normale non sa cambiare lingua da solo. Se il tuo Firefox è già in italiano ti basta il punto 3.
   2. Apri `about:preferences`, nella sezione «Lingua» clicca «Imposta alternative…», aggiungi l'italiano e portalo in cima, conferma e riavvia Firefox quando te lo chiede.
-  3. Con la build di prova caricata, apri la barra laterale di TabDeclutter (clic sulla sua icona nella barra degli strumenti) e leggi la parola che c'è scritta dentro.
+  3. Con la build di prova caricata, apri la barra laterale di TabDeclutter (clic sulla sua icona nella barra degli strumenti) e leggi i nomi delle tre voci in alto.
   4. Se al punto 2 hai cambiato lingua, rimetti quella di prima con lo stesso percorso e riavvia.
-  Risultato atteso: nella barra laterale c'è scritto «Ciao», non «Hello» e non `__MSG_hello__`. Se vedi «Hello» con Firefox in italiano, scrivilo.
+  Risultato atteso: le tre voci sono «Riordina», «Organizza» e «Archivio», non «Declutter», «Organize», «Archive», e nessuna è `__MSG_...__`. Se le vedi in inglese con Firefox in italiano, scrivilo.
 
 ## Fase M2 — Il pannello
 

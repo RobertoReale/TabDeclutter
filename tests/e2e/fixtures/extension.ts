@@ -84,7 +84,7 @@ export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
 
   // The profile lives in the test's own output directory, so Playwright creates
   // it, keeps it when the test fails and removes it when it passes.
-  context: async ({ recorder, uiLanguage, headless }, use, testInfo) => {
+  context: async ({ recorder, uiLanguage, headless, colorScheme }, use, testInfo) => {
     const userDataDir = testInfo.outputPath('profile');
     seedProfile(userDataDir, uiLanguage);
 
@@ -98,6 +98,10 @@ export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
       // the runner's default (`en-US`) would win and the panel would be in
       // Italian while calling itself English.
       locale: uiLanguage,
+      // `prefers-color-scheme`, the only way the panel picks its theme (PLAN.md
+      // §4.7). Passed on so `test.use({ colorScheme: 'dark' })` reaches a
+      // persistent context, which does not get the runner's options for free.
+      colorScheme,
       args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`],
     });
     recorder.attach(context);
