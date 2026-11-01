@@ -53,4 +53,7 @@ directly. Use:
    it was running.
 
 Never add `Co-authored-by` or any attribution to Claude in commits. Never push, create a GitHub
-repository or publish to a store unless he asks.
+repository or publish to a store unless he asks. One standing exception he asked for (2026-11-01):
+when the sequence finishes, `tools/assistant.ps1` creates `RobertoReale/TabDeclutter` on GitHub as
+a **public** repository and pushes main (task branches stay local). The store submission is still
+his to ask for.

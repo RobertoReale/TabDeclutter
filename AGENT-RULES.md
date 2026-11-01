@@ -54,6 +54,12 @@ merges, so `pnpm gates` and the merge cannot disagree.
 - When a browser API seems to behave differently from the spec, check the official docs
   (developer.chrome.com, developer.mozilla.org) before deciding. Then pick the simplest solution
   consistent with PLAN.md §3, and record it in DECISIONS.md.
+- **Searching the web.** You have `WebSearch` and `WebFetch`. Use them when the repository cannot
+  answer and a guess would cost more than a search: an API that does not behave as the spec says,
+  an error you cannot explain from the code, a version or compatibility question, a behaviour that
+  may have changed after your training. Prefer official documentation and the library's own source
+  over forums, and cite the page in the DECISIONS.md entry it supports. Do not search for what
+  PLAN.md, the code or the tests already say: every result is carried by every later request.
 
 ## Deciding versus stopping
 

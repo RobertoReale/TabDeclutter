@@ -77,6 +77,8 @@ $AnswerTaskName = 'tabdeclutter-answer'
 $StopFile = Join-Path $Cfg.logDir 'auto-stopped.txt'
 $DoneFile = Join-Path $Cfg.logDir 'auto-finished.txt'
 $GaveUpFile = Join-Path $Cfg.logDir 'watchdog-gave-up.txt'
+$GitHubRepo = 'RobertoReale/TabDeclutter'
+$GitHubDescription = 'Suggests which tabs to close, groups the rest into native tab groups and blocks duplicate tabs. Chrome and Firefox, everything stays on the device.'
 
 New-Item -ItemType Directory -Path $StateDir -Force | Out-Null
 
@@ -338,7 +340,8 @@ function Get-Todo($S) {
 
     if ($S.status -eq 'finished') {
         $release = @($S.checks | Where-Object { -not $_.done -and $_.phase -eq 'release' })
-        $steps = @('Tutti i task sono stati fatti, verificati e uniti a main.') +
+        $steps = @('Tutti i task sono stati fatti, verificati e uniti a main.',
+                   "Il codice viene pubblicato da solo su GitHub, come repository pubblico: https://github.com/$GitHubRepo") +
                  @($release | ForEach-Object { "[$($_.id)] $($_.title)" + $(if ($_.body.Count) { "`n" + ($_.body -join "`n") } else { '' }) }) +
                  @('Per la pubblicazione apri Claude Code nella cartella TabDeclutter e scrivi: «Aiutami a pubblicare». Pacchetti e testi sono già pronti (docs/STORE_LISTING.md, docs/RELEASE-CHECKLIST.md).')
         & $say 'checks' 'TabDeclutter è finito: restano i passi della pubblicazione' $steps
@@ -533,6 +536,35 @@ Non modificare questi file: vengono sostituiti alla fine di ogni fase.
     }
 }
 
+function Publish-Repository([hashtable] $State) {
+    <#
+        The owner's standing decision (2026-11-01): when every task is done, main goes to
+        GitHub as a public repository. Only main: the task branches stay on this machine.
+        Safe to repeat, so a failure is simply tried again on the next check: an existing
+        repository or remote is reused, and pushing a main that is already there changes
+        nothing.
+    #>
+    $sha = (Invoke-Git rev-parse main).out.Trim()
+    if ($State['publishedSha'] -eq $sha) { return $true }
+
+    if ((Invoke-Git remote get-url origin).code -ne 0) {
+        $null = & gh repo view $GitHubRepo 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $out = & gh repo create $GitHubRepo --public --description $GitHubDescription 2>&1
+            if ($LASTEXITCODE -ne 0) { Write-Log "publish: gh repo create failed: $out"; return $false }
+            Write-Log "publish: created $GitHubRepo (public)"
+        }
+        $add = Invoke-Git remote add origin "https://github.com/$GitHubRepo.git"
+        if ($add.code -ne 0) { Write-Log "publish: remote add failed: $($add.err.Trim())"; return $false }
+    }
+
+    $push = Invoke-Git push origin main
+    if ($push.code -ne 0) { Write-Log "publish: push failed: $($push.err.Trim())"; return $false }
+    $State['publishedSha'] = $sha
+    Write-Log "publish: main at $sha pushed to $GitHubRepo"
+    return $true
+}
+
 # ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
@@ -584,6 +616,20 @@ function Invoke-Check {
         [void] (Update-TestBuild -State $state)
         $events.Add('Tutti i task sono finiti. Restano i passi della pubblicazione.')
         $state['finishedAnnounced'] = $true
+    }
+
+    if ($s.status -eq 'finished') {
+        $already = $state['publishedSha']
+        if (Publish-Repository -State $state) {
+            if ($state['publishedSha'] -ne $already) {
+                $events.Add("Il codice è pubblicato su GitHub: https://github.com/$GitHubRepo")
+                $state.Remove('publishFailNoticed')
+            }
+        }
+        elseif (-not $state['publishFailNoticed']) {
+            $events.Add('La pubblicazione su GitHub non è riuscita: riprovo da solo ogni 10 minuti. Se non si sblocca, scrivi a Claude «la pubblicazione su GitHub non va».')
+            $state['publishFailNoticed'] = $true
+        }
     }
 
     # A runner that died: give the watchdog half an hour before bothering anyone.
