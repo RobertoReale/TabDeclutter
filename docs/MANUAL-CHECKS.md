@@ -60,3 +60,10 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   3. Nell'elenco clicca la riga più recente, chiamata «CI», e poi il riquadro «gates»: compare la lista dei passaggi. Aspetta che finisca — tra cinque e venti minuti, perché scarica due browser e li avvia davvero.
   4. Se accanto a un passaggio c'è una X rossa, clicca quel passaggio per aprire il registro e copia le ultime dieci righe.
   Risultato atteso: la riga «CI» ha il segno di spunta verde e tutti i passaggi sono verdi (install, lint, typecheck, unit tests, build chrome, build firefox, web-ext lint, e2e chromium, e2e firefox). Gli stessi controlli passano sul tuo PC prima di ogni commit, quindi un rosso qui è quasi sempre una differenza dell'ambiente di GitHub e non un difetto del prodotto: riportalo con le righe che hai copiato e col nome del passaggio rosso.
+
+- [ ] (M1.5) Controllo a campione di 30 etichette delle schede di prova
+  1. Questa verifica non si fa nel browser e non serve installare niente: dentro il progetto ci sono 300 schede finte, e per ognuna è già stata scritta a mano la risposta alla domanda «un utente attento la chiuderebbe?». Serve il tuo giudizio su 30 di quelle risposte.
+  2. Scrivi all'assistente: «mostrami 30 etichette di tabs-300». Ti risponde con un elenco numerato: per ogni scheda il titolo, l'indirizzo, da quanto tempo non viene guardata, quante volte è stata aperta, la risposta scelta («da chiudere» oppure «da tenere») e la ragione in una riga.
+  3. Leggi una riga alla volta e chiediti solo questo: se fosse una tua scheda, la chiuderesti senza pensarci? Se sì, la risposta giusta è «da chiudere»; se ci pensi anche solo un attimo, è «da tenere».
+  4. Dì all'assistente i numeri delle righe su cui non sei d'accordo, con una parola sul perché. Ci vogliono circa quindici minuti.
+  Risultato atteso: su 30 esempi sei d'accordo almeno 27 volte. Soprattutto: nessuna scheda marcata «da chiudere» ti sembra una che poi ti dispiacerebbe non ritrovare. È quello l'errore che conta, perché il prodotto preferisce lasciar aperta una scheda inutile piuttosto che chiuderne una utile.
