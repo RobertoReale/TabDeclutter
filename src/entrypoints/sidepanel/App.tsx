@@ -39,7 +39,8 @@ export function App() {
       <header class="td-header">
         <div class="td-header-row">
           <h1 class="td-title">{t('extName')}</h1>
-          <span class="td-counts">
+          {/* §4.8: the counts are a polite live region (see `HealthBar`). */}
+          <span class="td-counts" aria-live="polite">
             {countsText(tabCount.value, windowCount.value, t, language)}
           </span>
           <button

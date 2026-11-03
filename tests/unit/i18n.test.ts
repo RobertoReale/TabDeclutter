@@ -96,6 +96,7 @@ describe('the message catalogues', () => {
       'countWindowsOne',
       'countWindowsOther',
       'declutterEmpty',
+      'declutterList',
       'extDescription',
       'extName',
       'healthReview',

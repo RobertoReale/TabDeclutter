@@ -1,10 +1,16 @@
 /**
- * One row of the Declutter list (PLAN.md §4.3).
+ * One row of the Declutter list (PLAN.md §4.3, §4.8).
  *
  * Two lines: the favicon, the title and the domain in grey; then why the score suggests
  * it, with the chips that qualify it. The actions appear on hover or focus — "Vai" is the
  * only one M2.2 has, the rest come with the actions task — and nothing on the row changes
  * anything about the tab except by being clicked.
+ *
+ * It is a `row` of the grid the list is, with everything it shows in one `gridcell`, so a
+ * screen reader reads the title, the domain, the reason and the chips as one thing, which
+ * is what the row is. Whether this row holds the single tab stop of §4.8 is the view's
+ * answer, because ↑/↓ cross section boundaries; `Enter` on it goes to the tab, and the
+ * view handles that too, where the key bubbles to.
  *
  * A title and a URL are a page's own text and are never trusted: they are JSX children
  * and an attribute, never markup (invariant 7).
@@ -15,11 +21,21 @@ import type { Favicon } from '@/platform/favicon';
 import { faviconOf } from '@/platform/favicon';
 import { activateTab } from '@/platform/tabs';
 import { displayHost } from '@/core/url';
+import { rowStopId } from '../keyboard';
 import type { DeclutterRow } from '../sections';
 import { chipsOf, reasonText } from '../reasons';
 import { Chip } from './Chip';
 
-export function TabRow({ row, language }: { row: DeclutterRow; language: string }) {
+export function TabRow({
+  row,
+  language,
+  focused,
+}: {
+  row: DeclutterRow;
+  language: string;
+  /** Whether this row holds the list's `tabindex="0"`. */
+  focused: boolean;
+}) {
   const { tab, scored } = row;
   const reason = reasonText(scored, t, language);
   const chips = chipsOf(scored, t, language);
@@ -29,33 +45,38 @@ export function TabRow({ row, language }: { row: DeclutterRow; language: string 
   const title = tab.title === '' ? host : tab.title;
 
   return (
-    <li class="td-row">
-      <div class="td-row-line">
-        <TabFavicon tab={tab} />
-        <span class="td-row-title" title={tab.url}>
-          {title}
-        </span>
-        <span class="td-row-host">{host}</span>
-      </div>
+    <div class="td-row" role="row" data-stop={rowStopId(tab.id)} tabIndex={focused ? 0 : -1}>
+      <div class="td-row-cell" role="gridcell">
+        <div class="td-row-line">
+          <TabFavicon tab={tab} />
+          <span class="td-row-title" title={tab.url}>
+            {title}
+          </span>
+          <span class="td-row-host">{host}</span>
+        </div>
 
-      <div class="td-row-line td-row-meta">
-        {reason !== '' && <span class="td-row-reason">{reason}</span>}
-        {chips.map((chip) => (
-          <Chip key={chip.id} text={chip.text} />
-        ))}
-        <span class="td-row-actions">
-          <button
-            type="button"
-            class="td-action"
-            onClick={() => {
-              void activateTab(tab.id, tab.windowId).catch(failed);
-            }}
-          >
-            {t('actionGo')}
-          </button>
-        </span>
+        <div class="td-row-line td-row-meta">
+          {reason !== '' && <span class="td-row-reason">{reason}</span>}
+          {chips.map((chip) => (
+            <Chip key={chip.id} text={chip.text} />
+          ))}
+          <span class="td-row-actions">
+            <button
+              type="button"
+              class="td-action"
+              // Out of the tab order, so the list stays the single tab stop of §4.8: the
+              // row's own `Enter` already does what this button does.
+              tabIndex={-1}
+              onClick={() => {
+                void activateTab(tab.id, tab.windowId).catch(failed);
+              }}
+            >
+              {t('actionGo')}
+            </button>
+          </span>
+        </div>
       </div>
-    </li>
+    </div>
   );
 }
 

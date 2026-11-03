@@ -1274,3 +1274,45 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Why:** the alternative was a second `chrome.tabs` caller in the panel for one action and a
   mapper in a third place, and the module M3.1 would have created is the same one. The API is a
   parameter with a default, so both functions are tested without an extension context.
+
+## M2.3 — the Declutter list is a `grid`, not a `listbox`
+
+- **Context:** §4.8 leaves the choice open between `listbox`/`option` and `grid`, and asks for the
+  task to record it.
+- **Decision:** `grid` — one `div[role=grid]` named by `declutterList`, a `rowgroup` per section,
+  and a `row` per section header and per tab, each with a single `gridcell`.
+- **Why:** a row already holds a button ("Vai") and M3.2 adds a checkbox and three more actions,
+  and ARIA forbids interactive descendants inside an `option`. The cost is the sections' `<h2>`:
+  a grid's children must be rows or rowgroups, so the heading became the text of the header row.
+  Its name and count are unchanged, and the panel still has exactly one `<h1>`.
+
+## M2.3 — the section header is a row with `aria-expanded`, not a button
+
+- **Context:** the sections fold, and §4.8 wants ↑/↓ to walk the whole list, headers included.
+- **Decision:** the header is the rowgroup's first `row`, carrying `aria-expanded` and the fold's
+  click; `Enter` on it folds and unfolds.
+- **Why:** `aria-expanded` is allowed on `row` in ARIA 1.2, and a nested `<button>` would have been
+  a second tab stop inside a list that is meant to be one. The row's own button is out of the tab
+  order (`tabindex="-1"`) for the same reason: `Enter` on the row already goes to the tab.
+
+## M2.3 — one tab stop for the whole list, by stop id, and no wrapping
+
+- **Context:** a roving tabindex has to survive tabs closing, sections folding and the list being
+  rebuilt from a signal on every tab event.
+- **Decision:** the stops are identified by a string (`section:<id>`, `row:<tabId>`) held in
+  `DeclutterView`, not by an index; when the chosen stop is gone the first stop takes the focus;
+  ↑ at the top and ↓ at the bottom do nothing.
+- **Why:** an index would move the focus to a different tab the moment a row above it disappeared.
+  Not wrapping is the ARIA grid default and keeps `Tab` the way out of the list. The arithmetic is
+  `sidepanel/keyboard.ts`, a pure module, so it is unit-tested without a browser.
+
+## M2.3 — the focus ring uses `:focus`, and the counts are the live regions
+
+- **Context:** §4.8 asks for a visible focus ring and `aria-live="polite"` on the counts.
+- **Decision:** `.td-row`/`.td-section-toggle` draw the ring on `:focus`, not `:focus-visible`;
+  the polite regions are the header's counts and the health bar's sentence.
+- **Why:** these stops are reached only through the roving tabindex, which focuses them from
+  script, and Chromium's `:focus-visible` heuristic drops the ring after a programmatic focus that
+  followed a click — leaving a keyboard user with no idea where they are. Both counts change on
+  their own as tabs open and close, which is what a polite region is for; the toasts §4.8 also
+  mentions do not exist until M3.2.

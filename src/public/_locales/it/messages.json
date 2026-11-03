@@ -71,6 +71,10 @@
     "message": "Tutto in ordine. Nessuna scheda da rivedere.",
     "description": "Shown in the Declutter view when the score suggests nothing."
   },
+  "declutterList": {
+    "message": "Schede da rivedere",
+    "description": "Accessible name of the Declutter list, never shown on screen: what a screen reader says when the keyboard enters it."
+  },
   "sectionDuplicates": {
     "message": "Duplicati",
     "description": "Heading of the Declutter section holding tabs that show a page another tab already shows."
