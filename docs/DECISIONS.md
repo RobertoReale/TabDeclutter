@@ -1316,3 +1316,119 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   followed a click — leaving a keyboard user with no idea where they are. Both counts change on
   their own as tabs open and close, which is what a polite region is for; the toasts §4.8 also
   mentions do not exist until M3.2.
+
+## M2.4 — the badge counts the `close` bucket only, written plain
+
+- **Context:** §4.1 asks for "how many tabs are to close" and gives `14` as the example, without
+  saying what to do about a thousand tabs or about the `review` bucket.
+- **Decision:** the count is the tabs whose bucket is `close`, and the text is `String(count)`:
+  no `Intl` grouping, no `99+` cap, and nothing at all at 0.
+- **Why:** the `review` bucket is "come and look", which is a reason to open the panel and not a
+  number to act on, and §3 asks the extension to say one actionable thing. A cap would hide the
+  only case where the number is itself the news; four digits is beyond any real tab count, and the
+  browser truncates a badge of its own accord long before that.
+
+## M2.4 — a neutral grey for the count, the accent for the flash
+
+- **Context:** §4.1 asks for a "neutral colour" and §8.5 for a colour change lasting 1.5 s, neither
+  of them named.
+- **Decision:** the badge is `--td-text-muted` (`#5f6368`) with white text, and the flash is
+  `--td-accent` (`#1a73e8`); both are re-asserted on every refresh.
+- **Why:** a badge the user never asked for must not look like an alert, which rules out the accent
+  for the resting state — and leaves it free to make the flash unmistakably a change. Re-asserting
+  the pair costs two calls on a path that has already scored every tab, and it is what repairs a
+  flash whose restore never ran because Chrome stopped the worker (invariant 6). The tests check
+  that the resting colour is a grey and the flash is not, so the palette can be retuned without
+  rewriting them.
+
+## M2.4 — what asks the badge for a recompute, and nothing else
+
+- **Context:** §11 forbids polling and names a 2 s debounce and a 30-minute alarm, without listing
+  the events in between.
+- **Decision:** `tabs.onCreated/onRemoved/onMoved/onUpdated/onActivated/onAttached/onDetached`
+  (and `onReplaced` where it exists), a `storage.onChanged` on the five stored values a score
+  reads, the alarm, and `runtime.onStartup`/`onInstalled`. All of them share one 2 s timer, and the
+  "Mostra badge" setting is read before anything is counted.
+- **Why:** this is exactly the set the panel follows, because the same rules read all of it: a keep
+  being added or the tracker flushing its records changes the verdict with no tab having moved, and
+  the settings reaching the badge through the same door is what makes "Mostra badge" take effect at
+  once. Reading the setting first means a tab event costs no score at all when the badge is off,
+  which is the cheapest the §11 budget can be. The badge writes nothing, so there is no loop.
+
+## M2.4 — the 30-minute alarm is created only when it is missing
+
+- **Context:** the alarm is asked for at the top level of the background, which runs again every
+  time Chrome starts a new service worker — many times an hour on a busy browser.
+- **Decision:** `alarms.get(name)` first, and `alarms.create` only if there is nothing there.
+- **Why:** `alarms.create` with a name that already exists replaces the alarm and starts its
+  countdown again, so an unconditional create would push the next refresh forever out of reach and
+  the 30 minutes of §11 would never elapse. Alarms outlive the worker, so the read is almost always
+  the whole of the work.
+
+## M2.4 — `badge.ts` repeats the panel's snapshot read instead of sharing it
+
+- **Context:** `sidepanel/state/tabs.ts` already reads the same seven things and calls `scoreTabs`
+  over them; the badge needs one number out of the same answer.
+- **Decision:** the read is written again inside `badge.ts`. M2.4's scope is `badge.ts`, its
+  registration and its tests.
+- **Why:** what invariant 9 asks is one definition of a verdict, and both callers get that from
+  `core/scoring`; what is duplicated is the plumbing around it. The two contexts want different
+  things of it — the panel wants every scored tab and its window roll-up, the badge wants a count
+  and, unlike the panel, must not score at all when the setting is off — so the shared function
+  would have grown options for both before it saved anything. Worth revisiting when a third caller
+  appears: the guard of M3b.2 is the candidate.
+
+## M2.4 — perf budgets are CPU time, not wall time
+
+- **Context:** the `perf budgets` gate reds the sequence on a machine that is busy. `pnpm perf`
+  measured the score at 9.8-12.5 ms on an idle machine and 16-69 ms with a browser and an editor
+  on the same cores, with `src/core/scoring.ts` untouched; two merges of M2.4 failed on it.
+- **Decision:** `tests/perf/budget.ts` measures the CPU time of the process — `process.cpuUsage()`,
+  user plus system — around each run and asserts the median of that. The limit is still PLAN.md
+  §11's 15 ms with no allowance on top, the warm-up is still 20 runs, the median is still over 11
+  samples and the measurement is still repeated up to 3 times; `phasekit.json` is unchanged and so
+  is the scoring code. The wall-clock median is measured too and printed beside the CPU one, for
+  information only.
+- **Why:** the budget is a claim about the code, and a wall clock also charges it for every
+  millisecond the operating system gave to something else. CPU time counts only the intervals in
+  which this process was running, which is the right question for `score()`: it is synchronous and
+  single-threaded, so on a quiet machine the two numbers are the same thing (measured: 9.75 CPU
+  against 9.91 wall) and under load the CPU figure is the one that still means something (measured:
+  25 CPU against 166 wall).
+- **Why a batch.** `process.cpuUsage()` reads in microseconds but is charged in scheduler ticks:
+  on Windows it moves in steps of about 15.6 ms, so a single 10 ms run measures 0 or 15.6 and never
+  10. Each sample is therefore a batch of runs divided by its size. The size is calibrated, not
+  written down, so the helper stays honest for the much quicker budgets of M2.5 and M4.1 — but it
+  is calibrated after the warm-up and never below 16 runs, because the first run of all and a
+  calibration taken while the machine was busy both read far too high and would choose a batch of
+  three, which is back to reporting ticks.
+- **What it still cannot do.** CPU time counts time, not cycles, so it does not undo anything that
+  makes the instructions themselves slower. Contention: with ten processes pinning the cores the
+  same work costs 17-32 ms of charged CPU, because a hyperthread sibling and a saturated memory bus
+  slow it down. Clock: with this laptop on battery and a third of it taken by other processes,
+  Windows reported the CPU at 42-71% of its nominal frequency and the score cost 52-68 ms of CPU —
+  five times the 9.75 ms the same tree measured on a quiet machine, and the 12.69 ms it measured
+  again once the machine was quiet. So the gate still answers for the code *and* for the state of
+  the machine: what is gone is only the failure caused by waiting for the scheduler.
+- **Not for everything.** An operation that waits rather than computes uses no CPU while it waits,
+  so if M2.5's panel-opening budget turns out to be dominated by waiting on the browser it needs a
+  wall-clock mode here. `BudgetReport.wallMedians` is already measured for that day.
+
+## M2.4 — perf budgets are enforced on mains only; on battery they are measured and reported, not enforced
+
+- **Context:** on battery Windows runs this laptop at about half its nominal frequency. The same
+  commit measured 9.75 ms on mains and 29-68 ms on battery with the machine idle, so the gate
+  stopped the unattended sequence over the power cable, not over the code — and the owner runs the
+  sequence on battery.
+- **Decision:** `tests/perf/budget.ts` asks `Win32_Battery.BatteryStatus` through a short
+  `powershell -NoProfile` call before it measures anything (1 means discharging; anything else, no
+  battery, a failed query or a platform that is not Windows all mean mains). On mains nothing
+  changes: same limit, same runs, same three attempts, same failure. On battery the measurement
+  still runs and still prints its medians, and if every attempt is over budget the test passes
+  after printing `perf budget NOT ENFORCED: running on battery (CPU throttled)`. The budget,
+  `phasekit.json` and the scoring code are untouched; `powerSourceFrom` is a pure function so the
+  reading has a unit test (`tests/unit/perf-budget-power.test.ts`).
+- **Why:** a budget in milliseconds asserted on a throttled CPU measures the machine. Not enforcing
+  it there costs nothing, because a real regression is caught by the next run on mains — every
+  merge the owner makes while plugged in, and any CI — while the number is in the log of every run
+  either way, under a line that cannot be read as a pass.

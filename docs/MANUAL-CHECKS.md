@@ -87,3 +87,10 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   4. Su una riga di scheda premi Invio.
   5. Accendi il Narratore di Windows con Ctrl+Win+Invio, rifai i punti 1, 2 e 3 ascoltando che cosa dice, e spegnilo con la stessa combinazione.
   Risultato atteso: ↓ e ↑ si muovono di una riga per volta e passano da una sezione alla successiva senza premere Tab, e si vede sempre su quale riga sei. Invio su un'intestazione apre e chiude la sezione; Invio su una riga porta su quella scheda. Il Narratore, su un'intestazione, legge il nome della sezione con quante schede contiene e dice se è aperta o chiusa; su una riga legge titolo, sito e motivo. Se ↓ salta delle righe, se non si capisce dove sei, o se il Narratore non legge qualcosa, scrivi a Claude che cosa.
+
+- [ ] (M2.4) Il numero sull'icona si legge, non allarma e si aggiorna da solo
+  ⏱ 3 minuti · Chrome, con le tue schede vere
+  1. Con la build di prova caricata, guarda l'icona di TabDeclutter nella barra degli strumenti e leggi il numero sopra (se non c'è nessun numero, va bene: è una risposta anche quella).
+  2. Apri il pannello e leggi la scritta in alto accanto alla barra, «… da rivedere».
+  3. Chiudi a mano una delle schede che il pannello propone, poi aspetta cinque secondi senza toccare nulla e guarda di nuovo l'icona.
+  Risultato atteso: il numero si legge a colpo d'occhio e non sembra un allarme (è grigio, non rosso); non è mai più grande del numero del punto 2, perché sull'icona vanno solo le schede da chiudere e nel pannello anche quelle da rivedere; al punto 3 cambia da solo entro pochi secondi, senza riaprire il pannello. Se il pannello dice «Tutto in ordine», sull'icona non deve esserci nessun numero. Se il numero è più grande di quello del pannello, o se dopo il punto 3 resta quello di prima, scrivi a Claude i due numeri.
