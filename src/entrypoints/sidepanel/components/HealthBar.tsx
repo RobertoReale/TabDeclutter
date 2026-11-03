@@ -29,7 +29,14 @@ export function HealthBar({
         {/* A percentage, so the bar is as wide as the panel happens to be (§4.7). */}
         <div class="td-health-fill" style={`width: ${(tidy * 100).toFixed(1)}%`} />
       </div>
-      <p class="td-health-text">{reviewText(review, t, language)}</p>
+      {/*
+        §4.8: the counts are a polite live region, so a tab opening or closing is
+        announced as a new number rather than only redrawn. It is the sentence that is
+        live, not the bar, for the same reason the bar is `aria-hidden`.
+      */}
+      <p class="td-health-text" aria-live="polite">
+        {reviewText(review, t, language)}
+      </p>
     </div>
   );
 }

@@ -254,14 +254,25 @@ button {
   margin-top: var(--td-space-3);
 }
 
-/* The whole header is the button, so the whole width folds the section. */
+/*
+ * The section header: the whole width folds the section, and it is one of the
+ * stops ↑/↓ walk (§4.8), so it is at least `--td-target` tall and it keeps a
+ * pointer cursor even though it is a row rather than a button.
+ */
 .td-section-toggle {
+  min-height: var(--td-target);
+  font-size: var(--td-text-section);
+  font-weight: 500;
+  cursor: pointer;
+  /* A double click on a header would otherwise select the heading text. */
+  user-select: none;
+}
+
+.td-section-head {
   display: flex;
   align-items: center;
   gap: var(--td-space-1);
-  width: 100%;
   min-height: var(--td-target);
-  text-align: left;
 }
 
 .td-caret {
@@ -275,12 +286,6 @@ button {
 .td-section-name {
   flex: 1;
   min-width: 0;
-}
-
-.td-rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
 }
 
 /*
@@ -297,6 +302,21 @@ button {
 
 .td-row:hover {
   background: var(--td-hover);
+}
+
+/*
+ * §4.8's visible focus ring, on the list's own stops. `:focus` here and not
+ * `:focus-visible`: a row and a section header are reachable only through the
+ * roving tabindex — with ↑/↓, or by a click that hands them the keyboard — so
+ * the ring always says something true, and nothing rests on Chromium's
+ * `:focus-visible` heuristic for a programmatic focus. Inset, because a row is
+ * as wide as the list.
+ */
+.td-section-toggle:focus,
+.td-row:focus {
+  outline: 2px solid var(--td-accent);
+  outline-offset: -2px;
+  border-radius: var(--td-radius-sm);
 }
 
 .td-row-line {

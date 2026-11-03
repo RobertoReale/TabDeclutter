@@ -71,6 +71,10 @@
     "message": "All tidy. No tabs to review.",
     "description": "Shown in the Declutter view when the score suggests nothing."
   },
+  "declutterList": {
+    "message": "Tabs to review",
+    "description": "Accessible name of the Declutter list, never shown on screen: what a screen reader says when the keyboard enters it."
+  },
   "sectionDuplicates": {
     "message": "Duplicates",
     "description": "Heading of the Declutter section holding tabs that show a page another tab already shows."

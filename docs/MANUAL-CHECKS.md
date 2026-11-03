@@ -78,3 +78,12 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   1. Apri il pannello e guarda l'età di due o tre schede.
   2. Chiudi Chrome del tutto, riaprilo con le stesse schede e riapri il pannello.
   Risultato atteso: le stesse schede mostrano la stessa età di prima, non «appena aperta».
+
+- [ ] (M2.3) La lista si usa con la sola tastiera e lo screen reader la legge
+  ⏱ 5 minuti · Chrome
+  1. Con la build di prova caricata apri il pannello e, senza toccare il mouse, premi Tab finché il bordo di selezione non arriva sulla prima intestazione della lista («Duplicati (…)» o la prima che c'è).
+  2. Scendi con ↓ fino in fondo alla lista, poi risali con ↑.
+  3. Su un'intestazione di sezione premi Invio: la sezione si apre. Premi Invio di nuovo: si chiude.
+  4. Su una riga di scheda premi Invio.
+  5. Accendi il Narratore di Windows con Ctrl+Win+Invio, rifai i punti 1, 2 e 3 ascoltando che cosa dice, e spegnilo con la stessa combinazione.
+  Risultato atteso: ↓ e ↑ si muovono di una riga per volta e passano da una sezione alla successiva senza premere Tab, e si vede sempre su quale riga sei. Invio su un'intestazione apre e chiude la sezione; Invio su una riga porta su quella scheda. Il Narratore, su un'intestazione, legge il nome della sezione con quante schede contiene e dice se è aperta o chiusa; su una riga legge titolo, sito e motivo. Se ↓ salta delle righe, se non si capisce dove sei, o se il Narratore non legge qualcosa, scrivi a Claude che cosa.

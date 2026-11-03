@@ -239,12 +239,81 @@ async function seed(context: BrowserContext, extensionId: string): Promise<Seede
     await api.storage.local.set({ activity });
   }, historyFor(tabs));
 
+  /*
+   * Nothing is old until that write lands: the panel renders the tracker's own records
+   * first, and the seeded history reaches it as a `storage.onChanged`. A test that read
+   * the list straight away would read the one before the seed, and a test that walked it
+   * with the keyboard would have the rows shift under the walk. §4.3's folded section is
+   * what the seeded history produces and the records on their own never do, so its
+   * appearance is the signal that the list on screen is the seeded one.
+   */
+  await expect(panel.locator('.td-section-toggle[aria-expanded="false"]')).toHaveCount(1);
+
   return { panel, tabs };
 }
 
 /** A section by its place in the list, which is the order §4.3 fixes. */
 function sectionAt(panel: Page, at: number) {
   return panel.locator('.td-section').nth(at);
+}
+
+/** The `data-stop` of whatever has the focus, or `null` if it is not a stop of the list. */
+async function focusedStop(panel: Page): Promise<string | null> {
+  return panel.evaluate(() => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement ? (active.dataset.stop ?? null) : null;
+  });
+}
+
+/**
+ * Tabs forward until the focus is inside the list, the way a keyboard user arrives: the
+ * gear, the three views, and then the list — which is one tab stop, whatever it holds
+ * (§4.8's roving tabindex).
+ */
+async function tabIntoList(panel: Page): Promise<string | null> {
+  for (let press = 0; press < 12; press++) {
+    await panel.keyboard.press('Tab');
+    const stop = await focusedStop(panel);
+    if (stop !== null) return stop;
+  }
+  throw new Error('Tab never reached the Declutter list');
+}
+
+/** Where ↓ lands, pressed `times` over. */
+async function arrowDown(panel: Page, times: number): Promise<string | null> {
+  for (let press = 0; press < times; press++) await panel.keyboard.press('ArrowDown');
+  return focusedStop(panel);
+}
+
+/** Every stop of the list, in the order the document has them, which is the order ↓ walks. */
+async function stopsInDocument(panel: Page): Promise<string[]> {
+  return panel.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-stop]')].map(
+      (stop) => stop.dataset.stop ?? '',
+    ),
+  );
+}
+
+/**
+ * ↓ from the top of the list until `id` has the focus.
+ *
+ * The number of presses is read off the document rather than counted out here: how many
+ * rows a section ends up with depends on the score, and a page that was slow to load
+ * leaves a blank tab that adds one.
+ */
+async function arrowDownTo(panel: Page, id: string): Promise<string | null> {
+  const at = (await stopsInDocument(panel)).indexOf(id);
+  if (at < 0) throw new Error(`no stop ${id} in the list`);
+  return arrowDown(panel, at);
+}
+
+/** Every stop currently holding `tabindex="0"`, which §4.8 says is exactly one. */
+async function tabStops(panel: Page): Promise<string[]> {
+  return panel.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-stop][tabindex="0"]')].map(
+      (stop) => stop.dataset.stop ?? '',
+    ),
+  );
 }
 
 /** A heading as the panel builds it: "Duplicates (1)". */
@@ -347,6 +416,72 @@ test.describe('in English', () => {
     );
   });
 
+  test('the list is a grid the keyboard walks from end to end (§4.8)', async ({
+    context,
+    extensionId,
+  }) => {
+    const { panel } = await seed(context, extensionId);
+
+    // The roles M2.3 chose, in the DOM (docs/DECISIONS.md): one grid, named by a string
+    // only a screen reader hears, a rowgroup per section, and every row a single cell.
+    const grid = panel.getByRole('grid', { name: message('en', 'declutterList') });
+    await expect(grid).toHaveCount(1);
+
+    // What the list holds is the previous test's subject; here the shape is read off the
+    // document, so what is checked is the relation between the roles and the stops rather
+    // than a composition this test would only be repeating.
+    const sections = await panel.locator('.td-section').count();
+    expect(sections).toBeGreaterThan(1);
+    await expect(grid.locator('> [role="rowgroup"]')).toHaveCount(sections);
+    // The fold is on the header row itself, which is why the header is a row and not a
+    // button: it is one of the places ↑/↓ stop.
+    await expect(panel.locator('[role="rowgroup"] > [role="row"][aria-expanded]')).toHaveCount(
+      sections,
+    );
+
+    // Every row is a stop and carries exactly one cell: the section headers and the rows
+    // of the open sections, and nothing else.
+    const inDocument = await stopsInDocument(panel);
+    expect(inDocument.length).toBeGreaterThan(sections);
+    await expect(panel.getByRole('row')).toHaveCount(inDocument.length);
+    await expect(panel.getByRole('gridcell')).toHaveCount(inDocument.length);
+
+    // The counts are the polite live regions §4.8 asks for: the header's and the bar's.
+    await expect(panel.locator('.td-counts')).toHaveAttribute('aria-live', 'polite');
+    await expect(panel.locator('.td-health-text')).toHaveAttribute('aria-live', 'polite');
+
+    // Whatever the list holds, it is one tab stop, before the keyboard has touched it.
+    expect(await tabStops(panel)).toEqual([inDocument[0]]);
+
+    // Tab arrives at the top of the list, and ↓ walks every stop in turn, crossing from a
+    // section's last row into the next section's header without a second Tab.
+    expect(await tabIntoList(panel)).toBe(inDocument[0]);
+    const walked: (string | null)[] = [inDocument[0] ?? null];
+    for (let step = 1; step < inDocument.length; step++) {
+      walked.push(await arrowDown(panel, 1));
+    }
+    expect(walked).toEqual(inDocument);
+
+    // The tab stop followed the focus, and the far end does not wrap round to the top.
+    const last = inDocument[inDocument.length - 1];
+    expect(await tabStops(panel)).toEqual([last]);
+    expect(await arrowDown(panel, 1)).toBe(last);
+
+    // §4.8's visible focus ring, as Chromium computes it for the focused row.
+    const ring = await panel.evaluate(() => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement)) return null;
+      const style = getComputedStyle(active);
+      return { style: style.outlineStyle, width: style.outlineWidth };
+    });
+    expect(ring).toEqual({ style: 'solid', width: '2px' });
+
+    // And Tab leaves the list rather than walking its rows one by one: the row's own
+    // button is out of the tab order, because `Enter` on the row already activates it.
+    await panel.keyboard.press('Tab');
+    expect(await focusedStop(panel)).toBeNull();
+  });
+
   /*
    * Last, and on its own: activating a tab is a `tabs.onActivated` the background answers
    * by rewriting `local:activity` from its own memory, which undoes the seed a second
@@ -372,5 +507,62 @@ test.describe('in English', () => {
         }),
       )
       .toBe(beta.id);
+  });
+
+  /* Last for the same reason: it ends by activating a tab. */
+  test('the keyboard alone folds a section and goes to a tab with Enter (§4.8)', async ({
+    context,
+    extensionId,
+  }) => {
+    const { panel } = await seed(context, extensionId);
+
+    // §4.3's folded section is the one place in the list the keyboard has something to
+    // open. Which stop it is comes from the document: how many rows stand above it is the
+    // first test's subject, and counting them out again here would only make this test
+    // fail when that composition changes.
+    const folded = String(
+      await panel.locator('[role="row"][aria-expanded="false"]').getAttribute('data-stop'),
+    );
+    const inactive = panel.locator('.td-section').filter({
+      // By its stop, which the fold does not change, so the section is still this one
+      // once `Enter` has opened it.
+      has: panel.locator(`[data-stop="${folded}"]`),
+    });
+    const toggle = inactive.locator('.td-section-toggle');
+
+    const stops = await stopsInDocument(panel);
+    expect(await tabIntoList(panel)).toBe(stops[0]);
+    expect(await arrowDownTo(panel, folded)).toBe(folded);
+
+    // `Enter` on a header opens it, and `Enter` again closes it, without the focus moving.
+    await panel.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(inactive.locator('.td-row')).toHaveCount(1);
+    expect(await focusedStop(panel)).toBe(folded);
+
+    await panel.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(inactive.locator('.td-row')).toHaveCount(0);
+    expect(await focusedStop(panel)).toBe(folded);
+
+    // Open again, step onto the row it reveals, and go to the tab that row stands for:
+    // which tab that is, the row itself says, in the id its stop is named by.
+    await panel.keyboard.press('Enter');
+    const row = inactive.locator('.td-row').first();
+    await expect(row).toHaveText(new RegExp(GAMMA.title));
+    const stop = await row.getAttribute('data-stop');
+    // One step: the rows of a section follow its header immediately.
+    expect(await arrowDown(panel, 1)).toBe(stop);
+
+    await panel.keyboard.press('Enter');
+    await expect
+      .poll(async () =>
+        panel.evaluate(async () => {
+          const api = (globalThis as unknown as { chrome: SeedApi }).chrome;
+          const [active] = await api.tabs.query({ active: true, currentWindow: true });
+          return `row:${String(active?.id)}`;
+        }),
+      )
+      .toBe(stop);
   });
 });
