@@ -193,11 +193,58 @@ export async function panelState(page: Page): Promise<PanelState> {
   return state;
 }
 
+/** What the Declutter list rendered (PLAN.md §4.3). */
+export interface DeclutterState {
+  /** The heading of each section, in order: "Duplicates (1)". */
+  sections: string[];
+  /** The reason line of each row, in order. */
+  reasons: string[];
+}
+
+/**
+ * The Declutter list, once it has rows. Like `panelState`, a list that never arrives is
+ * returned as it last was, so the assertion fails on the real values.
+ *
+ * The section name is read from `.td-section-name` and not from the whole header: the
+ * header also holds the caret, which is decorative and not part of the heading.
+ */
+export async function declutterState(page: Page): Promise<DeclutterState> {
+  const read = async (): Promise<DeclutterState> =>
+    page.evaluate(() => ({
+      sections: [...document.querySelectorAll('.td-section-name')].map(
+        (name) => name.textContent ?? '',
+      ),
+      reasons: [...document.querySelectorAll('.td-row-reason')].map(
+        (reason) => reason.textContent ?? '',
+      ),
+    }));
+
+  let state = await read();
+  for (let attempt = 0; attempt < 40 && state.sections.length === 0; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    state = await read();
+  }
+  return state;
+}
+
 export interface PanelSession {
   /** `sidepanel.html` open in an ordinary tab: the sidebar renders this document. */
   page: Page;
   errors: ErrorCollector;
   close(): Promise<void>;
+}
+
+export interface PanelOptions {
+  /**
+   * Ordinary pages to open before the panel, for a test that needs tabs to score.
+   *
+   * Which of them Firefox ends up selecting is not ours to choose: `browsingContext.activate`
+   * — Puppeteer's `bringToFront` — is refused on the panel, because Gecko does not support it
+   * "in privileged scope", and the panel is a privileged document. Since the active tab of a
+   * window is protected (PLAN.md §6.4, step 1), a test must stay right whichever tab is
+   * selected; `declutter.spec.ts` does that by reading the selection back.
+   */
+  readonly tabs?: readonly string[];
 }
 
 /**
@@ -209,7 +256,7 @@ export interface PanelSession {
  * the alternative — adding `sidepanel.html` to `web_accessible_resources` — would
  * widen the shipped manifest for the tests' benefit.
  */
-export async function openPanel(): Promise<PanelSession> {
+export async function openPanel(options: PanelOptions = {}): Promise<PanelSession> {
   const firefox = await puppeteer.launch({
     browser: 'firefox',
     headless: true,
@@ -232,6 +279,12 @@ export async function openPanel(): Promise<PanelSession> {
     throw new Error(
       `Installed ${installed}, expected ${ADDON_ID}: the pinned UUID would not apply`,
     );
+  }
+
+  for (const url of options.tabs ?? []) {
+    const tab = await firefox.newPage();
+    // An ordinary http page, so Puppeteer's own navigation works here.
+    await tab.goto(url);
   }
 
   const page = await firefox.newPage();

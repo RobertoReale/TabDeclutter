@@ -28,7 +28,6 @@ import { compile } from '@/core/patterns';
 import type { ScoringResult } from '@/core/scoring';
 import { scoreTabs } from '@/core/scoring';
 import type { ActivityStore, Keeps, Settings, TabInfo } from '@/core/types';
-import { NO_GROUP_ID } from '@/core/types';
 import {
   activityItem,
   duplicateWhitelistItem,
@@ -38,12 +37,12 @@ import {
   readSettings,
   settingsItem,
 } from '@/platform/storage';
+import { queryTabs } from '@/platform/tabs';
+import type { DeclutterList } from '../sections';
+import { EMPTY_LIST, toSections } from '../sections';
 
 /** PLAN.md §5.2 asks for a 150 ms debounce on the tab events. */
 const RELOAD_DEBOUNCE_MS = 150;
-
-/** `windows.WINDOW_ID_NONE`, for a tab that belongs to no window. */
-const NO_WINDOW = -1;
 
 /** `local:activity` → `activity`: the key the browser reports a change under. */
 function bareKey(key: string): string {
@@ -117,12 +116,22 @@ export const scoring = computed<ScoringResult>(() => {
 });
 
 /**
+ * The Declutter list: the same scores, grouped into the sections of §4.3.
+ *
+ * A computed rather than something the view builds, so folding a section or
+ * switching views does not group the tabs again (PLAN.md §11).
+ */
+export const declutter = computed<DeclutterList>(() => {
+  const data = panelData.value;
+  if (data === null) return EMPTY_LIST;
+  return toSections(data.tabs, scoring.value);
+});
+
+/**
  * How many tabs the score suggests looking at: the "23 da rivedere" of §4.2.
  * Everything that is not `keep`, which is exactly what the Declutter view lists.
  */
-export const reviewCount = computed(
-  () => scoring.value.tabs.filter((tab) => tab.bucket !== 'keep').length,
-);
+export const reviewCount = computed(() => declutter.value.total);
 
 export interface PanelStateOptions {
   /** The clock, injected so the tests can be exact. */
@@ -204,9 +213,9 @@ export function startPanelState(options: PanelStateOptions = {}): PanelStateHand
 
 /** One pass over everything a score needs. */
 async function read(at: number): Promise<PanelData> {
-  const [browserTabs, activity, settings, keeps, protectedSites, whitelist, focusedWindowId] =
+  const [openTabs, activity, settings, keeps, protectedSites, whitelist, focusedWindowId] =
     await Promise.all([
-      browser.tabs.query({}),
+      queryTabs(),
       activityItem.getValue(),
       readSettings(),
       readKeeps(at),
@@ -216,7 +225,7 @@ async function read(at: number): Promise<PanelData> {
     ]);
 
   return {
-    tabs: asTabInfos(browserTabs as BrowserTab[]),
+    tabs: openTabs,
     activity,
     settings,
     keeps,
@@ -226,62 +235,6 @@ async function read(at: number): Promise<PanelData> {
     ownOrigin: browser.runtime.getURL(''),
     at,
   };
-}
-
-/**
- * What this module needs of a tab, whichever browser's type it came from.
- *
- * `platform/tabs.ts` owns this mapping once the panel starts acting on tabs
- * (PLAN.md §5.3); until then the only reader is this module. See
- * docs/DECISIONS.md.
- */
-interface BrowserTab {
-  id?: number;
-  windowId?: number;
-  index?: number;
-  url?: string;
-  pendingUrl?: string;
-  title?: string;
-  favIconUrl?: string;
-  pinned?: boolean;
-  audible?: boolean;
-  active?: boolean;
-  discarded?: boolean;
-  hidden?: boolean;
-  groupId?: number;
-  cookieStoreId?: string;
-  incognito?: boolean;
-  openerTabId?: number;
-  lastAccessed?: number;
-}
-
-/**
- * The tabs the core reasons about: the ones with an id, minus the ones another
- * extension hid, which PLAN.md §5.5 excludes everywhere.
- */
-function asTabInfos(browserTabs: readonly BrowserTab[]): readonly TabInfo[] {
-  return browserTabs
-    .filter((tab): tab is BrowserTab & { id: number } => tab.id !== undefined)
-    .filter((tab) => tab.hidden !== true)
-    .map((tab) => ({
-      id: tab.id,
-      windowId: tab.windowId ?? NO_WINDOW,
-      index: tab.index ?? 0,
-      url: tab.url ?? '',
-      pendingUrl: tab.pendingUrl,
-      title: tab.title ?? '',
-      favIconUrl: tab.favIconUrl,
-      pinned: tab.pinned === true,
-      audible: tab.audible === true,
-      active: tab.active === true,
-      discarded: tab.discarded === true,
-      hidden: false,
-      groupId: tab.groupId ?? NO_GROUP_ID,
-      cookieStoreId: tab.cookieStoreId,
-      incognito: tab.incognito === true,
-      openerTabId: tab.openerTabId,
-      lastAccessed: tab.lastAccessed,
-    }));
 }
 
 /**

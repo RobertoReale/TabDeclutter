@@ -150,3 +150,20 @@ export function registrableDomain(urlOrHostname: string): string | null {
   // own, which is what the user sees them as; see docs/DECISIONS.md.
   return getDomain(urlOrHostname.trim(), { allowPrivateDomains: true });
 }
+
+/**
+ * The host as a row shows it (PLAN.md §4.3, the grey domain): lower-case, without
+ * `www.`, `''` when the URL has no host at all (`about:blank`, a `file:` path, an empty
+ * string).
+ *
+ * Not `registrableDomain`: this is for the user to read, and `docs.example.com` and
+ * `example.com` are two different places to them, while `localhost` and `127.0.0.1` have
+ * no registrable domain and would otherwise show nothing. It is also what the favicon
+ * avatar takes its letter and its colour from, so the letter always matches the domain
+ * on screen (PLAN.md §5.5).
+ */
+export function displayHost(url: string): string {
+  const parsed = parse(url.trim());
+  if (parsed === null) return '';
+  return stripWww(parsed.hostname.toLowerCase());
+}

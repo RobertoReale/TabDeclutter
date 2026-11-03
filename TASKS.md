@@ -1036,7 +1036,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M1.7 Typed, versioned storage
 - [x] M1.8 Tab activity tracker
 - [x] M2.1 Design tokens, panel shell and reactive state
-- [ ] M2.2 Rows, sections and reasons
+- [x] M2.2 Rows, sections and reasons
 - [ ] M2.3 Keyboard navigation and ARIA
 - [ ] M2.4 Badge on the icon
 - [ ] M2.5 Panel opening budget

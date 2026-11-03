@@ -1,10 +1,10 @@
 /**
  * The panel's shell: the header of PLAN.md §4.2 and the view it is showing.
  *
- * The three views are only their empty state at this point — the rows are M2.2,
- * the groups M4.3, the archive M3.3 — but the header is already live: it reads
- * the signals of `state/tabs.ts`, so what it says is what the browser currently
- * has open.
+ * Declutter is live — its rows, its sections and its reasons are `views/
+ * DeclutterView.tsx` — while Organize is still M4.3 and the archive M3.3, so
+ * those two are only their empty state. The header reads the signals of
+ * `state/tabs.ts`, so what it says is what the browser currently has open.
  *
  * Every visible string goes through `t` (invariant 11) and nothing is ever
  * interpolated as HTML: a title or a URL is untrusted text (invariant 7), and
@@ -14,8 +14,9 @@
 import { useSignal } from '@preact/signals';
 
 import { panelLanguage, t } from '@/platform/i18n';
-import { countsText, reviewText } from './format';
-import { reviewCount, tabCount, windowCount } from './state/tabs';
+import { countsText } from './format';
+import { tabCount, windowCount } from './state/tabs';
+import { DeclutterView } from './views/DeclutterView';
 
 /** The views the navigation of §4.2 switches between, in its order. */
 const VIEWS = [
@@ -91,17 +92,6 @@ function View({ id, language }: { id: ViewId; language: string }) {
     case 'archive':
       return <p class="td-empty">{t('archiveEmpty')}</p>;
   }
-}
-
-/**
- * What the score found. The list itself is M2.2; until then the view says how
- * many tabs it would hold, which is the "N da rivedere" §4.2 puts next to the
- * health bar, or §4.3's empty state when the answer is none.
- */
-function DeclutterView({ language }: { language: string }) {
-  const count = reviewCount.value;
-  if (count === 0) return <p class="td-empty">{t('declutterEmpty')}</p>;
-  return <h2 class="td-section-title">{reviewText(count, t, language)}</h2>;
 }
 
 /** The settings are M6.1; the heading is here so the gear leads somewhere. */

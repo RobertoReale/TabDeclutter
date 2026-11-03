@@ -190,3 +190,210 @@ button {
   color: var(--td-text-muted);
   text-align: center;
 }
+
+/* ── The Declutter list of §4.3 ────────────────────────────────────────── */
+
+.td-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: var(--td-space-5);
+}
+
+/* The illustration is a line drawing, so it takes the text colour and needs no
+   second palette; muted, because the sentence is what matters. */
+.td-empty-art {
+  width: 96px;
+  height: 64px;
+  fill: none;
+  stroke: var(--td-border);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.td-empty-tick {
+  stroke: var(--td-accent);
+}
+
+/*
+ * The health bar of §4.2. It sits at the top of the list rather than in the
+ * header: it describes what Declutter is showing, and a full bar next to "Tutto
+ * in ordine" would say the same thing twice (docs/DECISIONS.md).
+ */
+.td-health {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+  margin-bottom: var(--td-space-3);
+}
+
+.td-health-bar {
+  flex: 1;
+  min-width: 0;
+  height: var(--td-space-2);
+  border-radius: var(--td-radius-pill);
+  background: var(--td-hover);
+  overflow: hidden;
+}
+
+.td-health-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--td-accent);
+  transition: width var(--td-duration) var(--td-ease);
+}
+
+.td-health-text {
+  flex: none;
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
+}
+
+.td-section + .td-section {
+  margin-top: var(--td-space-3);
+}
+
+/* The whole header is the button, so the whole width folds the section. */
+.td-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-1);
+  width: 100%;
+  min-height: var(--td-target);
+  text-align: left;
+}
+
+.td-caret {
+  flex: none;
+  width: var(--td-space-3);
+  color: var(--td-text-muted);
+}
+
+/* The heading itself, in its own element: it takes the width the caret leaves, and
+   it is the one piece of the header that reads as the section's name. */
+.td-section-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.td-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/*
+ * §11: the rows the user has not scrolled to are not laid out at all, and
+ * `contain-intrinsic-size` gives the scrollbar the height to count on while they
+ * are skipped — two lines plus the padding.
+ */
+.td-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 46px;
+  padding: var(--td-space-1) var(--td-space-2);
+  border-radius: var(--td-radius-sm);
+}
+
+.td-row:hover {
+  background: var(--td-hover);
+}
+
+.td-row-line {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+  min-width: 0;
+}
+
+.td-row-meta {
+  gap: var(--td-space-1) var(--td-space-2);
+  flex-wrap: wrap;
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
+  /* The second line starts under the title, not under the favicon. */
+  padding-left: calc(var(--td-favicon) + var(--td-space-2));
+}
+
+.td-favicon {
+  flex: none;
+  width: var(--td-favicon);
+  height: var(--td-favicon);
+  border-radius: var(--td-radius-sm);
+}
+
+/* §5.5's avatar: the initial of the domain over the colour the domain decides. */
+.td-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: hsl(var(--td-avatar-hue, 210) var(--td-avatar-saturation) var(--td-avatar-lightness));
+  color: var(--td-accent-contrast);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.td-row-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.td-row-host {
+  flex: none;
+  max-width: 40%;
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.td-chip {
+  padding: 0 var(--td-space-2);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius-pill);
+  white-space: nowrap;
+}
+
+/*
+ * §4.3: the actions appear on hover or focus. They keep their space either way,
+ * so a row does not reflow under the pointer, and `:focus-within` is what makes
+ * them reachable with the keyboard alone.
+ */
+.td-row-actions {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--td-duration) var(--td-ease);
+}
+
+.td-row:hover .td-row-actions,
+.td-row:focus-within .td-row-actions {
+  opacity: 1;
+}
+
+.td-action {
+  min-height: var(--td-target);
+  padding: 0 var(--td-space-2);
+  border-radius: var(--td-radius-pill);
+  color: var(--td-accent-text);
+  font-weight: 500;
+}
+
+.td-action:hover {
+  background: var(--td-accent-subtle);
+}
+
+/* §4.3's whole-window suggestion, which is about more than any one row. */
+.td-window-card {
+  margin-bottom: var(--td-space-3);
+  padding: var(--td-space-2) var(--td-space-3);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+  background: var(--td-raised);
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
+}

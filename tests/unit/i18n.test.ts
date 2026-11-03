@@ -79,8 +79,16 @@ function argumentCount(entry: Message): number {
 describe('the message catalogues', () => {
   it('carries exactly the keys the shipped code asks for, in en', () => {
     expect(Object.keys(en).sort()).toEqual([
+      'actionGo',
       'actionTitle',
       'archiveEmpty',
+      'chipBookmarked',
+      'chipDiscarded',
+      'chipError',
+      'chipNearDuplicate',
+      'chipOpenedNever',
+      'chipOpenedOne',
+      'chipOpenedOther',
       'cmdCloseDuplicates',
       'cmdToggleGuard',
       'countTabsOne',
@@ -98,6 +106,21 @@ describe('the message catalogues', () => {
       'navSettings',
       'organizeEmpty',
       'panelCounts',
+      'reasonAuth',
+      'reasonBlank',
+      'reasonBrowserPage',
+      'reasonDuplicate',
+      'reasonSearch',
+      'reasonStale',
+      'reasonStaleUnread',
+      'reasonTransient',
+      'sectionDuplicates',
+      'sectionHeading',
+      'sectionReview',
+      'sectionStale',
+      'sectionStaleUnread',
+      'sectionTransient',
+      'windowForgotten',
     ]);
   });
 

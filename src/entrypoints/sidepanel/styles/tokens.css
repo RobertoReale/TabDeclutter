@@ -59,6 +59,14 @@
   /* §4.8: click targets of at least 24 px. */
   --td-target: 24px;
 
+  /* The favicon of §5.5, and the size the row reserves for it. */
+  --td-favicon: 16px;
+  /* The initial-letter avatar of §5.5: the hue comes from the domain
+     (`--td-avatar-hue`, set on the element), these two keep it legible with
+     `--td-accent-contrast` on top, in both themes. */
+  --td-avatar-saturation: 45%;
+  --td-avatar-lightness: 30%;
+
   /* §4.7: 150 ms ease-out. The curve is Material's "standard decelerate",
      which is what Chrome's own surfaces use. */
   --td-duration: 150ms;
@@ -83,6 +91,10 @@
 
     --td-warning: #fdd663;
     --td-danger: #f28b82;
+
+    /* On a dark surface the avatar is the light one, and the letter is dark. */
+    --td-avatar-saturation: 40%;
+    --td-avatar-lightness: 68%;
   }
 }
 
