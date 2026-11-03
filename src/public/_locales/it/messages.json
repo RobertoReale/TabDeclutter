@@ -71,6 +71,98 @@
     "message": "Tutto in ordine. Nessuna scheda da rivedere.",
     "description": "Shown in the Declutter view when the score suggests nothing."
   },
+  "sectionDuplicates": {
+    "message": "Duplicati",
+    "description": "Heading of the Declutter section holding tabs that show a page another tab already shows."
+  },
+  "sectionTransient": {
+    "message": "Pagine temporanee",
+    "description": "Heading of the Declutter section holding pages that have already served their purpose: search results, sign-in pages, blank tabs."
+  },
+  "sectionStaleUnread": {
+    "message": "Vecchie e mai rilette",
+    "description": "Heading of the Declutter section holding tabs opened long ago and never actually looked at."
+  },
+  "sectionStale": {
+    "message": "Inattive",
+    "description": "Heading of the Declutter section holding tabs the user has not come back to in a long time."
+  },
+  "sectionReview": {
+    "message": "Da valutare",
+    "description": "Heading of the Declutter section holding tabs with no single strong reason, only small signals. Folded by default."
+  },
+  "sectionHeading": {
+    "message": "$1 ($2)",
+    "description": "A section heading with how many tabs it holds, as in \"Duplicates (3)\". $1 is the section name, $2 the formatted count."
+  },
+  "reasonDuplicate": {
+    "message": "Duplicato di un'altra scheda aperta",
+    "description": "The one-line reason under a tab's title, when another open tab shows the same page."
+  },
+  "reasonBlank": {
+    "message": "Scheda vuota, aperta da un po'",
+    "description": "The one-line reason under a tab's title, when the tab shows no page at all and has been idle for over an hour."
+  },
+  "reasonTransient": {
+    "message": "Pagina già consultata",
+    "description": "The one-line reason under a tab's title, for a page that has served its purpose and is none of the more specific kinds below."
+  },
+  "reasonSearch": {
+    "message": "Risultati di ricerca già consultati",
+    "description": "The one-line reason under a tab's title, when the page is a search results page left behind."
+  },
+  "reasonAuth": {
+    "message": "Pagina di accesso o reindirizzamento",
+    "description": "The one-line reason under a tab's title, when the page is a login, logout or OAuth callback page."
+  },
+  "reasonBrowserPage": {
+    "message": "Pagina del browser",
+    "description": "The one-line reason under a tab's title, when the page belongs to the browser itself, like its settings or downloads."
+  },
+  "reasonStale": {
+    "message": "Non la apri da $1",
+    "description": "The one-line reason under a tab's title, when the tab is simply old. $1 is a duration, as in \"12 days\"."
+  },
+  "reasonStaleUnread": {
+    "message": "Non la apri da $1 e non l'hai mai letta",
+    "description": "The one-line reason under a tab's title, when the tab is old and was barely ever in the foreground. $1 is a duration, as in \"12 days\"."
+  },
+  "chipOpenedNever": {
+    "message": "mai aperta",
+    "description": "Chip next to a tab's reason, when the tab was opened in the background and never brought to the front."
+  },
+  "chipOpenedOne": {
+    "message": "aperta $1 volta",
+    "description": "Chip next to a tab's reason, when the tab was brought to the front exactly once. $1 is the formatted number."
+  },
+  "chipOpenedOther": {
+    "message": "aperta $1 volte",
+    "description": "Chip next to a tab's reason, for every other number of times the tab was brought to the front. $1 is the formatted number."
+  },
+  "chipBookmarked": {
+    "message": "nei preferiti",
+    "description": "Chip next to a tab's reason, when the page is already in the bookmarks, so closing the tab loses nothing."
+  },
+  "chipNearDuplicate": {
+    "message": "quasi duplicata",
+    "description": "Chip next to a tab's reason, when another open tab shows the same page bar the query string or the fragment."
+  },
+  "chipDiscarded": {
+    "message": "sospesa",
+    "description": "Chip next to a tab's reason, when the browser has already dropped the page from memory."
+  },
+  "chipError": {
+    "message": "errore",
+    "description": "Chip next to a tab's reason, when the page failed to load."
+  },
+  "actionGo": {
+    "message": "Vai",
+    "description": "Button on a tab's row that activates that tab and brings its window to the front."
+  },
+  "windowForgotten": {
+    "message": "Finestra con $1 non toccata da $2",
+    "description": "Card above the Declutter list, offering a whole forgotten window. $1 is a counted noun, as in \"12 tabs\"; $2 a duration, as in \"3 weeks\"."
+  },
   "organizeEmpty": {
     "message": "Nessun gruppo da proporre.",
     "description": "Shown in the Organize view when there is nothing to group."

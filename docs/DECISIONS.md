@@ -1172,3 +1172,105 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Why:** the panel subscribes to all seven events because a real browser fires them; bending the
   product to the fake would be weakening a gate. The stubs turned the gap into coverage — there is
   now a test per event asserting it triggers exactly one read.
+
+## M2.2 — the five sections of §4.3, and what goes in them
+
+- **Context:** §4.3 names five sections; the scores name seven primary reasons (`protected`,
+  `duplicate`, `blank`, `transient`, `stale-unread`, `stale`, `review`).
+- **Decision:** `blank` joins "Pagine temporanee" and `protected` has no section at all;
+  `sections.ts` maps the rest one to one, in §4.3's order. Listed is every tab the score did not
+  put in `keep`, ordered by score descending and then by the browser's own tab order.
+- **Why:** an empty tab left open for an hour is the most transient page there is, and §4.3's list
+  of sections is closed at five. A protected tab scored 0 and has nothing to explain, so a section
+  for it would be a list of things not to do. The tab order breaks ties the way the user's own
+  window does, which keeps the list stable while they read it.
+
+## M2.2 — a section is folded when none of its rows is to close
+
+- **Context:** §4.3 asks for "«Da valutare» collapsed, «Da chiudere» expanded", which are buckets,
+  not sections: a section can hold rows from both.
+- **Decision:** `DeclutterSection.collapsed` is true when no row of that section is in the `close`
+  bucket. "Da valutare" can only ever hold `review` rows, so it is always folded; a folded section
+  renders no rows at all, and once the user has folded or unfolded one by hand their choice stands
+  for as long as the panel is open.
+- **Why:** it reads the spec's rule per section instead of guessing a second rule, and it is what
+  §3 asks for — the panel opens showing what it is sure about and nothing else.
+
+## M2.2 — the age is said once per row
+
+- **Context:** a row carries a reason sentence and a set of chips (§4.3, §6.4), and the sentence
+  for an inactive tab already contains the age ("Non la apri da 12 giorni").
+- **Decision:** `chipsOf` leaves the age chip out when the primary reason is `stale` or
+  `stale-unread`, and `format.ts` derives both the chip and the sentence from one `span()`, so they
+  can never name different units for the same duration.
+- **Why:** "Non la apri da 12 giorni · 12 gg fa" says the same thing twice in a 320 px panel.
+
+## M2.2 — a whole-window card needs something to close in it
+
+- **Context:** §4.3's card offers a forgotten window; `rollUpWindows` marks a window forgotten from
+  its idle time alone.
+- **Decision:** a card is drawn only when the window is forgotten *and* at least one of its tabs is
+  in the `close` bucket.
+- **Why:** a window can be untouched for weeks and hold nothing worth closing (every tab pinned,
+  kept, or on a protected site). Offering to close it is the one thing §3 says costs most: a
+  suggestion the user has to refuse.
+
+## M2.2 — a row has two lines and one action
+
+- **Context:** §4.3 describes a row with a favicon, title, domain, reason, chips and actions, and
+  the panel is as narrow as 320 px. Selection and bulk actions are M2.3's.
+- **Decision:** two lines — favicon, title and domain above; reason, chips and the actions below,
+  revealed on hover or focus — and the only action is "Vai", which activates the tab and brings its
+  window forward.
+- **Why:** it is the whole of §4.3 that M2.2 owns, and it leaves the row's shape unchanged when the
+  checkbox arrives: the second line already wraps.
+
+## M2.2 — the avatar's colour is a custom property, not a style
+
+- **Context:** §5.5's fallback favicon is the domain's initial over a colour derived from the
+  domain, and the hue is computed in `platform/favicon.ts`.
+- **Decision:** the row sets `--td-avatar-hue` only; saturation and lightness are tokens, and
+  `base.css` composes the `hsl()`.
+- **Why:** the avatar follows the theme (§4.7) without the hash knowing anything about light and
+  dark, and the hue stays the one thing the domain decides.
+
+## M2.2 — the health bar belongs to the Declutter view
+
+- **Context:** §4.2 puts a health bar in the panel; the header already carries the counts.
+- **Decision:** it is rendered by `DeclutterView`, above the sections, and reads
+  `declutter.value.total` — the number of rows the list is actually showing.
+- **Why:** it describes what Declutter is showing, so it has nothing to say on the other two views,
+  and a count that disagreed with the rows below it would be worse than no bar. On an empty list
+  there is no bar at all: a full bar beside "Tutto in ordine" would say the same thing twice.
+
+## M2.2 — days hold until a fortnight, then weeks take over
+
+- **Context:** one `span()` picks the unit for both the chip and the sentence, and PLAN.md's own
+  examples are "Non la apri da 12 giorni" (§6.4) and "non toccata da 3 settimane" (§4.3).
+- **Decision:** each unit has its own threshold: hours from an hour, days from a day, **weeks from
+  a fortnight**, months from 30 days, years from 365. Below an hour it is always at least "1 min".
+- **Why:** taking a unit as soon as one whole of it fits would make twelve days "1 settimana",
+  which loses what the spec's own sentence says, and twelve days is exactly the age §6.4 writes
+  out. Every unit still reads at least one whole, so the sequence never goes backwards.
+
+## M2.2 — the Chromium E2E moves the panel's clock, not the records
+
+- **Context:** the list has to be checked against aged tabs, and `scoring.ts` reads the later of
+  the stored `lastActiveAt` and Chrome's own `tab.lastAccessed`, which is always a moment ago.
+- **Decision:** the test seeds `local:activity` for what only storage knows (creation time,
+  activations) and opens the panel with `Date.now` shifted twelve days ahead, after waiting for the
+  background's debounced write to settle so the seed is not overwritten.
+- **Why:** writing an old `lastActiveAt` alone changes nothing — `lastAccessed` wins — and the
+  shift is what makes the idle ages, the section names and the real `Intl` output all observable in
+  the browser. Firefox gets the duplicate section instead, which needs no clock: its panel cannot
+  be given one (`evaluateOnNewDocument` does not run on `moz-extension://`).
+
+## M2.2 — `platform/tabs.ts` arrives early, and the panel reads the tabs through it
+
+- **Context:** M2.1 decided the Tab-to-`TabInfo` mapping could stay in `sidepanel/state/tabs.ts`
+  until M3.1 created `platform/tabs.ts` with the actions. "Vai" is an action, and it is M2.2's.
+- **Decision:** `platform/tabs.ts` exists now, with `asTabInfos`, `queryTabs` and `activateTab`;
+  the panel's state calls `queryTabs()` instead of mapping tabs itself.
+- **Why:** the alternative was a second `chrome.tabs` caller in the panel for one action and a
+  mapper in a third place, and the module M3.1 would have created is the same one. The API is a
+  parameter with a default, so both functions are tested without an extension context.

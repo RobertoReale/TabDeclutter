@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_MATCH_OPTIONS } from '../../src/core/types';
 import type { MatchOptions } from '../../src/core/types';
-import { isTrackingParam, normalizeUrl, registrableDomain } from '../../src/core/url';
+import { displayHost, isTrackingParam, normalizeUrl, registrableDomain } from '../../src/core/url';
 
 /** The defaults with one switch flipped, so each case says what it is testing. */
 function withOptions(overrides: Partial<MatchOptions>): MatchOptions {
@@ -252,4 +252,28 @@ describe('registrableDomain', () => {
   ])('%j has no registrable domain', (input) => {
     expect(registrableDomain(input)).toBeNull();
   });
+});
+
+describe('displayHost', () => {
+  it.each([
+    ['https://www.example.com/a/b?id=7', 'example.com'],
+    ['https://EXAMPLE.com/a', 'example.com'],
+    // Not the registrable domain: these are two different places to the user.
+    ['https://docs.google.com/document/d/1', 'docs.google.com'],
+    ['https://mail.google.com/mail/u/0', 'mail.google.com'],
+    // And a host with no registrable domain still has something to show.
+    ['http://localhost:3000/', 'localhost'],
+    ['https://192.168.1.1/a', '192.168.1.1'],
+    ['  https://example.com/a  ', 'example.com'],
+    ['https://müller.de/', 'xn--mller-kva.de'],
+  ])('%j → %j', (input, expected) => {
+    expect(displayHost(input)).toBe(expected);
+  });
+
+  it.each(['about:blank', 'about:newtab', 'file:///C:/tmp/report.pdf', 'not a url', '', '   '])(
+    '%j has no host to show',
+    (input) => {
+      expect(displayHost(input)).toBe('');
+    },
+  );
 });

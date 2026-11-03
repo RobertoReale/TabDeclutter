@@ -1,13 +1,19 @@
-import { readFileSync } from 'node:fs';
-
 import { describe, expect, it } from 'vitest';
 
-import { countsText, formatCount, reviewText } from '../../src/entrypoints/sidepanel/format';
-import type { MessageKey, Translate } from '../../src/platform/i18n';
-import { LOCALES, translator } from '../../src/platform/i18n';
+import {
+  countsText,
+  durationText,
+  formatCount,
+  relativeAge,
+  reviewText,
+  tabsText,
+} from '../../src/entrypoints/sidepanel/format';
+import type { MessageKey } from '../../src/platform/i18n';
+import { LOCALES } from '../../src/platform/i18n';
+import { catalogue, localeTranslator } from './support/catalogue';
 
 /**
- * The header's counted nouns, checked against the real catalogues: these
+ * The panel's counted nouns and ages, checked against the real catalogues: these
  * functions are the only reason "1 scheda" is not "1 schede", and the shipped
  * Italian is what has to come out of them.
  *
@@ -15,33 +21,9 @@ import { LOCALES, translator } from '../../src/platform/i18n';
  * the catalogue files, exactly as `tests/unit/i18n.test.ts` does.
  */
 
-interface Message {
-  message: string;
-  placeholders?: Record<string, { content: string }>;
-}
-
-function catalogue(locale: string): Record<string, Message> {
-  const path = new URL(`../../src/public/_locales/${locale}/messages.json`, import.meta.url);
-  return JSON.parse(readFileSync(path, 'utf8')) as Record<string, Message>;
-}
-
-/** `i18n.getMessage`'s substitution, over one locale's real messages. */
-function localeTranslator(locale: string): Translate {
-  const messages = catalogue(locale);
-  return translator({
-    getMessage(key: string, subs: string[] = []): string {
-      const entry = messages[key];
-      if (entry === undefined) return '';
-      let text = entry.message;
-      for (const [name, { content }] of Object.entries(entry.placeholders ?? {})) {
-        const index = /^\$([1-9])$/.exec(content)?.[1];
-        const value = index === undefined ? content : (subs[Number(index) - 1] ?? '');
-        text = text.replaceAll(`$${name.toUpperCase()}$`, value);
-      }
-      return text.replace(/\$([1-9])/g, (_, at: string) => subs[Number(at) - 1] ?? '');
-    },
-  });
-}
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 // Not `en`/`it`: `it` is vitest's own.
 const english = localeTranslator('en');
@@ -98,6 +80,78 @@ describe('reviewText', () => {
   it('says how many tabs the score suggests looking at', () => {
     expect(reviewText(23, english, 'en')).toBe('23 to review');
     expect(reviewText(23, italian, 'it')).toBe('23 da rivedere');
+  });
+});
+
+describe('tabsText', () => {
+  it('counts tabs for a sentence, in the right number', () => {
+    expect(tabsText(1, english, 'en')).toBe('1 tab');
+    expect(tabsText(12, english, 'en')).toBe('12 tabs');
+    expect(tabsText(1, italian, 'it')).toBe('1 scheda');
+    expect(tabsText(12, italian, 'it')).toBe('12 schede');
+  });
+});
+
+/*
+ * The ages. The expected strings are CLDR's, written out: that is the point of using
+ * `Intl` rather than translating them, and a wrong unit or a wrong sign would otherwise
+ * look plausible.
+ */
+describe('relativeAge', () => {
+  it('picks the unit the spec words that age in', () => {
+    expect(relativeAge(12 * DAY, 'en')).toBe('12d ago');
+    expect(relativeAge(12 * DAY, 'it')).toBe('12 gg fa');
+    expect(relativeAge(3 * 7 * DAY, 'it')).toBe('3 sett. fa');
+    expect(relativeAge(5 * HOUR, 'it')).toBe('5 h fa');
+    expect(relativeAge(2 * 30 * DAY, 'it')).toBe('2 mesi fa');
+  });
+
+  /*
+   * PLAN.md says both "Non la apri da 12 giorni" (§6.4) and "non toccata da 3 settimane"
+   * (§4.3), so days hold for a fortnight and weeks take over after it.
+   */
+  it('counts days up to a fortnight, then weeks', () => {
+    expect(relativeAge(13 * DAY, 'it')).toBe('13 gg fa');
+    expect(relativeAge(14 * DAY, 'it')).toBe('2 sett. fa');
+    expect(relativeAge(29 * DAY, 'it')).toBe('4 sett. fa');
+    expect(relativeAge(30 * DAY, 'it')).toBe('mese scorso');
+  });
+
+  it("uses the language's own word for a single step, which is why numeric is auto", () => {
+    expect(relativeAge(DAY, 'en')).toBe('yesterday');
+    expect(relativeAge(DAY, 'it')).toBe('ieri');
+  });
+
+  it('rounds down, so 90 minutes is an hour and not two', () => {
+    expect(relativeAge(90 * MINUTE, 'it')).toBe('1 h fa');
+    expect(relativeAge(47 * HOUR, 'it')).toBe('ieri');
+  });
+
+  it('never says zero: a tab seen seconds ago is a minute ago', () => {
+    expect(relativeAge(0, 'it')).toBe('1 min fa');
+    expect(relativeAge(500, 'it')).toBe('1 min fa');
+  });
+
+  it('treats a clock that went backwards as just now, not as the future', () => {
+    expect(relativeAge(-5 * DAY, 'it')).toBe('1 min fa');
+  });
+});
+
+describe('durationText', () => {
+  it('says the same duration as a quantity, for inside a sentence', () => {
+    expect(durationText(12 * DAY, 'en')).toBe('12 days');
+    expect(durationText(12 * DAY, 'it')).toBe('12 giorni');
+  });
+
+  it('agrees with the counted noun in the singular, which a translation would not', () => {
+    expect(durationText(DAY, 'en')).toBe('1 day');
+    expect(durationText(DAY, 'it')).toBe('1 giorno');
+    expect(durationText(HOUR, 'it')).toBe('1 ora');
+  });
+
+  it('names the same unit the chip does', () => {
+    expect(durationText(3 * 7 * DAY, 'it')).toBe('3 settimane');
+    expect(durationText(400 * DAY, 'it')).toBe('1 anno');
   });
 });
 
