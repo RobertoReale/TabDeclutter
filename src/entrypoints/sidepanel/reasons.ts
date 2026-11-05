@@ -15,7 +15,7 @@
 
 import type { Reason, ScoredTab } from '../../core/scoring';
 import type { MessageKey, Translate } from '../../platform/i18n';
-import { durationText, formatCount, relativeAge, tabsText } from './format';
+import { durationText, formatCount, pluralRules, relativeAge, tabsText } from './format';
 
 /** One chip: its text, and a stable key for the list. */
 export interface RowChip {
@@ -128,7 +128,7 @@ function chipText(reason: Reason, t: Translate, language: string): string {
 /** §6.4's "Aperta 1 volta": how many times the tab was ever in the foreground. */
 function openedText(activations: number, t: Translate, language: string): string {
   if (activations === 0) return t('chipOpenedNever');
-  const plural = new Intl.PluralRules(language).select(activations) === 'one';
+  const plural = pluralRules(language).select(activations) === 'one';
   return t(plural ? 'chipOpenedOne' : 'chipOpenedOther', formatCount(activations, language));
 }
 
