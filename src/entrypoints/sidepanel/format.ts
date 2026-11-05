@@ -9,15 +9,67 @@
  *
  * `t` and the language are arguments rather than imports, so every function here
  * is pure and can be tested without an extension around it.
+ *
+ * Every `Intl` object here is built once and kept (`reuse` below): constructing one
+ * resolves the locale's data and costs far more than formatting with it, and these
+ * functions are called several times per row. Building them per call was the largest
+ * movable part of the panel's opening time with 300 tabs — 174 ms went on rendering
+ * 206 rows, and keeping them took that phase to 128 ms and the whole opening from
+ * 317 ms to 277 ms (PLAN.md §11, docs/DECISIONS.md M2.5).
  */
 
 // Relative, not `@/`: the `unit` vitest project runs without WXT's plugin and
 // so without WXT's alias, and this module is tested there.
 import type { MessageKey, Translate } from '../../platform/i18n';
 
+/**
+ * Keeps one built object per distinct argument list. The key is explicit because the
+ * arguments are what the constructor varies on, and nothing else may enter it.
+ *
+ * The cache never evicts, which is safe for what it holds: the language is the panel's
+ * own and changes only with the browser's UI language, and the units are the five of
+ * `STEPS` plus minutes.
+ */
+function reuse<A extends readonly unknown[], T>(
+  key: (...args: A) => string,
+  build: (...args: A) => T,
+): (...args: A) => T {
+  const built = new Map<string, T>();
+  return (...args: A): T => {
+    const at = key(...args);
+    const existing = built.get(at);
+    if (existing !== undefined) return existing;
+    const made = build(...args);
+    built.set(at, made);
+    return made;
+  };
+}
+
+const numbers = reuse(
+  (language: string) => language,
+  (language: string) => new Intl.NumberFormat(language),
+);
+
+/** Shared with `reasons.ts`, so that the panel builds one set of rules and not one per row. */
+export const pluralRules = reuse(
+  (language: string) => language,
+  (language: string) => new Intl.PluralRules(language),
+);
+
+const ages = reuse(
+  (language: string) => language,
+  (language: string) => new Intl.RelativeTimeFormat(language, { numeric: 'auto', style: 'narrow' }),
+);
+
+const durations = reuse(
+  (language: string, unit: Intl.RelativeTimeFormatUnit) => `${language} ${unit}`,
+  (language: string, unit: Intl.RelativeTimeFormatUnit) =>
+    new Intl.NumberFormat(language, { style: 'unit', unit, unitDisplay: 'long' }),
+);
+
 /** A number as the panel's language writes it: `1.234` in Italian, `1,234` in English. */
 export function formatCount(value: number, language: string): string {
-  return new Intl.NumberFormat(language).format(value);
+  return numbers(language).format(value);
 }
 
 /**
@@ -26,7 +78,7 @@ export function formatCount(value: number, language: string): string {
  * falls back to `other`, which is the form its catalogue should then carry.
  */
 function plural(value: number, language: string): 'one' | 'other' {
-  return new Intl.PluralRules(language).select(value) === 'one' ? 'one' : 'other';
+  return pluralRules(language).select(value) === 'one' ? 'one' : 'other';
 }
 
 /** `countTabsOne` / `countTabsOther` and friends, with the number filled in. */
@@ -118,10 +170,7 @@ function span(ms: number): Span {
  */
 export function relativeAge(ms: number, language: string): string {
   const { value, unit } = span(Math.max(0, ms));
-  return new Intl.RelativeTimeFormat(language, { numeric: 'auto', style: 'narrow' }).format(
-    -value,
-    unit,
-  );
+  return ages(language).format(-value, unit);
 }
 
 /**
@@ -133,9 +182,5 @@ export function relativeAge(ms: number, language: string): string {
  */
 export function durationText(ms: number, language: string): string {
   const { value, unit } = span(Math.max(0, ms));
-  return new Intl.NumberFormat(language, {
-    style: 'unit',
-    unit,
-    unitDisplay: 'long',
-  }).format(value);
+  return durations(language, unit).format(value);
 }

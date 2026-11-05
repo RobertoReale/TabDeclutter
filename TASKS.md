@@ -1039,7 +1039,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M2.2 Rows, sections and reasons
 - [x] M2.3 Keyboard navigation and ARIA
 - [x] M2.4 Badge on the icon
-- [ ] M2.5 Panel opening budget
+- [x] M2.5 Panel opening budget
 - [ ] M3.1 Tab actions and safeguards
 - [ ] M3.2 Selection, bar, toast and row actions
 - [ ] M3.3 Archive view and periodic cleanup

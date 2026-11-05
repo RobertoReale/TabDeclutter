@@ -94,3 +94,10 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   2. Apri il pannello e leggi la scritta in alto accanto alla barra, «… da rivedere».
   3. Chiudi a mano una delle schede che il pannello propone, poi aspetta cinque secondi senza toccare nulla e guarda di nuovo l'icona.
   Risultato atteso: il numero si legge a colpo d'occhio e non sembra un allarme (è grigio, non rosso); non è mai più grande del numero del punto 2, perché sull'icona vanno solo le schede da chiudere e nel pannello anche quelle da rivedere; al punto 3 cambia da solo entro pochi secondi, senza riaprire il pannello. Se il pannello dice «Tutto in ordine», sull'icona non deve esserci nessun numero. Se il numero è più grande di quello del pannello, o se dopo il punto 3 resta quello di prima, scrivi a Claude i due numeri.
+
+- [ ] (M2.5) La misura del pannello con 300 schede, a portatile attaccato
+  ⏱ 2 minuti · il tuo computer, con il cavo della corrente
+  1. Il test che cronometra l'apertura del pannello esiste e gira da solo, ma su questo portatile a batteria Windows dimezza il processore: il numero misurato finora (270 ms contro i 150 del progetto) dice quanto era lenta la macchina, non quanto è lento il pannello.
+  2. Attacca il portatile alla corrente e lascialo attaccato.
+  3. Scrivi a Claude: «misura l'apertura del pannello con la corrente attaccata».
+  Risultato atteso: Claude ti dice un numero in millisecondi e se sta entro 150. Se ci sta, questa verifica è chiusa; se non ci sta, lui apre una fix task per velocizzare il pannello.

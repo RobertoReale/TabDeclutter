@@ -1411,8 +1411,10 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   again once the machine was quiet. So the gate still answers for the code *and* for the state of
   the machine: what is gone is only the failure caused by waiting for the scheduler.
 - **Not for everything.** An operation that waits rather than computes uses no CPU while it waits,
-  so if M2.5's panel-opening budget turns out to be dominated by waiting on the browser it needs a
-  wall-clock mode here. `BudgetReport.wallMedians` is already measured for that day.
+  and `process.cpuUsage()` only ever sees this process. M2.5's panel opening turned out to be both
+  — a browser does the work, and a third of the time goes on waiting for it — so it got the
+  wall-clock mode this bullet anticipated: `measureWallBudget`, same medians, same three attempts,
+  same battery rule, with the millisecond taken from the page instead of from `cpuUsage`.
 
 ## M2.4 — perf budgets are enforced on mains only; on battery they are measured and reported, not enforced
 
@@ -1432,3 +1434,76 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   it there costs nothing, because a real regression is caught by the next run on mains — every
   merge the owner makes while plugged in, and any CI — while the number is in the log of every run
   either way, under a line that cannot be read as a pass.
+
+## M2.5 — the panel budget is measured in a real browser, on 300 stubbed tabs, at the painted frame
+
+- **Context:** PLAN.md §11 promises "panel open → list visible (300 tabs): ≤ 150 ms", and M2.5 left
+  the method open: 300 real tabs in the E2E, or a harness rendering the panel on the fixture's data.
+- **Decision:** a real Chromium, 300 stubbed tabs, timed by the page.
+  `tests/perf/panel-opening.perf.test.ts` launches its own persistent context with the Chrome build,
+  replaces `chrome.tabs.query` from an init script with `tests/fixtures/tabs-300.json` (timestamps
+  shifted so the ages are the ones the fixture's labels describe), seeds the raw `activity` key the
+  way `tests/e2e/` does, and then opens `sidepanel.html` in a fresh page nine times per attempt
+  after two warm-up openings. What is timed is the page's own `performance.now()` at the animation
+  frame following the mutation that puts the list in the DOM — navigation to painted rows, with
+  nothing of Playwright's inside the interval. `measureWallBudget` in `tests/perf/budget.ts` does
+  the medians, the three attempts and the battery rule, exactly as the CPU budgets do.
+- **Why:** three of the four things the plan is promising — a document loading, a 167 KB module
+  compiling, a frame painting — only happen in a browser, and they are most of the cost: an empty
+  panel, zero rows, measured 122 ms of the 150 the budget allows. A jsdom harness would have
+  measured jsdom. 300 *stubbed* tabs rather than real ones because 300 real tabs means 300
+  renderers competing for the machine the measurement is reading, and the panel cannot tell the
+  difference: it asks one question and gets the same answer. Each opening uses a fresh page because
+  re-navigating one page drifted monotonically (262 → 660 ms) and that drift was the harness, not
+  the panel.
+- **Why it cannot be met by rendering less.** Every opening also reports the rows present when the
+  clock was read and the rows present once settled, and the test requires them equal. Today the
+  panel renders the list in one synchronous pass, so the first row and the last arrive together;
+  if that ever became progressive, the mark would stop meaning "the list is visible" and the test
+  fails instead of getting quietly faster.
+- **The measured number.** On this laptop, on battery, the panel usually opens in **a median of
+  250-280 ms** — best-of-three medians of 260.5, 269.3, 262.2 and 255.2 ms in four runs, with the
+  29 openings behind the first of those spread 233-408 ms. Over the 150 ms budget, so printed and
+  not enforced. But a fifth run, same code, measured **151.2 ms** in its middle attempt (265.2,
+  151.2, 255.0): for nine openings Windows gave this machine its processor, and the panel came in
+  at the budget. **No mains measurement was taken — this session never had the cable** — so that
+  151 ms is the closest thing to one: it says the 270 ms is the machine's and not the panel's.
+  Every median this session saw fell between 151 and 284 ms.
+- **What the machine was doing while it was measured.** The scoring budget runs in the same
+  `pnpm perf` and has a mains baseline written down: 9.75 ms (M1.6). It measured 48.81-61.56 ms in
+  these runs, so the machine was three to five times slow. The panel's 270 ms over that factor is
+  54-90 ms, which is why the budget is very probably met on mains with room to spare — but that is
+  an inference from a calibration, not an observation, and the first run on mains is what settles
+  it (docs/MANUAL-CHECKS.md, M2.5).
+- **The gate.** The test lives in `tests/perf/` and runs in the existing `perf budgets` gate, which
+  has no `retries` and runs one file at a time with coverage off. It is not in `tests/e2e/` because
+  that gate retries the whole command once, and a measurement hidden behind a retry is what
+  `vitest.perf.config.ts` exists to prevent; it does not use the `tests/e2e/` fixtures because those
+  attach a console and request recorder to every page, and a measurement must not be instrumented
+  by the suite containing it. `pnpm perf` now needs the Chrome build, so `perf budgets` was moved
+  in the `gates` array to just after `build chrome`. Nothing else in `phasekit.json` changed.
+
+## M2.5 — the panel's `Intl` formatters are built once per language, not once per row
+
+- **Context:** the first measurement put the opening at 317 ms. Split by phase: 106 ms to load and
+  compile the module, 26 ms for the seven reads, **174 ms** for scoring, sectioning and rendering
+  206 rows, 11 ms to lay out and paint. 0.85 ms per row is far too much for twelve DOM nodes, and
+  a CPU profile of one opening showed the app's own JavaScript was not where it went.
+- **Decision:** `src/entrypoints/sidepanel/format.ts` keeps each `Intl` object in a small map
+  (`reuse`), keyed by the arguments its constructor varies on — the language, plus the unit for
+  `durationText`'s `style: 'unit'` formatter. `pluralRules` is exported so `reasons.ts` shares the
+  same rules instead of building its own per row. The cache never evicts: the language is the
+  panel's own and the units are six.
+- **Why:** constructing an `Intl.NumberFormat`, `Intl.PluralRules` or `Intl.RelativeTimeFormat`
+  resolves the locale's data and costs far more than formatting with one, and a row builds several.
+  Five constructor calls sat on per-row paths. Memoising them took the row phase from 174 ms to
+  128 ms and the whole opening from 317 ms to 277 ms, with no change to a single string: the
+  formatters are immutable and keyed by everything they depend on.
+- **What was ruled out.** Favicons: a run with the `_favicon/` images replaced by avatars measured
+  315 ms against the baseline's 317, so the 206 image requests cost nothing measurable, and
+  `content-visibility: auto` (M2.1) already keeps layout and paint at 11 ms. Virtualization: the
+  task allows it only if nothing else is enough, and the remaining cost is not in the rows — an
+  empty panel is 122 ms of the 277. Splitting `tldts` off the panel's critical path: PLAN.md §11
+  already excludes it from the size budget, and the score needs normalised domains before the
+  first row, so there is nothing to defer. Deferring rows past the first paint was rejected on
+  purpose: it would move the mark rather than the cost.

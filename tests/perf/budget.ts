@@ -28,10 +28,14 @@
  * is worth reading, which is also the only way this stays honest for an operation a
  * hundred times quicker than the score.
  *
- * **What this does not measure.** An operation that spends its time waiting rather than
- * computing uses no CPU while it waits, so a future budget on something asynchronous
- * (M2.5's panel opening, if it waits on the browser) is a wall-clock question and will need
- * a mode of its own here. `wallMedians` is already in the report for that day.
+ * **The second mode: `measureWallBudget`.** An operation that spends its time waiting
+ * rather than computing uses no CPU while it waits, and `process.cpuUsage()` only ever sees
+ * this process — neither reads a budget on a browser doing the work. The panel opening
+ * (M2.5) is exactly that: a document loads, a module is compiled, a list is rendered and
+ * painted, all in a Chromium that Node only drives. So that mode takes the millisecond from
+ * whoever can see the clock that matters — the page — and keeps the rest of the rules here:
+ * a median of several openings after a warm-up, up to three attempts, best attempt decides,
+ * and the number printed whatever the verdict.
  *
  * **On battery the budget is measured and not enforced.** CPU time counts time and not
  * cycles, and Windows runs this laptop at about half its nominal frequency when it is
@@ -199,6 +203,99 @@ export async function measureBudget(spec: BudgetSpec, run: () => unknown): Promi
     batchRuns,
     message,
   };
+}
+
+/**
+ * How many openings are thrown away before the first one is counted. Two, not twenty: an
+ * opening costs seconds rather than milliseconds, and what it warms is the browser — the
+ * extension's service worker up, V8's code cache for the panel's chunk written, the
+ * profile's storage read once — which is the state a user's browser is always in and which
+ * two openings already reach.
+ */
+const WALL_WARM_UP_RUNS = 2;
+
+/** Nine openings per attempt: an odd number, so the median is one of them. */
+const WALL_SAMPLES = 9;
+
+export interface WallBudgetSpec {
+  /** What is measured, as it appears in the output: `opening the panel with 300 tabs`. */
+  readonly what: string;
+  /** The budget of PLAN.md §11, in milliseconds, exactly as the plan states it. */
+  readonly limitMs: number;
+  readonly warmUpRuns?: number;
+  readonly samples?: number;
+  readonly attempts?: number;
+  readonly powerSource?: PowerSource;
+}
+
+export interface WallBudgetReport {
+  /** True when any one attempt's median came in at or under the budget. */
+  readonly withinBudget: boolean;
+  readonly powerSource: PowerSource;
+  /** False on battery: the number was measured and reported, and nothing rests on it. */
+  readonly enforced: boolean;
+  /** What a test asserts: within budget, or measured on battery. */
+  readonly passed: boolean;
+  /** One median per attempt, in the order they were measured. */
+  readonly medians: readonly number[];
+  /** Every opening measured, attempt by attempt, so the log shows the spread. */
+  readonly samples: readonly (readonly number[])[];
+  /** The best of the medians: the one the verdict rests on. */
+  readonly bestMs: number;
+  readonly message: string;
+}
+
+/**
+ * Measures a budget whose milliseconds only the thing being measured can read, and reports
+ * the same way `measureBudget` does — a test should read
+ * `expect(report.passed, report.message).toBe(true)`.
+ *
+ * `open` performs one whole operation and answers with how long it took. Returning the
+ * number rather than being timed from here is the point: a wall clock around an
+ * `await page.goto()` would also charge the operation for Playwright's round trips, and
+ * what the plan promises is what the user waits for, which is what the page's own
+ * `performance.now()` counts.
+ */
+export async function measureWallBudget(
+  spec: WallBudgetSpec,
+  open: () => Promise<number>,
+): Promise<WallBudgetReport> {
+  // Before anything is timed: it spawns a process.
+  const powerSource = spec.powerSource ?? readPowerSource();
+  const warmUpRuns = spec.warmUpRuns ?? WALL_WARM_UP_RUNS;
+  const sampleCount = spec.samples ?? WALL_SAMPLES;
+  const attempts = spec.attempts ?? ATTEMPTS;
+
+  for (let i = 0; i < warmUpRuns; i += 1) await open();
+
+  const medians: number[] = [];
+  const samples: number[][] = [];
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const measured: number[] = [];
+    for (let i = 0; i < sampleCount; i += 1) measured.push(await open());
+    samples.push(measured);
+    const middle = median(measured);
+    medians.push(middle);
+    if (middle <= spec.limitMs) break;
+  }
+
+  const bestMs = Math.min(...medians);
+  const withinBudget = bestMs <= spec.limitMs;
+  const enforced = powerSource === 'mains';
+  const passed = withinBudget || !enforced;
+  const label = medians.length === 1 ? 'wall median' : 'wall medians';
+  const list = medians.map((value) => value.toFixed(1)).join(', ');
+  const spread = samples
+    .map((attempt) => attempt.map((value) => value.toFixed(0)).join(' '))
+    .join(' | ');
+  const how = `${String(sampleCount)} openings after ${String(warmUpRuns)} warm-up, ${String(medians.length)} of ${String(attempts)} attempts`;
+  const verdict = withinBudget ? 'within budget' : 'over budget on every attempt';
+  const message = `perf budget: ${spec.what} — limit ${String(spec.limitMs)} ms, ${label} ${list} ms (${how}), ${verdict}\n  openings: ${spread}`;
+  // The excuse first and in capitals, exactly as the CPU mode prints it: a green gate
+  // hiding a number over budget has to be impossible to miss.
+  if (!withinBudget && !enforced) console.log(NOT_ENFORCED);
+  console.log(message);
+  return { withinBudget, powerSource, enforced, passed, medians, samples, bestMs, message };
 }
 
 /**
