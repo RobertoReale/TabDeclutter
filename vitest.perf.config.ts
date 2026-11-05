@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * The wall-clock budgets of PLAN.md §11 (`pnpm perf`), in a run of their own.
+ * The time budgets of PLAN.md §11 (`pnpm perf`), in a run of their own.
  *
  * A measurement cannot share the machine with the rest of the suite: `pnpm test` keeps V8
  * coverage on for every run (vitest.config.ts) and spreads its files over parallel
@@ -24,7 +24,10 @@ export default defineConfig({
     allowOnly: false,
     // Three attempts at a budget on a machine that is struggling still take longer than
     // the 5 s default, and a timeout would report as a failure without a measured number.
-    testTimeout: 60_000,
+    // Each sample is now a batch of runs (tests/perf/budget.ts), so a machine busy enough
+    // to make a run ten times slower needs minutes to say so; it should still get to say
+    // it, with its numbers, rather than be cut off.
+    testTimeout: 180_000,
     // The default reporter keeps a passing test's console output to itself, and the
     // measured number is the whole point of this run: it has to be in the gate's log
     // whether the budget was met or missed.

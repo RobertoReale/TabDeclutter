@@ -59,10 +59,11 @@ function failureLines(output, { before = 1, after = 6, tail = 10, max = 60 } = {
 }
 
 // The counts a green gate ends with (tests passed, coverage, warnings) and the numbers a
-// green gate measured (`perf budget:`, tests/perf/budget.ts), which the report has to
+// green gate measured (any `perf budget` line, tests/perf/budget.ts — including the one
+// saying a budget was measured on battery and not enforced), which the report has to
 // quote, without the hundreds of lines above them.
 const summary =
-  /\b\d+ (passed|failed|skipped|problems?|errors?|warnings?|notices?)\b|^\s*(All files|Statements|Lines)\b|^\s*perf budget:/i;
+  /\b\d+ (passed|failed|skipped|problems?|errors?|warnings?|notices?)\b|^\s*(All files|Statements|Lines)\b|^\s*perf budget\b/i;
 
 function summaryLines(output, max = 4) {
   const lines = stripVTControlCharacters(output).split(/\r?\n/);
