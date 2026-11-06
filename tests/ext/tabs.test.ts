@@ -8,8 +8,11 @@ import { activateTab, asTabInfos, NO_WINDOW, queryTabs } from '../../src/platfor
  * The boundary between the browser's tabs and the `TabInfo` the rules reason about
  * (invariant 4), and the "Vai" action of PLAN.md §4.3.
  *
- * The API is injected, so what we call and in which order is checked here without an
- * extension context.
+ * The API is injected, so what we call and in which order is checked on an object of our
+ * own. The file still belongs to the extension project rather than the unit one: since
+ * M3.1 `platform/tabs.ts` writes the archive, and importing `platform/storage.ts` defines
+ * the storage items, which read themselves as soon as they exist. The actions those
+ * writes belong to are in `actions.test.ts`.
  */
 
 function fakeApi(found: readonly BrowserTab[] = []) {

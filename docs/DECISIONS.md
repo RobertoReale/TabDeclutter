@@ -1507,3 +1507,68 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   already excludes it from the size budget, and the score needs normalised domains before the
   first row, so there is nothing to defer. Deferring rows past the first paint was rejected on
   purpose: it would move the mark rather than the cost.
+
+## M3.1 — a close writes the archive first, and a failed batch is retried one tab at a time
+
+- **Context:** PLAN.md §9 says a close archives and then removes. It does not say what happens when
+  `tabs.remove` fails, and §8.6 only says to ignore the error. One `tabs.remove` with every id is
+  one gesture for the browser, but Chrome fails the whole call when a single id is stale.
+- **Decision:** `closeTabs` writes the archive entries first and removes afterwards. The removal is
+  one call with every id; if that call rejects, each id is tried again on its own, and every failure
+  is swallowed. The entries are returned either way, so an "Annulla" toast has something to undo.
+- **Why:** invariant 3 is the one that cannot bend: a tab closed without an archive entry is a tab
+  lost, while an archive entry whose tab survived is a harmless row the user can ignore. That fixes
+  the order. The retry is what keeps one tab the user closed a second earlier from saving nineteen
+  others from being closed — the batch call stays the normal path, and the loop only runs when
+  something was already gone.
+
+## M3.1 — a restore exempts the URL before the tab exists, and the tab id after
+
+- **Context:** PLAN.md §8.6 wants every tab the extension opens recorded in the guard's exemptions.
+  The guard reacts to `onCreated`, and the tab id is only known once the tab is there.
+- **Decision:** `restoreTabs` writes one exemption per entry by URL **before** it creates or
+  restores anything, and a second write with the new tab ids afterwards. Two writes per restore, not
+  two per tab.
+- **Why:** an exemption written after `tabs.create` is a race the guard can win, and it would close
+  the tab the user just asked for — the worst failure this extension has. The URL is known in
+  advance and is enough to recognise the tab; the id is written as well because a restored tab that
+  navigates away keeps its id but not its URL. Batching both writes keeps an undo of twenty tabs at
+  the "one write per action" of PLAN.md §10.
+
+## M3.1 — the group is found by comparing titles ourselves, not with `tabGroups.query({ title })`
+
+- **Context:** PLAN.md §5.5 has a restore look its group up by title, because group ids do not
+  survive a restart and Firefox's `sessions` never reports one. Chrome has a `title` filter that
+  looks like exactly the call to make.
+- **Decision:** `restoreTabs` queries every group (`tabGroups.query({})`) and compares the titles in
+  our own code, exactly. A group in the restored tab's window wins over one of the same name
+  elsewhere; a title that matches nothing leaves the tab ungrouped.
+- **Why:** Chrome documents that filter as a **pattern**, so a group the user called "Work \*" would
+  be matched by the title "Work" and the tab would land in a group it never belonged to. Comparing
+  here costs one query either way and cannot be fooled by a title containing `*` or `?`. Leaving the
+  tab ungrouped is the honest answer for a group the user deleted: inventing it again would be a
+  change they did not ask for.
+
+## M3.1 — only the entries that came back leave the archive, and they come back inactive
+
+- **Context:** §9 ends a restore by removing the entry from the archive. It does not say what to do
+  with an entry that could not be restored, nor whether the restored tab should be focused.
+- **Decision:** an entry is removed only once a tab exists for it; one that neither `sessions.restore`
+  nor either `tabs.create` could bring back stays in the archive. Restored tabs are created with
+  `active: false`.
+- **Why:** removing an entry we failed to restore would turn a recoverable failure into a lost tab.
+  And "Annulla" means "put back what was there": a restore of twenty tabs that stole the focus
+  twenty times would be a second mistake on top of the one being undone.
+
+## M3.1 — `platform/tabs.ts` is tested in the extension project, not the unit one
+
+- **Context:** `tests/unit/tabs.test.ts` covered the `TabInfo` mapping and "Vai" with an injected
+  API and no extension context. M3.1 makes `platform/tabs.ts` import `platform/storage.ts`.
+- **Decision:** the file moved to `tests/ext/tabs.test.ts`, unchanged apart from its comment. The
+  new `tests/ext/actions.test.ts` covers the actions, with the real storage behind them and an
+  injected API for the tab calls.
+- **Why:** defining a storage item makes `@wxt-dev/storage` read it immediately, so merely importing
+  the storage module needs `browser.storage`, which the unit project does not have by design. Every
+  other platform module that persists anything is already tested under `tests/ext/` for the same
+  reason. The alternative — injecting the five storage functions into every action — would push the
+  wiring onto every caller to keep a test file where it was.
