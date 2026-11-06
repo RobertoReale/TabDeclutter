@@ -245,23 +245,54 @@ export function pruneKeeps(now: number): Promise<number> {
 export type ExemptionTarget = Pick<GuardExemption, 'tabId' | 'url'>;
 
 /**
- * Exempts a tab the extension itself opened or restored, for `EXEMPTION_TTL_MS` by
- * default (PLAN.md §8.6).
+ * Exempts a whole action's tabs in **one** write, for `EXEMPTION_TTL_MS` by default
+ * (PLAN.md §8.6).
  *
- * The same write drops the exemptions that have already run out, so the set cannot grow
- * without an alarm to collect it.
+ * An undo of twenty tabs is one action and must cost one write, like the archive's
+ * (PLAN.md §10). The same write drops the exemptions that have already run out, so the
+ * set cannot grow without an alarm to collect it.
  */
+export function addExemptions(
+  targets: readonly ExemptionTarget[],
+  now: number,
+  ttlMs: number = EXEMPTION_TTL_MS,
+): Promise<void> {
+  return serialize(guardStateItem.key, async () => {
+    if (targets.length === 0) return;
+    const state = await guardStateItem.getValue();
+    await guardStateItem.setValue({
+      ...state,
+      exemptions: [
+        ...activeOf(state.exemptions, now),
+        ...targets.map((target) => ({ ...target, until: now + ttlMs })),
+      ],
+    });
+  });
+}
+
+/** Exempts one tab the extension itself opened or restored (PLAN.md §8.6). */
 export function addExemption(
   target: ExemptionTarget,
   now: number,
   ttlMs: number = EXEMPTION_TTL_MS,
 ): Promise<void> {
-  return serialize(guardStateItem.key, async () => {
-    const state = await guardStateItem.getValue();
-    await guardStateItem.setValue({
-      ...state,
-      exemptions: [...activeOf(state.exemptions, now), { ...target, until: now + ttlMs }],
-    });
+  return addExemptions([target], now, ttlMs);
+}
+
+/**
+ * "Protect site" (PLAN.md §9): the domain joins "Siti protetti", once.
+ *
+ * Stored trimmed and lower-cased, which is how `core/scoring.ts` compares the list
+ * against a host; a domain already in it is not written again, so pressing the row's menu
+ * item twice costs one write.
+ */
+export function addProtectedDomain(domain: string): Promise<void> {
+  return serialize(protectedDomainsItem.key, async () => {
+    const wanted = domain.trim().toLowerCase();
+    if (wanted === '') return;
+    const stored = await protectedDomainsItem.getValue();
+    if (stored.some((entry) => entry.trim().toLowerCase() === wanted)) return;
+    await protectedDomainsItem.setValue([...stored, wanted]);
   });
 }
 
