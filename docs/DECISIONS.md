@@ -1572,3 +1572,50 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   other platform module that persists anything is already tested under `tests/ext/` for the same
   reason. The alternative — injecting the five storage functions into every action — would push the
   wiring onto every caller to keep a test file where it was.
+
+## F.1 — perf budgets are judged against a reference workload run in the same conditions
+
+- **Context:** the `perf budgets` gate stopped the unattended sequence three times with no code
+  change: on parallel load (M1.8), on battery (M2.4) and on mains with the machine idle (M3.2),
+  where the score measured 24-51 ms minutes after the same commit had measured 10.7-12.8 ms. CPU
+  time instead of wall time (M2.4) removed the time the process was not running, but not this: an
+  i7-12700H changes its own speed several-fold. Measured here, the score alone — no second workload
+  anywhere in the process — goes from 9.75 ms to 29.31 ms after 1.5 s of nothing but scoring, and is
+  still at 22.44 ms after 45 s of idle. A pure arithmetic loop that allocates nothing does the same,
+  so it is not garbage, not the code, and not recovered by waiting: it is a saturating thread being
+  moved to an E-core and left there. No clock can tell that apart from slower code, because a clock
+  does not know how fast the machine was meant to be.
+- **Decision:** every budget carries its own yardstick. `referenceWorkload` is fixed, deterministic,
+  CPU-bound pure JavaScript — URL-shaped literals, a `Map` of sixty-four keys, an in-place sort — and
+  deliberately not the scorer. It is measured interleaved with every sample batch, in the same unit
+  as the measurement (CPU time for the CPU budgets, the page's own clock for the panel, where it runs
+  inside the page between openings), so both land on the same core in the same state. What is
+  enforced is `median ≤ budget × clamp(referenceMedian / REFERENCE_MS, 1, 8)`. The whole verdict is
+  one pure function, `judgeBudget`, covered case by case in `tests/unit/perf-budget-verdict.test.ts`.
+  The budget numbers of PLAN.md §11 are untouched: 15 ms for the score, 150 ms for the panel, 50 ms
+  for the clustering.
+- **Why:** `REFERENCE_CPU_MS` is 1.79 ms and `REFERENCE_PAGE_MS` is 3.48 ms — the best of several
+  measurements on mains with the machine idle (1.786, 1.792, 1.792, 1.953 for the first; 3.48, 3.48,
+  3.52, 4.92, 5.11, 5.14, 5.46, 5.89 for the second). The best and not the average, because
+  `REFERENCE_MS` has to mean "this machine at its own best": at that speed the plan's number applies
+  exactly, and a factor above 1 then says precisely how far below its best the machine is right now.
+  Calibrated from a mediocre reading instead, every run would look faster than nominal, the factor
+  would clamp to 1 forever and the gate would go on stopping the sequence. The 1.79 ms is the state
+  in which the score itself measures the 10-12 ms the 15 ms budget was written against.
+- **Why the factor is clamped:** never below 1, so a machine faster than this laptop — CI, or a later
+  one — is never judged against more than the plan's number, and a reference that could not be
+  measured at all (zero, negative, not a number) also reads as 1, the one answer that cannot hide a
+  regression. Never above 8: past that the machine is not slow, it is a different machine, and an
+  enlarged limit stops meaning anything, so the numbers are measured and printed and the gate passes
+  saying `perf budget NOT ENFORCED: machine too slow (factor …)`. 8 rather than 4 at the owner's
+  instruction: this laptop measures 5-6× on battery, and with a ceiling of 8 such a run is still
+  judged against an enlarged limit instead of being excused outright. The battery rule is unchanged.
+- **Why the reference batch is larger than the others:** the reference median is a divisor, so an
+  error on it is an error on the limit. At the usual 120 ms floor a 2 ms reference was read to within
+  about eight of Windows' 15.6 ms ticks, and the ratio between the score and the yardstick wandered
+  between 4 and 23 across one run's eleven samples. At 400 ms it is twenty-five ticks, the ratio
+  holds at 6-8, and the gate costs a few seconds more.
+- **What it was checked against:** five consecutive green `pnpm perf` runs on mains, each printing
+  its factor; a throwaway scorer made three times slower, which fails on mains at 62.50 ms against a
+  32.70 ms limit with all three attempts over; and a run under six busy Node processes, verified
+  alive on both sides of it, which passes with factor 1.74 at 18.56 ms against 26.09 ms.

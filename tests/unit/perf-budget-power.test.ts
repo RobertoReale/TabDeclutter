@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { measureBudget, powerSourceFrom } from '../perf/budget';
+import { measureBudget, powerSourceFrom, REFERENCE_CPU_MS } from '../perf/budget';
 
 describe('the power source behind a perf budget', () => {
   it('reads a discharging battery as battery', () => {
@@ -47,7 +47,13 @@ describe('a budget that is missed', () => {
     vi.restoreAllMocks();
   });
 
-  /** A run too expensive for a budget of 0 ms, measured once, with nothing to warm up. */
+  /**
+   * A run too expensive for a budget of 0 ms, measured once, with nothing to warm up.
+   *
+   * `referenceMs` is given rather than measured: this test is about the power source, and a
+   * reference measured on whatever machine happens to run it would decide the verdict
+   * instead (`REFERENCE_CPU_MS`, so a factor of exactly 1, and a limit still at 0 ms).
+   */
   async function missTheBudget(powerSource: 'battery' | 'mains') {
     const printed: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
@@ -62,6 +68,7 @@ describe('a budget that is missed', () => {
         attempts: 1,
         batchRuns: 1,
         powerSource,
+        referenceMs: REFERENCE_CPU_MS,
       },
       () => {
         const until = performance.now() + 25;

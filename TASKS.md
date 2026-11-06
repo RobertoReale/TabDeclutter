@@ -1066,7 +1066,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [ ] M7.4 Store screenshots
 - [ ] M7.5 Packages and reproducible build
 - [ ] M7.6 Release checklist and final audit
-- [ ] F.1 Perf budgets judged against the machine's own speed
+- [x] F.1 Perf budgets judged against the machine's own speed
 
 ## 13. PHASE F — Fixes from the manual checks
 
