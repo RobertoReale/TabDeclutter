@@ -67,19 +67,19 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
 
 ## Fase M2 — Il pannello
 
-- [ ] (M2.2) Il pannello non propone di chiudere schede che vuoi tenere
+- [x] (M2.2) Il pannello non propone di chiudere schede che vuoi tenere
   ⏱ 5 minuti · Chrome, con le tue schede vere
   1. Usa Chrome per almeno un giorno con la build di prova caricata.
   2. Apri il pannello di TabDeclutter e scorri le schede proposte da chiudere.
   Risultato atteso: nessuna è una scheda che vorresti tenere. Se ce n'è una, scrivi a Claude quale e perché.
 
-- [ ] (M2.2) Dopo il riavvio di Chrome le schede non tornano «nuove»
+- [x] (M2.2) Dopo il riavvio di Chrome le schede non tornano «nuove»
   ⏱ 2 minuti · Chrome
   1. Apri il pannello e guarda l'età di due o tre schede.
   2. Chiudi Chrome del tutto, riaprilo con le stesse schede e riapri il pannello.
   Risultato atteso: le stesse schede mostrano la stessa età di prima, non «appena aperta».
 
-- [ ] (M2.3) La lista si usa con la sola tastiera e lo screen reader la legge
+- [x] (M2.3) La lista si usa con la sola tastiera e lo screen reader la legge
   ⏱ 5 minuti · Chrome
   1. Con la build di prova caricata apri il pannello e, senza toccare il mouse, premi Tab finché il bordo di selezione non arriva sulla prima intestazione della lista («Duplicati (…)» o la prima che c'è).
   2. Scendi con ↓ fino in fondo alla lista, poi risali con ↑.
@@ -88,7 +88,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   5. Accendi il Narratore di Windows con Ctrl+Win+Invio, rifai i punti 1, 2 e 3 ascoltando che cosa dice, e spegnilo con la stessa combinazione.
   Risultato atteso: ↓ e ↑ si muovono di una riga per volta e passano da una sezione alla successiva senza premere Tab, e si vede sempre su quale riga sei. Invio su un'intestazione apre e chiude la sezione; Invio su una riga porta su quella scheda. Il Narratore, su un'intestazione, legge il nome della sezione con quante schede contiene e dice se è aperta o chiusa; su una riga legge titolo, sito e motivo. Se ↓ salta delle righe, se non si capisce dove sei, o se il Narratore non legge qualcosa, scrivi a Claude che cosa.
 
-- [ ] (M2.4) Il numero sull'icona si legge, non allarma e si aggiorna da solo
+- [x] (M2.4) Il numero sull'icona si legge, non allarma e si aggiorna da solo
   ⏱ 3 minuti · Chrome, con le tue schede vere
   1. Con la build di prova caricata, guarda l'icona di TabDeclutter nella barra degli strumenti e leggi il numero sopra (se non c'è nessun numero, va bene: è una risposta anche quella).
   2. Apri il pannello e leggi la scritta in alto accanto alla barra, «… da rivedere».
