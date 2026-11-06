@@ -1066,6 +1066,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [ ] M7.4 Store screenshots
 - [ ] M7.5 Packages and reproducible build
 - [ ] M7.6 Release checklist and final audit
+- [ ] F.1 Perf budgets judged against the machine's own speed
 
 ## 13. PHASE F — Fixes from the manual checks
 
@@ -1075,3 +1076,69 @@ happen (in the owner's words), **Spec**, **What to do**, **Scope**, **Done when*
 always includes an automated test that reproduces the problem, when one is possible, and a new
 entry in MANUAL-CHECKS to try it again by hand. The ledger row goes at the end of section 12 and the
 target goes into `autoSequence` right after the task in progress.
+
+### F.1 — Perf budgets judged against the machine's own speed
+
+**Where it came from.** No manual check started this task. The `perf budgets` gate stopped the
+unattended sequence three times without any change to the code:
+- M1.8 failed on parallel load.
+- M2.4 failed on battery.
+- M3.2 failed on mains, at 2026-11-06 10:09, with the machine idle.
+
+At 10:09 on commit `bdbc12a` the gate measured scoring at a CPU median of 24-51 ms and the panel
+at 177-202 ms. The same code had measured 10.7-12.8 ms and 82-142 ms a few minutes earlier. The
+i7-12700H laptop changes speed by 2-4× on its own, through thermal state, P-cores against
+E-cores, and the power plan. Neither CPU time nor wall time can tell that apart from slower code.
+The owner (Roberto) wants the sequence to run unattended without stopping on the machine. A real
+regression must still stop it.
+
+**Spec.** PLAN.md §11. The numbers stay exactly as they are: 15 ms scoring, 150 ms panel and,
+later, 50 ms clustering. They describe a machine at its nominal speed. Only the way a measurement
+is compared against them changes.
+
+**What to do.**
+1. **Calibrate the machine in the same conditions as the measurement.** In `tests/perf/budget.ts`:
+   - Add a fixed, deterministic, CPU-bound reference workload. It must be pure JS, use no I/O, and
+     take a few ms at nominal speed. A mix of string, Map and array work that looks like the
+     scorer's is a good choice. It must not be the scorer itself.
+   - Interleave a reference run with every sample batch, so both land on the same core in the same
+     thermal and frequency state.
+   - Take the reference median in the same unit as the measurement: CPU time for CPU budgets, the
+     page clock for the panel. For the panel, run the reference workload inside the page with
+     `page.evaluate`, between openings.
+2. **Turn the reference into a slowdown factor.** Add one committed constant per mode,
+   `REFERENCE_MS`. Set it to the reference median this laptop measures on mains when the gate is
+   green: take the best of several runs and record it in DECISIONS. Compute
+   `factor = clamp(referenceMedian / REFERENCE_MS, 1, 4)`:
+   - It never goes below 1, so a faster machine (CI) is never judged against more than the plan's
+     number.
+   - Above 4, the machine is too slow to judge anything. Measure and print, then pass with
+     `perf budget NOT ENFORCED: machine too slow (factor …)`.
+3. **Enforce `median <= budget × factor`.**
+   - Print the raw median, the reference median, the factor and the effective limit, whatever the
+     verdict.
+   - Keep the warm-up, the batches, the three attempts with the best attempt deciding, and the
+     battery rule.
+   - Put the verdict in one pure function and unit-test it: within, over, factor clamped at 1,
+     factor clamped at 4, battery.
+4. **Show that a regression is still caught.**
+   - In a throwaway run that is not committed, make the measured operation about 3× slower, for
+     example by repeating the work inside the measured callback. The gate must fail on mains.
+   - Under synthetic load the gate must pass with a factor above 1. For that load, run a few busy
+     Node processes for the length of the run, and start them from a throwaway script that is not
+     committed.
+   - Report both runs: the medians, the factor and the verdict.
+5. Add one DECISIONS.md entry: "F.1 — perf budgets are judged against a reference workload run in
+   the same conditions". Give the reason above, the `REFERENCE_MS` values, and why the factor is
+   clamped. Update the comment block of `budget.ts`.
+
+**Scope.** `tests/perf/` and `DECISIONS.md` only. Do not touch `src/`, the budget numbers,
+`phasekit.json` (no retries) or the CI workflow. Add no manual check: nothing changes that a
+person can see.
+
+**Done when.**
+- The full `pnpm gates` is green twice in a row.
+- `pnpm perf` is green 5 times in a row, and every run prints its factor.
+- The throwaway 3× regression fails the gate on mains.
+- Under load the gate passes with a factor above 1.
+- The verdict function has its unit tests, and they run in `pnpm test`.

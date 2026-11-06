@@ -56,6 +56,7 @@
     "M2.4",
     "M2.5",
     "M3.1",
+    { "target": "F.1", "note": "perf gate stopped M3.2 on the machine, not the code" },
     "M3.2",
     "M3.3",
     "M3.4",
