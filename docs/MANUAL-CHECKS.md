@@ -95,7 +95,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   3. Chiudi a mano una delle schede che il pannello propone, poi aspetta cinque secondi senza toccare nulla e guarda di nuovo l'icona.
   Risultato atteso: il numero si legge a colpo d'occhio e non sembra un allarme (è grigio, non rosso); non è mai più grande del numero del punto 2, perché sull'icona vanno solo le schede da chiudere e nel pannello anche quelle da rivedere; al punto 3 cambia da solo entro pochi secondi, senza riaprire il pannello. Se il pannello dice «Tutto in ordine», sull'icona non deve esserci nessun numero. Se il numero è più grande di quello del pannello, o se dopo il punto 3 resta quello di prima, scrivi a Claude i due numeri.
 
-- [ ] (M2.5) La misura del pannello con 300 schede, a portatile attaccato
+- [x] (M2.5) La misura del pannello con 300 schede, a portatile attaccato → fatta da Claude il 2026-11-06 con la corrente: mediane 141.7, 81.9, 85.6 ms, entro 150
   ⏱ 2 minuti · il tuo computer, con il cavo della corrente
   1. Il test che cronometra l'apertura del pannello esiste e gira da solo, ma su questo portatile a batteria Windows dimezza il processore: il numero misurato finora (270 ms contro i 150 del progetto) dice quanto era lenta la macchina, non quanto è lento il pannello.
   2. Attacca il portatile alla corrente e lascialo attaccato.
