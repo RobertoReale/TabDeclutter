@@ -21,6 +21,13 @@
  * the list entering the DOM — so, from the navigation that opens the panel to the frame the
  * rows are painted in. Nothing of Playwright's is inside it.
  *
+ * **What the number is compared against.** Not the 150 ms alone: the budget times how slow
+ * this machine is at the moment of the opening, measured by running the reference workload
+ * of `tests/perf/budget.ts` inside the same page, on the same clock, right after the clock
+ * has been read and before the page is closed (docs/DECISIONS.md, F.1). In the same page,
+ * because a renderer of its own would be a renderer Chromium is free to deprioritise, and
+ * the yardstick has to share the conditions it measures.
+ *
  * **Why it cannot be satisfied by rendering less.** Every opening also reports how many
  * rows were in the document when the clock was read and how many were there once the panel
  * had settled, and the test requires the two to be equal. The panel renders its list in one
@@ -36,7 +43,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { ActivityStore, TabInfo } from '../../src/core/types';
 import { loadFixture } from '../fixtures/scoring-input';
-import { measureWallBudget } from './budget';
+import { measureWallBudget, referenceWorkloadExpression, type WallSample } from './budget';
 
 /** PLAN.md §11: "Panel open → list visible (300 tabs): ≤ 150 ms". */
 const BUDGET_MS = 150;
@@ -145,8 +152,14 @@ afterAll(async () => {
   await context?.close();
 });
 
+/**
+ * The reference workload as source text, built once: it is the same string every time, and
+ * stringifying a function per opening would be work inside the measured interval's page.
+ */
+const REFERENCE_EXPRESSION = referenceWorkloadExpression();
+
 /** One opening: a fresh page, so that nothing of the previous one is still on screen. */
-async function openPanel(): Promise<number> {
+async function openPanel(): Promise<WallSample> {
   const page = await context.newPage();
   // Before the document exists: the panel queries the tabs as it boots, and a stub
   // installed afterwards would never be asked.
@@ -185,10 +198,17 @@ async function openPanel(): Promise<number> {
     settled: document.querySelectorAll('.td-row').length,
     counts: document.querySelector('.td-counts')?.textContent ?? '',
   }));
+  // The yardstick, in this page and on this page's clock, while the machine is still in the
+  // state the opening above was measured in. Handed over as source rather than as a
+  // function because the page is an extension page: its CSP forbids `eval`, and so does
+  // this repository's lint (TASKS.md §2, invariant 7). A string given to `page.evaluate`
+  // goes through the debugging protocol instead, which is not the page evaluating anything
+  // of its own.
+  const referenceMs = await page.evaluate<number>(REFERENCE_EXPRESSION);
   await page.close();
 
   openings.push({ ...mark, ...after });
-  return mark.ms;
+  return { ms: mark.ms, referenceMs };
 }
 
 describe('the time budget (PLAN.md §11)', () => {
