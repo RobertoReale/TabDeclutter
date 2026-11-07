@@ -407,8 +407,36 @@ button {
   background: var(--td-accent-subtle);
 }
 
+/*
+ * The one action a strip is about: the close in the selection bar, and [Conferma]
+ * in a confirmation. Filled, so the choice is not between three identical pills.
+ *
+ * Not red: §4.7 keeps `--td-danger` for "Elimina definitivamente" (§4.5), which is
+ * the only thing in the product that cannot be undone. A close can — that is what
+ * the archive and the toast are — so it is the accent.
+ */
+.td-action-primary {
+  background: var(--td-accent);
+  color: var(--td-accent-contrast);
+}
+
+.td-action-primary:hover {
+  background: var(--td-accent);
+  /* Darkened by the text colour's own shadow rather than a second token. */
+  box-shadow: inset 0 0 0 999px var(--td-hover);
+}
+
+/* The section header's two actions keep their space, unlike a row's. */
+.td-section-action {
+  flex: none;
+  font-size: var(--td-text-meta);
+}
+
 /* §4.3's whole-window suggestion, which is about more than any one row. */
 .td-window-card {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
   margin-bottom: var(--td-space-3);
   padding: var(--td-space-2) var(--td-space-3);
   border: 1px solid var(--td-border);
@@ -416,4 +444,115 @@ button {
   background: var(--td-raised);
   font-size: var(--td-text-meta);
   color: var(--td-text-muted);
+}
+
+.td-window-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.td-window-action {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* ── Selection, the bar, the questions and the toast (§4.3, §9) ─────────── */
+
+/*
+ * The checkbox of §4.3. It is the row's state made visible and never the thing
+ * that is clicked (`TabRow`), so it takes no space in the hit target: the row is
+ * the 24 px one.
+ */
+.td-row-check {
+  flex: none;
+  width: var(--td-space-3);
+  height: var(--td-space-3);
+  margin: 0;
+  accent-color: var(--td-accent);
+  /* The row answers the click; the box must not swallow it. */
+  pointer-events: none;
+}
+
+.td-row-picked {
+  background: var(--td-accent-subtle);
+}
+
+.td-row-picked:hover {
+  /* Both at once, so hovering a picked row is not *less* marked than hovering a
+     plain one. */
+  background: var(--td-accent-subtle);
+  box-shadow: inset 0 0 0 999px var(--td-hover);
+}
+
+/*
+ * §4.3's sticky footer: the bar when something is picked, the toast after a close.
+ * It sits at the bottom of the viewport over the list, so it is `--raised` with a
+ * rule above it, like the header. Transparent to the pointer where it is empty —
+ * otherwise an invisible strip would eat the clicks of the last rows.
+ */
+.td-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: var(--td-space-3) calc(-1 * var(--td-space-4)) calc(-1 * var(--td-space-4));
+  padding: 0 var(--td-space-4);
+  pointer-events: none;
+}
+
+.td-footer > * {
+  pointer-events: auto;
+}
+
+.td-bar,
+.td-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+  padding: var(--td-space-2) var(--td-space-3);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+  background: var(--td-raised);
+}
+
+.td-bar {
+  /* Flush with the bottom of the panel, so it reads as part of the frame. */
+  margin-bottom: var(--td-space-3);
+  flex-wrap: wrap;
+}
+
+/*
+ * The toast's slot is always in the document and never hidden, because it is the
+ * live region: a region that appears together with its text is announced
+ * inconsistently, while one that was already there announces whatever is put into
+ * it (§4.8). Empty it is a box of no height, so it costs the layout nothing.
+ */
+.td-toast {
+  margin-bottom: var(--td-space-2);
+  background: var(--td-surface);
+  /* It covers rows, so unlike the bar it needs to lift off them. */
+  box-shadow: 0 1px 3px var(--td-hover);
+}
+
+.td-toast-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.td-toast-undo {
+  flex: none;
+}
+
+/* §9's question: the text takes the room, the two answers stay whole. */
+.td-confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.td-confirm-text {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
 }

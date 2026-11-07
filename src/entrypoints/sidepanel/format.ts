@@ -107,6 +107,38 @@ export function tabsText(count: number, t: Translate, language: string): string 
   return counted(count, 'countTabsOne', 'countTabsOther', t, language);
 }
 
+/** "la finestra" / "le finestre", for the sentence a whole-window close makes (§9). */
+function windowsText(count: number, t: Translate, language: string): string {
+  return t(plural(count, language) === 'one' ? 'barWindowOne' : 'barWindowOther');
+}
+
+/**
+ * The sticky bar's close button (PLAN.md §4.3, §9).
+ *
+ * "Chiudi 17" while the windows stay, and §9's "Chiudi 3 schede e la finestra" when the
+ * selection empties one — the wording *is* the safeguard there, so the count stops being
+ * a bare number and the sentence names what else goes.
+ */
+export function closeSelectionText(
+  tabs: number,
+  windows: number,
+  t: Translate,
+  language: string,
+): string {
+  if (windows === 0) return t('barClose', formatCount(tabs, language));
+  return t('barCloseWithWindows', tabsText(tabs, t, language), windowsText(windows, t, language));
+}
+
+/** §9's inline confirmation: "Chiudi 42 schede?". */
+export function confirmCloseText(count: number, t: Translate, language: string): string {
+  return t('confirmClose', tabsText(count, t, language));
+}
+
+/** The undo toast's "17 schede chiuse", the half of §4.3's toast that is not the button. */
+export function closedText(count: number, t: Translate, language: string): string {
+  return counted(count, 'toastClosedOne', 'toastClosedOther', t, language);
+}
+
 /** The health bar's "23 da rivedere" (PLAN.md §4.2). */
 export function reviewText(count: number, t: Translate, language: string): string {
   return t('healthReview', formatCount(count, language));

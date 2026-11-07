@@ -1619,3 +1619,161 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   its factor; a throwaway scorer made three times slower, which fails on mains at 62.50 ms against a
   32.70 ms limit with all three attempts over; and a run under six busy Node processes, verified
   alive on both sides of it, which passes with factor 1.74 at 18.56 ms against 26.09 ms.
+
+## M3.2 — every close goes through `state/commands.ts`
+
+- **Context:** the panel can now close tabs from six places: a row's own button, the selection bar,
+  a section's "Chiudi tutti", a window card, `Del` and `Backspace`. PLAN.md §9 attaches two
+  conditions to all of them (the question above 25 tabs, the question for the tab in use) and
+  invariant 2 attaches a third (the archive).
+- **Decision:** none of the six calls `src/platform/tabs.ts`. They call `requestClose(tabIds)` or
+  `requestCloseWindow(windowId)` in `src/entrypoints/sidepanel/state/commands.ts`, which plans the
+  close with `safeguardsFor` from `src/core/actions.ts`, asks if the plan says to, and only then
+  closes. `keepTabs`, `discardTabs` and `undoClose` live there too, so a component never awaits
+  anything: it names an intention and the module owns the promise, with one `catch` that logs.
+- **Why:** a safeguard that each caller has to remember is a safeguard that the seventh caller will
+  not have. With one door, M4.3's "Raggruppa" and §4.5's archive actions inherit §9 by calling it,
+  and the components stay synchronous — which is also what keeps `DeclutterView`'s key handler a
+  plain `switch` rather than a chain of awaits inside a DOM event.
+
+## M3.2 — a close that needs confirming picks its tabs first, and asks in the bar
+
+- **Context:** §9 wants the two confirmations inline and never through `confirm()`. It does not say
+  where inline is.
+- **Decision:** `gate()` sets a `PendingClose` on the `asking` signal and, before asking, calls
+  `selectTabs` over exactly the tabs it is about to close. The sticky bar then renders `Confirm` in
+  place of its three buttons: the question, [Conferma], [Annulla]. [Conferma] re-plans from the open
+  tabs rather than trusting the plan it was given.
+- **Why:** the question is "Chiudi 26 schede?" and the only honest answer to "which twenty-six?" is
+  the rows themselves, ticked, with the question in the strip right under them. Putting it in the bar
+  also means there is one place on screen where a close is pending, so a second close cannot be
+  started behind the first. Re-planning on [Conferma] is because the browser does not wait for the
+  answer: a tab closed by hand in the meantime is simply no longer in the list, and a window that
+  stopped being whole no longer counts as a window.
+
+## M3.2 — the active-tab question wins over the count question
+
+- **Context:** `safeguardsFor` reports both `activeTab` and the bulk flag, and a close can trip both.
+- **Decision:** one question is asked, and if the selection holds the tab in use it is that one
+  ("Chiudi anche la scheda che stai usando?").
+- **Why:** §9's two conditions are not equally surprising. Twenty-six tabs going is what the user
+  just asked for; the page under their eyes going is not. Asking both in sequence would make the
+  second question look like a refused answer to the first.
+
+## M3.2 — `Escape` answers the question first, and [Annulla] keeps the selection
+
+- **Context:** §4.8 gives `Escape` one job and does not say what it does while a confirmation is up.
+- **Decision:** `Escape` cancels a pending question if there is one, and otherwise clears the
+  selection — so it takes two presses to get from a question back to nothing. [Annulla] cancels the
+  question and leaves the selection exactly as it was.
+- **Why:** one press, one undoing of one thing, in the order the user built it. And a cancelled
+  confirmation almost always means "not all of those" rather than "never mind": keeping the ticks
+  lets the user unpick three rows and close the rest, which a selection wiped by [Annulla] would
+  make them rebuild from scratch.
+
+## M3.2 — a whole-window selection is still a close of tabs; only the card closes the window
+
+- **Context:** `safeguardsFor` reports `wholeWindowIds`, so the bar can say "Chiudi 3 schede e la
+  finestra" for a selection that happens to empty a window. `src/platform/tabs.ts` has both
+  `closeTabs` and `closeWindow`, and they archive with different reasons.
+- **Decision:** `PendingClose.windowId` is set only by `requestCloseWindow`, which §4.3's window card
+  calls. A selection that empties a window goes through `closeTabs` all the same; the wording is
+  honest either way, because Chrome closes a window whose last tab goes.
+- **Why:** the archive is the record of why a tab went (§4.5), and the two gestures are not the same
+  reason: "ho chiuso questa finestra dimenticata" is `window`, "ho chiuso queste schede" is `manual`,
+  even when the outcome on screen is identical. Deciding by outcome would relabel the second as the
+  first whenever a selection happened to be exhaustive.
+
+## M3.2 — the selection keeps ids whose tabs have gone
+
+- **Context:** tabs close, move between windows and are replaced while the panel is open, and the
+  selection is a plain set of ids.
+- **Decision:** nothing prunes it. `deselectTabs` is called after a close for the ids it closed, and
+  that is the only housekeeping; a stale id simply never matches anything again.
+- **Why:** every reader already starts from the open tabs — `safeguardsFor` filters its input by the
+  live `tabs` array, and the bar's counts come out of that filter. A pruning watcher on top would be
+  a second source of truth for "what is picked", and the one case it would change is a tab id Chrome
+  reused, which it does not do within a session.
+
+## M3.2 — the row picks the tab; the checkbox only shows it
+
+- **Context:** §4.3 wants a selection, and the rows are already a grid with their own `Vai`,
+  `Mantieni` and `Chiudi` buttons.
+- **Decision:** a click anywhere on the row toggles it. The checkbox is rendered with no handler at
+  all and `pointer-events: none`, so it is the state made visible and never a second target; the row
+  actions `stopPropagation` so using one does not also pick the row.
+- **Why:** a 16 px box is below §4.4's 24 px target, and offering both a box and a row means two
+  gestures with the same meaning and one of them hard to hit. Keeping the `<input>` in the DOM is for
+  the screen reader, which reads the row's `aria-label` with its checked state; `pointer-events: none`
+  is what stops the click landing on the input and never reaching the row.
+
+## M3.2 — one selection signal per row, and "Seleziona tutti" is its own component
+
+- **Context:** §11 forbids re-rendering the list for a selection, and reading a signal during render
+  subscribes the component that read it.
+- **Decision:** `selectedSignal(tabId)` hands back a per-id computed, memoised in a `Map`, and that
+  is the only thing a row reads. The section header's button was extracted into `SelectAllButton`
+  because it has to read `allSelected(tabIds)`, which depends on the whole set.
+- **Why:** without the extraction, picking one row invalidated `allSelected`, re-rendered `Section`
+  and therefore re-rendered every `TabRow` under it — the exact cost §11 budgets against, at 300
+  tabs. The `Map` is never pruned: one computed per tab id seen in a session is a few hundred
+  objects, and dropping one while a row still holds it would silently stop that row updating.
+
+## M3.2 — the section's select-all button changes its own label
+
+- **Context:** the header has room for two actions beside the count.
+- **Decision:** one button, labelled "Seleziona tutti" or "Deseleziona tutti" according to whether
+  the section's rows are all picked, next to "Chiudi tutti (N)". `allSelected([])` is `false`, so an
+  empty section keeps the first label.
+- **Why:** a separate "Deseleziona" is dead most of the time and the pair doubles the header's width
+  at a 320 px panel (§4.1). The label is the state, which is also what tells the user that the
+  section is fully picked without a third indicator.
+
+## M3.2 — the close buttons use the accent, not `--td-danger`
+
+- **Context:** a close is destructive, and the token file has a red.
+- **Decision:** `--td-danger` stays reserved for "Elimina definitivamente" in the archive (§4.5).
+  The bar's close and [Conferma] get a new `.td-action-primary`, filled with `--td-accent`; every
+  other close is a plain action button.
+- **Why:** §4.5 is the only irreversible action in the product, and a red that also means "close 26
+  tabs, undoable for 8 s" stops meaning "this does not come back". Making the bar's close the only
+  filled button in the panel is enough to find it.
+
+## M3.2 — the toast's region is in the document before there is a toast
+
+- **Context:** §4.3 wants the toast announced, which means `aria-live`.
+- **Decision:** `.td-toast-slot` is rendered always, with `role="status"` and `aria-live="polite"`,
+  and the toast appears inside it. A first draft hid the empty slot with `:empty { display: none }`;
+  that was removed and the spacing moved onto `.td-toast` itself.
+- **Why:** a live region that is inserted together with its text is announced unreliably — the
+  screen reader has to be watching the region before the text arrives. The whole footer is
+  `pointer-events: none` with `pointer-events: auto` on its children, so the empty slot and the
+  sticky strip never swallow a click meant for the last row.
+
+## M3.2 — the window card got its close button here, not in M3.1
+
+- **Context:** M3.1 rendered §4.3's forgotten-window card as a sentence. The card's action is the
+  only place in the panel where a close takes the tab the user is looking at.
+- **Decision:** the button belongs to M3.2, with the rest of the actions, and
+  `tests/e2e/declutter.spec.ts` now asserts the sentence on `.td-window-text` rather than on the
+  whole card.
+- **Why:** it is an action, and until `commands.ts` existed there was nothing safe to wire it to.
+  It is also the only reachable path to both halves of §9 that the E2E can exercise: `protectionOf`
+  returns `active` for any active tab, so no list-driven selection can ever contain one or empty a
+  window.
+
+## M3.2 — the actions E2E ages its tabs with the clock alone and seeds nothing
+
+- **Context:** `tests/e2e/declutter.spec.ts` seeds `local:activity` and then waits for the background
+  tracker to stop rewriting it, which costs seconds and is the fiddliest part of that spec.
+- **Decision:** `tests/e2e/actions.spec.ts` seeds no storage at all. It installs a `Date.now` twelve
+  days ahead with `addInitScript` before loading the panel, opens its tabs with `chrome.tabs.create`,
+  and takes the rendered row count as the signal that the list has settled. It reuses the window's
+  first tab as the panel page instead of opening a new one.
+- **Why:** `factsOf` takes the later of the stored `lastActiveAt` and Chrome's own `lastAccessed`,
+  and `lastAccessed` is always seconds ago, so the clock shift alone makes every tab twelve days
+  idle — past the two-hour grace, the one-day bootstrap grace and `staleDays` at once — and a tab
+  with no record counts as never read, which is the tab these tests want anyway. No seed means no
+  tracker race to wait out. Reusing the first tab keeps the panel its window's *active* tab, which
+  is what makes the active-tab confirmation reachable and what lets every assertion here use a real
+  `click()` instead of a dispatched event on a throttled background page.

@@ -409,7 +409,8 @@ test.describe('in English', () => {
 
     // Every tab of the window is older than `staleDays` and some of them are to close,
     // which is what §4.3 offers a whole window for.
-    await expect(panel.locator('.td-window-card')).toHaveText(
+    // The sentence, not the card: the card also holds the close button of §4.3.
+    await expect(panel.locator('.td-window-text')).toHaveText(
       message('en', 'windowForgotten')
         .replace('$1', tabsText(tabs.length))
         .replace('$2', AGE_SENTENCE),

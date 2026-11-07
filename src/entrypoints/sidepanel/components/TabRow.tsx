@@ -1,10 +1,14 @@
 /**
  * One row of the Declutter list (PLAN.md §4.3, §4.8).
  *
- * Two lines: the favicon, the title and the domain in grey; then why the score suggests
- * it, with the chips that qualify it. The actions appear on hover or focus — "Vai" is the
- * only one M2.2 has, the rest come with the actions task — and nothing on the row changes
- * anything about the tab except by being clicked.
+ * Two lines: the checkbox, the favicon, the title and the domain in grey; then why the
+ * score suggests it, with the chips that qualify it and the three actions of §4.3 — "Vai",
+ * "Mantieni", "Chiudi" — which appear on hover or focus.
+ *
+ * A click anywhere else on the row picks it, which is why the checkbox has no handler of
+ * its own: one gesture, one place that answers it, and a 24 px target that is the whole
+ * row rather than a 16 px box (§4.8). The three buttons stop the click, so pressing one
+ * never also ticks the row.
  *
  * It is a `row` of the grid the list is, with everything it shows in one `gridcell`, so a
  * screen reader reads the title, the domain, the reason and the chips as one thing, which
@@ -24,6 +28,8 @@ import { displayHost } from '@/core/url';
 import { rowStopId } from '../keyboard';
 import type { DeclutterRow } from '../sections';
 import { chipsOf, reasonText } from '../reasons';
+import { keepTabs, requestClose } from '../state/commands';
+import { selectedSignal, toggleSelected } from '../state/selection';
 import { Chip } from './Chip';
 
 export function TabRow({
@@ -43,11 +49,30 @@ export function TabRow({
   // never a blank line with a favicon.
   const host = displayHost(tab.url);
   const title = tab.title === '' ? host : tab.title;
+  // Its own signal, so a `Space` on another row does not re-render this one (§11).
+  const selected = selectedSignal(tab.id).value;
 
   return (
-    <div class="td-row" role="row" data-stop={rowStopId(tab.id)} tabIndex={focused ? 0 : -1}>
+    <div
+      class={selected ? 'td-row td-row-picked' : 'td-row'}
+      role="row"
+      data-stop={rowStopId(tab.id)}
+      tabIndex={focused ? 0 : -1}
+      onClick={() => {
+        toggleSelected(tab.id);
+      }}
+    >
       <div class="td-row-cell" role="gridcell">
         <div class="td-row-line">
+          <input
+            type="checkbox"
+            class="td-row-check"
+            checked={selected}
+            aria-label={t('rowSelect', title)}
+            // Out of the tab order (§4.8's single tab stop) and without a handler: the
+            // click it makes reaches the row, which is what picks the tab.
+            tabIndex={-1}
+          />
           <TabFavicon tab={tab} />
           <span class="td-row-title" title={tab.url}>
             {title}
@@ -61,17 +86,42 @@ export function TabRow({
             <Chip key={chip.id} text={chip.text} />
           ))}
           <span class="td-row-actions">
+            {/*
+             * All three out of the tab order, so the list stays the single tab stop of
+             * §4.8: the keys of §4.8 do from the row what these do with the mouse.
+             */}
             <button
               type="button"
               class="td-action"
-              // Out of the tab order, so the list stays the single tab stop of §4.8: the
-              // row's own `Enter` already does what this button does.
               tabIndex={-1}
-              onClick={() => {
+              onClick={(event) => {
+                event.stopPropagation();
                 void activateTab(tab.id, tab.windowId).catch(failed);
               }}
             >
               {t('actionGo')}
+            </button>
+            <button
+              type="button"
+              class="td-action"
+              tabIndex={-1}
+              onClick={(event) => {
+                event.stopPropagation();
+                keepTabs([tab]);
+              }}
+            >
+              {t('actionKeep')}
+            </button>
+            <button
+              type="button"
+              class="td-action"
+              tabIndex={-1}
+              onClick={(event) => {
+                event.stopPropagation();
+                requestClose([tab.id]);
+              }}
+            >
+              {t('actionClose')}
             </button>
           </span>
         </div>

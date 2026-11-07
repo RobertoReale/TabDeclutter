@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  closeSelectionText,
+  closedText,
+  confirmCloseText,
   countsText,
   durationText,
   formatCount,
@@ -93,6 +96,68 @@ describe('tabsText', () => {
 });
 
 /*
+ * The selection bar's close button (§4.3, §9). The whole reason this is a helper and not
+ * a message is the second half: §9 asks the button itself to say that a window goes with
+ * the tabs, and the two halves have to agree in number independently.
+ */
+describe('closeSelectionText', () => {
+  it('is the bare count when no window empties, which is almost always', () => {
+    expect(closeSelectionText(17, 0, english, 'en')).toBe('Close 17');
+    expect(closeSelectionText(17, 0, italian, 'it')).toBe('Chiudi 17');
+  });
+
+  it("says the window goes too, in §9's words", () => {
+    expect(closeSelectionText(3, 1, italian, 'it')).toBe('Chiudi 3 schede e la finestra');
+    expect(closeSelectionText(3, 1, english, 'en')).toBe('Close 3 tabs and the window');
+  });
+
+  it('agrees in both halves at once, which one message could not', () => {
+    expect(closeSelectionText(1, 1, italian, 'it')).toBe('Chiudi 1 scheda e la finestra');
+    expect(closeSelectionText(8, 2, italian, 'it')).toBe('Chiudi 8 schede e le finestre');
+    expect(closeSelectionText(8, 2, english, 'en')).toBe('Close 8 tabs and the windows');
+  });
+
+  it.each(LOCALES)('%s: leaves no placeholder behind', (locale) => {
+    expect(closeSelectionText(5, 0, localeTranslator(locale), locale)).not.toMatch(/\$/);
+    expect(closeSelectionText(5, 1, localeTranslator(locale), locale)).not.toMatch(/\$/);
+    expect(closeSelectionText(5, 3, localeTranslator(locale), locale)).not.toMatch(/\$/);
+  });
+});
+
+describe('confirmCloseText', () => {
+  it("asks §9's question with the count in it", () => {
+    expect(confirmCloseText(42, italian, 'it')).toBe('Chiudi 42 schede?');
+    expect(confirmCloseText(42, english, 'en')).toBe('Close 42 tabs?');
+  });
+
+  /*
+   * The question only appears above `BULK_CONFIRM_LIMIT`, so a singular is unreachable
+   * from the bar — but the string is built the same way either way, and a helper that
+   * says "1 schede" would be a wording bug waiting for a second caller.
+   */
+  it('counts in the singular all the same', () => {
+    expect(confirmCloseText(1, italian, 'it')).toBe('Chiudi 1 scheda?');
+  });
+});
+
+describe('closedText', () => {
+  it("is the toast's own half of §4.3", () => {
+    expect(closedText(17, italian, 'it')).toBe('17 schede chiuse');
+    expect(closedText(17, english, 'en')).toBe('17 tabs closed');
+  });
+
+  it('agrees with one closed tab, which is the commonest close of all', () => {
+    expect(closedText(1, italian, 'it')).toBe('1 scheda chiusa');
+    expect(closedText(1, english, 'en')).toBe('1 tab closed');
+  });
+
+  it('groups the thousands, like every other count the panel shows', () => {
+    expect(closedText(1200, italian, 'it')).toBe('1200 schede chiuse');
+    expect(closedText(12000, italian, 'it')).toBe('12.000 schede chiuse');
+  });
+});
+
+/*
  * The ages. The expected strings are CLDR's, written out: that is the point of using
  * `Intl` rather than translating them, and a wrong unit or a wrong sign would otherwise
  * look plausible.
@@ -163,6 +228,13 @@ describe('every message these helpers reach', () => {
     'countWindowsOne',
     'countWindowsOther',
     'healthReview',
+    'barClose',
+    'barCloseWithWindows',
+    'barWindowOne',
+    'barWindowOther',
+    'confirmClose',
+    'toastClosedOne',
+    'toastClosedOther',
   ];
 
   it.each(LOCALES)('%s: exists, so no call can come back empty', (locale) => {
