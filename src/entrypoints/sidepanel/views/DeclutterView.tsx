@@ -4,9 +4,7 @@
  *
  * It renders `declutter`, the grouped list `state/tabs.ts` computes, and decides nothing
  * itself — which section a tab is in and in which order the rows go is `sections.ts`'s
- * answer, and the wording is `reasons.ts`'s. The selection, the bulk actions and the
- * sticky bar §4.3 also draws are the actions task; what is here is the list, its reasons
- * and "Vai".
+ * answer, the wording is `reasons.ts`'s, and what a close means is `state/commands.ts`'s.
  *
  * The list is one ARIA grid and holds one tab stop (the roving tabindex of §4.8): the two
  * state pieces that needs — which sections the user has folded, and which stop has the tab
@@ -15,21 +13,46 @@
  * `keyboard.ts`'s, and the keys are handled on the grid, where every row's event bubbles
  * to.
  *
- * `Space`, `Del`, `K`, `Ctrl+A` and `Ctrl+Z` are the actions task (TASKS.md M3.2): they
- * select, close and undo, and there is nothing yet for them to do.
+ * §4.8's keys are the ones that need to know where the keyboard is, so they are here too:
+ * `Space` picks, `Del`/`Backspace` closes, `K` keeps, `Ctrl/Cmd+A` picks the section. The
+ * two that are about the panel and not about one row — `Ctrl/Cmd+Z`, which undoes the last
+ * close, and `Escape`, which drops the selection — are on the document, because the toast
+ * and the bar can be answered while the focus is anywhere.
+ *
+ * The bar and the toast are below the list and outside its empty state: closing the last
+ * suggestion leaves an empty list, and that is exactly the moment an "Annulla" matters.
  */
 
 import { useSignal } from '@preact/signals';
-import { useRef } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 
 import { t } from '@/platform/i18n';
 import { activateTab } from '@/platform/tabs';
+import type { TabInfo } from '@/core/types';
 import { EmptyState } from '../components/EmptyState';
 import { HealthBar } from '../components/HealthBar';
 import { Section } from '../components/Section';
+import { SelectionBar } from '../components/SelectionBar';
+import { Toast } from '../components/Toast';
 import { activeStop, nextStop, stopsOf, type OpenSection, type Stop } from '../keyboard';
 import { forgottenWindowText } from '../reasons';
 import type { ForgottenWindow, SectionId } from '../sections';
+import {
+  asking,
+  cancelClose,
+  keepTabs,
+  requestClose,
+  requestCloseWindow,
+  selectionSafeguards,
+  undoClose,
+} from '../state/commands';
+import {
+  allSelected,
+  clearSelection,
+  deselectTabs,
+  selectTabs,
+  toggleSelected,
+} from '../state/selection';
 import { declutter, tabCount } from '../state/tabs';
 
 export function DeclutterView({ language }: { language: string }) {
@@ -75,6 +98,27 @@ export function DeclutterView({ language }: { language: string }) {
     void activateTab(stop.tab.id, stop.tab.windowId).catch(failed);
   }
 
+  /** The tabs of the section a stop is in: what `Ctrl+A` picks and `Space` on a header does. */
+  function sectionOf(stop: Stop): readonly TabInfo[] {
+    const found =
+      stop.kind === 'section'
+        ? list.sections.find((section) => section.id === stop.section)
+        : list.sections.find((section) => section.rows.some((row) => row.tab.id === stop.tab.id));
+    return found?.rows.map((row) => row.tab) ?? [];
+  }
+
+  /**
+   * What a key acts on: the selection when there is one, and otherwise where the keyboard
+   * is — a row, or every row of the section whose header it is on. Which is the same rule
+   * the bar follows, so `Del` never closes something the bar would not have.
+   */
+  function targetOf(stop: Stop | null): readonly TabInfo[] {
+    const picked = selectionSafeguards.value.tabs;
+    if (picked.length > 0) return picked;
+    if (stop === null) return [];
+    return stop.kind === 'row' ? [stop.tab] : sectionOf(stop);
+  }
+
   function onKeyDown(event: KeyboardEvent): void {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       // The arrows belong to the list: they move the tab stop and never scroll the panel
@@ -84,10 +128,46 @@ export function DeclutterView({ language }: { language: string }) {
       return;
     }
 
-    if (event.key !== 'Enter' || active === null) return;
-    // Only when the stop itself has the focus: `Enter` on the "Vai" button inside a row
+    if (active === null) return;
+    // Whether the stop itself has the focus, or something inside it: a row holds a
+    // checkbox and three buttons, and `Enter` or `Space` on one of those is its own.
+    const onStop = event.target instanceof HTMLElement && event.target.dataset.stop === active.id;
+
+    if ((event.ctrlKey || event.metaKey) && (event.key === 'a' || event.key === 'A')) {
+      // §4.8: the section the keyboard is in, not the document the browser would select.
+      event.preventDefault();
+      selectTabs(sectionOf(active).map((tab) => tab.id));
+      return;
+    }
+
+    if ((event.key === 'Delete' || event.key === 'Backspace') && !event.altKey) {
+      event.preventDefault();
+      requestClose(targetOf(active).map((tab) => tab.id));
+      return;
+    }
+
+    if (event.key === 'k' || event.key === 'K') {
+      event.preventDefault();
+      keepTabs(targetOf(active));
+      return;
+    }
+
+    if (event.key === ' ' && onStop) {
+      event.preventDefault();
+      if (active.kind === 'row') {
+        toggleSelected(active.tab.id);
+        return;
+      }
+      // On a header it is the section, which is what the header's own button does.
+      const tabIds = sectionOf(active).map((tab) => tab.id);
+      if (allSelected(tabIds)) deselectTabs(tabIds);
+      else selectTabs(tabIds);
+      return;
+    }
+
+    // `Enter` only when the stop itself has the focus: on the "Vai" button inside a row it
     // is that button's own, and would otherwise activate the tab twice.
-    if (!(event.target instanceof HTMLElement) || event.target.dataset.stop !== active.id) return;
+    if (event.key !== 'Enter' || !onStop) return;
     event.preventDefault();
     act(active);
   }
@@ -103,54 +183,108 @@ export function DeclutterView({ language }: { language: string }) {
     if (stop !== null) chosen.value = stop.dataset.stop ?? null;
   }
 
-  if (list.total === 0) return <EmptyState text={t('declutterEmpty')} />;
+  /**
+   * The two keys of §4.8 that are about the panel rather than about a row, on the document
+   * so they answer from wherever the focus is — including the toast itself, and including
+   * the moment the list has gone empty because the close emptied it.
+   */
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z')) {
+        event.preventDefault();
+        undoClose();
+        return;
+      }
+      if (event.key !== 'Escape') return;
+      // A question first: the user is backing out of it, not out of the selection it
+      // picked out for them (docs/DECISIONS.md).
+      if (asking.value !== null) {
+        cancelClose();
+        return;
+      }
+      clearSelection();
+    }
+
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
+  }, []);
 
   return (
     <>
-      <HealthBar review={list.total} total={tabCount.value} language={language} />
+      {list.total === 0 ? (
+        <EmptyState text={t('declutterEmpty')} />
+      ) : (
+        <>
+          <HealthBar review={list.total} total={tabCount.value} language={language} />
 
-      {list.windows.map((window) => (
-        <WindowCard key={window.windowId} window={window} language={language} />
-      ))}
+          {list.windows.map((window) => (
+            <WindowCard key={window.windowId} window={window} language={language} />
+          ))}
+
+          {/*
+           * `grid` and not `listbox`: a row holds a checkbox and three buttons, and an
+           * `option` may hold no interactive element at all (docs/DECISIONS.md).
+           */}
+          <div
+            ref={grid}
+            class="td-list"
+            role="grid"
+            aria-label={t('declutterList')}
+            onKeyDown={onKeyDown}
+            onFocusIn={onFocusIn}
+          >
+            {sections.map(({ section, open }) => (
+              <Section
+                key={section.id}
+                section={section}
+                open={open}
+                activeStop={active?.id ?? null}
+                language={language}
+                onToggle={() => {
+                  toggle(section.id, open);
+                }}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       {/*
-       * `grid` and not `listbox`: a row holds a button now and a checkbox with three
-       * more in M3.2, and an `option` may hold no interactive element at all
-       * (docs/DECISIONS.md).
+       * Below the list and outside its empty state, because the close that empties the
+       * list is exactly the one whose "Annulla" matters.
        */}
-      <div
-        ref={grid}
-        class="td-list"
-        role="grid"
-        aria-label={t('declutterList')}
-        onKeyDown={onKeyDown}
-        onFocusIn={onFocusIn}
-      >
-        {sections.map(({ section, open }) => (
-          <Section
-            key={section.id}
-            section={section}
-            open={open}
-            activeStop={active?.id ?? null}
-            language={language}
-            onToggle={() => {
-              toggle(section.id, open);
-            }}
-          />
-        ))}
+      <div class="td-footer">
+        <Toast language={language} />
+        <SelectionBar language={language} />
       </div>
     </>
   );
 }
 
 /**
- * §4.3's whole-window suggestion: "Finestra con 12 schede non toccata da 3 settimane".
- * The button that closes it belongs to the actions task, so for now the card is the
- * sentence — the tabs themselves are in the sections below it either way.
+ * §4.3's whole-window suggestion: "Finestra con 12 schede non toccata da 3 settimane",
+ * with the button that takes the whole window at once. That close goes through
+ * `requestCloseWindow` and not through the selection, so the archive records a window and
+ * §4.5 can offer it back as one.
  */
 function WindowCard({ window, language }: { window: ForgottenWindow; language: string }) {
   return (
-    <p class="td-window-card">{forgottenWindowText(window.tabCount, window.idleMs, t, language)}</p>
+    <p class="td-window-card">
+      <span class="td-window-text">
+        {forgottenWindowText(window.tabCount, window.idleMs, t, language)}
+      </span>
+      <button
+        type="button"
+        class="td-action td-window-action"
+        onClick={() => {
+          requestCloseWindow(window.windowId);
+        }}
+      >
+        {t('windowClose')}
+      </button>
+    </p>
   );
 }
 

@@ -6,7 +6,10 @@
  * whether the rows below it are showing, which is the pattern a screen reader already
  * knows from every collapsible table. It is a row and not a `<button>` inside one because
  * a grid's rows are what ↑/↓ walk, and the header is one of the stops: giving it a button
- * of its own would put a second tab stop inside the single one §4.8 asks for.
+ * of its own would put a second tab stop inside the single one §4.8 asks for. The two
+ * actions §4.3 puts in the header — "Seleziona tutti", "Chiudi tutti (N)" — are out of the
+ * tab order for the same reason, and the keyboard reaches them as `Ctrl+A` and `Del` on
+ * the header itself.
  *
  * A folded section renders no rows at all rather than hiding them: 500 rows that are not
  * in the document cost nothing, which is the cheapest half of §11, and they are not stops
@@ -20,6 +23,8 @@ import { t, type MessageKey } from '@/platform/i18n';
 import { formatCount } from '../format';
 import { rowStopId, sectionStopId } from '../keyboard';
 import type { DeclutterSection, SectionId } from '../sections';
+import { requestClose } from '../state/commands';
+import { allSelected, deselectTabs, selectTabs } from '../state/selection';
 import { TabRow } from './TabRow';
 
 /** §4.3's section names, in `sections.ts`'s order. */
@@ -52,6 +57,7 @@ export function Section({
     formatCount(section.rows.length, language),
   );
   const stop = sectionStopId(section.id);
+  const tabIds = section.rows.map((row) => row.tab.id);
 
   return (
     <div class="td-section" role="rowgroup">
@@ -69,6 +75,25 @@ export function Section({
             {open ? '▾' : '▸'}
           </span>
           <span class="td-section-name">{heading}</span>
+
+          {/*
+           * §4.3's two section actions. Both stop the click: the header folds the section
+           * when it is clicked, and picking or closing its tabs is not that. Out of the tab
+           * order for the same reason as the row's (§4.8's single tab stop), with `Ctrl+A`
+           * and `Del` on the header doing from the keyboard what they do.
+           */}
+          <SelectAllButton tabIds={tabIds} />
+          <button
+            type="button"
+            class="td-action td-section-action"
+            tabIndex={-1}
+            onClick={(event) => {
+              event.stopPropagation();
+              requestClose(tabIds);
+            }}
+          >
+            {t('sectionCloseAll', formatCount(tabIds.length, language))}
+          </button>
         </span>
       </div>
 
@@ -84,5 +109,31 @@ export function Section({
           />
         ))}
     </div>
+  );
+}
+
+/**
+ * §4.3's "Seleziona tutti", with the label that follows what it would do next.
+ *
+ * Its own component because it is the one thing in the header that reads the selection,
+ * and reading it in `Section` would subscribe the section — and so re-render all of its
+ * rows — every time a single row is picked (§11).
+ */
+function SelectAllButton({ tabIds }: { tabIds: readonly number[] }) {
+  const all = allSelected(tabIds);
+
+  return (
+    <button
+      type="button"
+      class="td-action td-section-action"
+      tabIndex={-1}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (all) deselectTabs(tabIds);
+        else selectTabs(tabIds);
+      }}
+    >
+      {t(all ? 'sectionDeselectAll' : 'sectionSelectAll')}
+    </button>
   );
 }

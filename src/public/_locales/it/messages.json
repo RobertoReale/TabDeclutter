@@ -163,9 +163,89 @@
     "message": "Vai",
     "description": "Button on a tab's row that activates that tab and brings its window to the front."
   },
+  "actionKeep": {
+    "message": "Mantieni",
+    "description": "Button on a tab's row and in the selection bar that keeps those tabs out of the suggestions for a week."
+  },
+  "actionClose": {
+    "message": "Chiudi",
+    "description": "Button on a tab's row that closes that tab."
+  },
+  "actionDiscard": {
+    "message": "Sospendi",
+    "description": "Button in the selection bar that drops the selected tabs from memory without closing them."
+  },
+  "actionUndo": {
+    "message": "Annulla",
+    "description": "Button in the toast that appears after a close, bringing the tabs that were just closed back."
+  },
+  "actionConfirm": {
+    "message": "Conferma",
+    "description": "Button that carries out a close the panel asked about first."
+  },
+  "actionCancel": {
+    "message": "Annulla",
+    "description": "Button that dismisses a question the panel asked, leaving everything as it was."
+  },
+  "rowSelect": {
+    "message": "Seleziona $1",
+    "description": "Name of the checkbox on a tab's row, read by a screen reader. $1 is the tab's title."
+  },
+  "sectionSelectAll": {
+    "message": "Seleziona tutti",
+    "description": "Button in a section's header that selects every tab of that section."
+  },
+  "sectionDeselectAll": {
+    "message": "Deseleziona tutti",
+    "description": "Button in a section's header, in place of \"Select all\" once every tab of that section is selected."
+  },
+  "sectionCloseAll": {
+    "message": "Chiudi tutti ($1)",
+    "description": "Button in a section's header that closes every tab of that section. $1 is how many they are."
+  },
   "windowForgotten": {
     "message": "Finestra con $1 non toccata da $2",
     "description": "Card above the Declutter list, offering a whole forgotten window. $1 is a counted noun, as in \"12 tabs\"; $2 a duration, as in \"3 weeks\"."
+  },
+  "windowClose": {
+    "message": "Chiudi finestra",
+    "description": "Button on the card above the Declutter list, which closes that whole forgotten window."
+  },
+  "barLabel": {
+    "message": "Azioni sulla selezione",
+    "description": "Accessible name of the bar that appears at the bottom of the panel while tabs are selected, never shown on screen."
+  },
+  "barClose": {
+    "message": "Chiudi $1",
+    "description": "Button in the selection bar that closes the selected tabs. $1 is the formatted number."
+  },
+  "barCloseWithWindows": {
+    "message": "Chiudi $1 e $2",
+    "description": "Button in the selection bar when the selection empties one or more windows, so that it says what else goes. $1 is a counted noun, as in \"3 tabs\"; $2 is \"the window\" or \"the windows\"."
+  },
+  "barWindowOne": {
+    "message": "la finestra",
+    "description": "The second half of \"Close 3 tabs and the window\", when the selection empties exactly one window."
+  },
+  "barWindowOther": {
+    "message": "le finestre",
+    "description": "The second half of \"Close 8 tabs and the windows\", when the selection empties more than one."
+  },
+  "confirmClose": {
+    "message": "Chiudi $1?",
+    "description": "The question the selection bar asks before closing more than 25 tabs. $1 is a counted noun, as in \"42 tabs\"."
+  },
+  "confirmCloseActive": {
+    "message": "Chiudere anche la scheda che stai usando?",
+    "description": "The question the selection bar asks when the close would take the tab the user is on right now."
+  },
+  "toastClosedOne": {
+    "message": "$1 scheda chiusa",
+    "description": "The toast that appears after a close, when it was exactly one tab. $1 is the formatted number."
+  },
+  "toastClosedOther": {
+    "message": "$1 schede chiuse",
+    "description": "The toast that appears after a close, for every other count. $1 is the formatted number."
   },
   "organizeEmpty": {
     "message": "Nessun gruppo da proporre.",
