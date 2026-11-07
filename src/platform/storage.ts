@@ -348,6 +348,26 @@ export function addProtectedDomain(domain: string): Promise<void> {
   });
 }
 
+/**
+ * "Consenti duplicati per questo sito" (PLAN.md §4.1): one pattern joins the duplicate
+ * whitelist, once.
+ *
+ * Stored **exactly as it was given**, unlike a protected domain: a whitelist line is
+ * matched case-sensitively and may be a regular expression (`core/patterns.ts`), so
+ * lower-casing it here would change what it matches. Only the surrounding spaces go, and
+ * a pattern already in the list is not written again — pressing the menu item twice on
+ * the same site costs one write.
+ */
+export function addDuplicateWhitelistPattern(pattern: string): Promise<void> {
+  return serialize(duplicateWhitelistItem.key, async () => {
+    const wanted = pattern.trim();
+    if (wanted === '') return;
+    const stored = await duplicateWhitelistItem.getValue();
+    if (stored.some((entry) => entry.trim() === wanted)) return;
+    await duplicateWhitelistItem.setValue([...stored, wanted]);
+  });
+}
+
 function activeOf(exemptions: readonly GuardExemption[], now: number): GuardExemption[] {
   return exemptions.filter((exemption) => exemption.until > now);
 }

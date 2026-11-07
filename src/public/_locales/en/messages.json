@@ -354,5 +354,17 @@
   "barDelete": {
     "message": "Delete $1",
     "description": "Button in the Archive view's selection bar that removes the selected entries from the archive. $1 is the formatted number."
+  },
+  "menuKeepAlways": {
+    "message": "Always keep this tab",
+    "description": "Item in the right-click menu on a page or a tab: the tab is never suggested for closing again."
+  },
+  "menuProtectSite": {
+    "message": "Always protect this site",
+    "description": "Item in the right-click menu on a page or a tab: the site joins the protected sites, and none of its tabs is ever suggested for closing."
+  },
+  "menuAllowDuplicates": {
+    "message": "Allow duplicates for this site",
+    "description": "Item in the right-click menu on a page or a tab: the site joins the duplicate whitelist, so opening the same page twice is no longer blocked."
   }
 }

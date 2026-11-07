@@ -15,6 +15,8 @@ const chromeEnv: CapabilityEnv = {
     tabGroups: {},
     // Chrome has `sessions`, but not `setTabValue`.
     sessions: {},
+    // Chrome's own enum of the contexts it accepts: a page, a frame, its icon — no tab.
+    contextMenus: { ContextType: { ALL: 'all', PAGE: 'page', FRAME: 'frame', ACTION: 'action' } },
   },
   globals: { LanguageModel: {} },
 };
@@ -28,6 +30,9 @@ const firefoxEnv: CapabilityEnv = {
     tabGroups: {},
     contextualIdentities: {},
     sessions: { setTabValue: () => undefined },
+    // `menus` and not `contextMenus`: with the `menus` permission of PLAN.md §5.4, that
+    // alias does not exist on Firefox. Its enum has a tab strip entry in it.
+    menus: { ContextType: { ALL: 'all', PAGE: 'page', TAB: 'tab' } },
   },
   globals: {},
 };
@@ -51,6 +56,12 @@ describe('detectCapabilities on Chrome', () => {
     expect(caps.containers).toBe(false);
     expect(caps.sessionTabValues).toBe(false);
   });
+
+  // Chrome rejects the whole `create` call when a context it has no name for is asked
+  // for, so the three items of PLAN.md §4.1 are registered on the page only.
+  it('rules out the tab context, which Chrome has no name for', () => {
+    expect(caps.tabContextMenu).toBe(false);
+  });
 });
 
 describe('detectCapabilities on Firefox', () => {
@@ -68,6 +79,10 @@ describe('detectCapabilities on Firefox', () => {
 
   it('finds tab groups, which Firefox 139 added', () => {
     expect(caps.tabGroups).toBe(true);
+  });
+
+  it('finds the tab context, so a menu item is shown on the tab strip too', () => {
+    expect(caps.tabContextMenu).toBe(true);
   });
 
   it('rules out the Chrome-only features', () => {
@@ -88,7 +103,16 @@ describe('detectCapabilities with nothing available', () => {
       containers: false,
       sessionTabValues: false,
       duplicateCommandDetection: false,
+      tabContextMenu: false,
     });
+  });
+
+  it('does not take a context enum without a tab in it for one that has one', () => {
+    const env: CapabilityEnv = {
+      targetBrowser: 'chrome',
+      extensionApi: { contextMenus: { ContextType: { PAGE: 'page' } } },
+    };
+    expect(detectCapabilities(env).tabContextMenu).toBe(false);
   });
 
   it('does not take a non-callable sessions.setTabValue for the real thing', () => {

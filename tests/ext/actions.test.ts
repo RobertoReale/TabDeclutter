@@ -52,6 +52,7 @@ const WITH_GROUPS: Capabilities = {
   containers: false,
   sessionTabValues: false,
   duplicateCommandDetection: true,
+  tabContextMenu: false,
 };
 
 /** Invariant 10: Firefox before 139 has no tab groups at all. */

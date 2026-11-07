@@ -18,6 +18,7 @@ const NOTHING: Capabilities = {
   containers: false,
   sessionTabValues: false,
   duplicateCommandDetection: false,
+  tabContextMenu: false,
 };
 
 /** Chrome: the favicon cache is there, on the extension's own origin. */

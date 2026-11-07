@@ -1043,7 +1043,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M3.1 Tab actions and safeguards
 - [x] M3.2 Selection, bar, toast and row actions
 - [x] M3.3 Archive view and periodic cleanup
-- [ ] M3.4 Page and tab context menus
+- [x] M3.4 Page and tab context menus
 - [ ] M3.5 Actions E2E
 - [ ] M3b.1 Pure guard decision
 - [ ] M3b.2 Live guard in the background

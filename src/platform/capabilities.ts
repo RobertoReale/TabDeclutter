@@ -25,6 +25,9 @@ interface ExtensionApiProbe {
   readonly tabGroups?: unknown;
   readonly contextualIdentities?: unknown;
   readonly sessions?: { readonly setTabValue?: unknown } | undefined;
+  /** Firefox's name for the context menus. Chrome has no `menus`. */
+  readonly menus?: { readonly ContextType?: object } | undefined;
+  readonly contextMenus?: { readonly ContextType?: object } | undefined;
 }
 
 export interface Capabilities {
@@ -44,6 +47,16 @@ export interface Capabilities {
   readonly sessionTabValues: boolean;
   /** Chrome: telling an intentional "Duplicate tab" apart (PLAN.md §8.6). */
   readonly duplicateCommandDetection: boolean;
+  /**
+   * Firefox: a context menu may also be shown on a tab strip entry, `contexts: ['tab']`.
+   *
+   * Chrome has no such context and rejects the whole `create` call when it is named, so
+   * PLAN.md §5.5 asks for it to be "added when present". Read off `ContextType`, which
+   * both browsers expose as the enum of the contexts they accept, so this is feature
+   * detection and not a browser name (invariant 5). `menus` is where Firefox keeps it,
+   * `contextMenus` where Chrome does.
+   */
+  readonly tabContextMenu: boolean;
 }
 
 export function detectCapabilities(env: CapabilityEnv): Capabilities {
@@ -57,7 +70,13 @@ export function detectCapabilities(env: CapabilityEnv): Capabilities {
     containers: Boolean(api?.contextualIdentities),
     sessionTabValues: typeof api?.sessions?.setTabValue === 'function',
     duplicateCommandDetection: env.targetBrowser === 'chrome',
+    tabContextMenu: hasTabContext(api?.menus?.ContextType ?? api?.contextMenus?.ContextType),
   };
+}
+
+/** `ContextType.TAB` is Firefox's; Chrome's enum has no such member. */
+function hasTabContext(contextType: object | undefined): boolean {
+  return contextType !== undefined && 'TAB' in contextType;
 }
 
 /** Read off `globalThis`, so that a browser without it just gives `undefined`. */

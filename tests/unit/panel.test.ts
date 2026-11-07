@@ -13,6 +13,7 @@ const NOTHING: Capabilities = {
   containers: false,
   sessionTabValues: false,
   duplicateCommandDetection: false,
+  tabContextMenu: false,
 };
 
 function chromeApi() {
