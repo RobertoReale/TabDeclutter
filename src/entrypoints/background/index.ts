@@ -5,10 +5,12 @@
 import { registerPanelOpening } from '@/platform/panel';
 
 import { registerBadge } from './badge';
+import { registerCleanup } from './cleanup';
 import { registerTracker } from './tracker';
 
 export default defineBackground(() => {
   registerPanelOpening();
   registerTracker();
   registerBadge();
+  registerCleanup();
 });

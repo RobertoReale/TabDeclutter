@@ -28,6 +28,7 @@
 import { storage } from 'wxt/utils/storage';
 import type { StorageItemKey } from 'wxt/utils/storage';
 
+import { pruneArchiveEntries, sweepActivity } from '../core/archive';
 import { keepKey } from '../core/scoring';
 import type {
   ActivityStore,
@@ -158,6 +159,11 @@ export function addToArchive(entries: readonly ArchivedTab[]): Promise<void> {
   });
 }
 
+/** The whole archive, newest first: what the Archive view lists (PLAN.md §4.5). */
+export function readArchive(): Promise<readonly ArchivedTab[]> {
+  return archiveItem.getValue();
+}
+
 /** Removes entries by `ArchivedTab.id`, in one write: a restore ends here (PLAN.md §9). */
 export function removeFromArchive(ids: readonly string[]): Promise<void> {
   return serialize(archiveItem.key, async () => {
@@ -168,6 +174,52 @@ export function removeFromArchive(ids: readonly string[]): Promise<void> {
     // Nothing matched: do not rewrite the same array.
     if (kept.length === stored.length) return;
     await archiveItem.setValue(kept);
+  });
+}
+
+/**
+ * "Svuota archivio" (PLAN.md §4.5), in one write.
+ *
+ * It writes even when the archive is already empty, unlike the helpers above: the view
+ * asked a question and got an answer, and the `onChanged` that follows is what tells the
+ * panel the answer was carried out.
+ */
+export function emptyArchive(): Promise<void> {
+  return serialize(archiveItem.key, async () => {
+    await archiveItem.setValue([]);
+  });
+}
+
+/**
+ * Drops the archive entries past retention or past the cap, in one write, and says how
+ * many went.
+ *
+ * The `archive` third of the 6 h cleanup of PLAN.md §10. What to keep is
+ * `pruneArchiveEntries`' answer: this only reads, writes and counts.
+ */
+export function pruneArchive(now: number, retentionDays: number): Promise<number> {
+  return serialize(archiveItem.key, async () => {
+    const stored = await archiveItem.getValue();
+    const { kept, dropped } = pruneArchiveEntries(stored, { now, retentionDays });
+    if (dropped > 0) await archiveItem.setValue([...kept]);
+    return dropped;
+  });
+}
+
+/**
+ * Drops the activity records of tabs that are no longer open, in one write, and says how
+ * many went.
+ *
+ * The `activity` third of the 6 h cleanup of PLAN.md §10. `openTabIds` comes from the
+ * caller rather than from `tabs.query` here, so this stays one read and one write of one
+ * key, and the caller decides the moment both halves describe.
+ */
+export function pruneActivity(openTabIds: readonly number[]): Promise<number> {
+  return serialize(activityItem.key, async () => {
+    const stored = await activityItem.getValue();
+    const { kept, dropped } = sweepActivity(stored, openTabIds);
+    if (dropped > 0) await activityItem.setValue(kept);
+    return dropped;
   });
 }
 
@@ -225,8 +277,8 @@ export async function isKept(url: string, now: number): Promise<boolean> {
 /**
  * Drops the expired keeps in one write and says how many went.
  *
- * This is the `keeps` half of the 6 h cleanup of PLAN.md §10; the alarm that calls it
- * comes with the background's housekeeping.
+ * The `keeps` third of the 6 h cleanup of PLAN.md §10, called — with `pruneArchive` and
+ * `pruneActivity` — from `entrypoints/background/cleanup.ts`.
  */
 export function pruneKeeps(now: number): Promise<number> {
   return serialize(keepsItem.key, async () => {

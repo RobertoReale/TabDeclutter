@@ -2,9 +2,10 @@
  * The panel's shell: the header of PLAN.md §4.2 and the view it is showing.
  *
  * Declutter is live — its rows, its sections and its reasons are `views/
- * DeclutterView.tsx` — while Organize is still M4.3 and the archive M3.3, so
- * those two are only their empty state. The header reads the signals of
- * `state/tabs.ts`, so what it says is what the browser currently has open.
+ * DeclutterView.tsx` — and so is the archive (`views/ArchiveView.tsx`), while
+ * Organize is still M4.3 and so is only its empty state. The header reads the
+ * signals of `state/tabs.ts`, so what it says is what the browser currently has
+ * open.
  *
  * Every visible string goes through `t` (invariant 11) and nothing is ever
  * interpolated as HTML: a title or a URL is untrusted text (invariant 7), and
@@ -16,6 +17,7 @@ import { useSignal } from '@preact/signals';
 import { panelLanguage, t } from '@/platform/i18n';
 import { countsText } from './format';
 import { tabCount, windowCount } from './state/tabs';
+import { ArchiveView } from './views/ArchiveView';
 import { DeclutterView } from './views/DeclutterView';
 
 /** The views the navigation of §4.2 switches between, in its order. */
@@ -91,7 +93,7 @@ function View({ id, language }: { id: ViewId; language: string }) {
     case 'organize':
       return <p class="td-empty">{t('organizeEmpty')}</p>;
     case 'archive':
-      return <p class="td-empty">{t('archiveEmpty')}</p>;
+      return <ArchiveView language={language} />;
   }
 }
 

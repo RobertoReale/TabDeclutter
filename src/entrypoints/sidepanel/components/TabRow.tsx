@@ -21,8 +21,6 @@
  */
 
 import { t } from '@/platform/i18n';
-import type { Favicon } from '@/platform/favicon';
-import { faviconOf } from '@/platform/favicon';
 import { activateTab } from '@/platform/tabs';
 import { displayHost } from '@/core/url';
 import { rowStopId } from '../keyboard';
@@ -31,6 +29,7 @@ import { chipsOf, reasonText } from '../reasons';
 import { keepTabs, requestClose } from '../state/commands';
 import { selectedSignal, toggleSelected } from '../state/selection';
 import { Chip } from './Chip';
+import { RowFavicon } from './RowFavicon';
 
 export function TabRow({
   row,
@@ -73,7 +72,7 @@ export function TabRow({
             // click it makes reaches the row, which is what picks the tab.
             tabIndex={-1}
           />
-          <TabFavicon tab={tab} />
+          <RowFavicon page={tab} />
           <span class="td-row-title" title={tab.url}>
             {title}
           </span>
@@ -127,32 +126,6 @@ export function TabRow({
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * The 16 px icon. `faviconOf` decides between the browser's own cached icon and an
- * avatar; this only draws the answer.
- */
-function TabFavicon({ tab }: { tab: { url: string; favIconUrl?: string } }) {
-  const favicon: Favicon = faviconOf(tab);
-
-  if (favicon.kind === 'image') {
-    // Decorative: the title beside it names the tab, and an alt text repeating the
-    // domain would be read twice. `loading="lazy"` keeps a long list cheap (§11).
-    return <img class="td-favicon" src={favicon.src} alt="" loading="lazy" decoding="async" />;
-  }
-
-  return (
-    <span
-      class="td-favicon td-avatar"
-      aria-hidden="true"
-      // A custom property, so the hue is the only thing the component decides: the
-      // saturation, the lightness and the contrast stay in the stylesheet (§4.8).
-      style={`--td-avatar-hue: ${favicon.hue}`}
-    >
-      {favicon.initial}
-    </span>
   );
 }
 

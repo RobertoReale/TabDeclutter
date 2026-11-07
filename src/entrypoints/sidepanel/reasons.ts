@@ -14,6 +14,7 @@
  */
 
 import type { Reason, ScoredTab } from '../../core/scoring';
+import type { ArchiveReason } from '../../core/types';
 import type { MessageKey, Translate } from '../../platform/i18n';
 import { durationText, formatCount, pluralRules, relativeAge, tabsText } from './format';
 
@@ -130,6 +131,28 @@ function openedText(activations: number, t: Translate, language: string): string
   if (activations === 0) return t('chipOpenedNever');
   const plural = pluralRules(language).select(activations) === 'one';
   return t(plural ? 'chipOpenedOne' : 'chipOpenedOther', formatCount(activations, language));
+}
+
+/**
+ * Why an archived tab was closed (PLAN.md §4.5: "titolo, dominio, data chiusura,
+ * motivo").
+ *
+ * Four reasons and four sentences, because the archive's whole purpose is that the user
+ * recognises a close they may not remember making: "l'ho chiusa io" and "l'ha chiusa la
+ * protezione duplicati" are the two answers §4.5's origin filter is built on, and a window
+ * taken whole is the one close where a tab the user never looked at went with the others.
+ */
+export function archiveReasonText(reason: ArchiveReason, t: Translate): string {
+  switch (reason) {
+    case 'manual':
+      return t('archiveReasonManual');
+    case 'window':
+      return t('archiveReasonWindow');
+    case 'duplicate-auto':
+      return t('archiveReasonDuplicateAuto');
+    case 'duplicate-manual':
+      return t('archiveReasonDuplicateManual');
+  }
 }
 
 /** The §4.3 card: "Finestra con 12 schede non toccata da 3 settimane". */
