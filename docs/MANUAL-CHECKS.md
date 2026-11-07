@@ -128,3 +128,13 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   5. Scendi con ↓ su una riga che vuoi tenere e premi K: la riga esce dalla lista, ma la scheda resta aperta nel browser.
   6. Accendi il Narratore di Windows con Ctrl+Win+Invio, rifai i punti 3 e 4 ascoltando che cosa dice, e spegnilo con la stessa combinazione.
   Risultato atteso: ogni tasto fa una cosa sola e si capisce sempre su quale riga sei; la barra spaziatrice spunta e non apre nulla; Canc chiude solo quello che è spuntato; Ctrl+Z riporta la scheda senza che tu debba andare col mouse sul riquadro «Annulla»; K non chiude niente. Al punto 6 il Narratore annuncia da solo «1 scheda chiusa» subito dopo Canc, senza che tu debba cercarlo. Se un tasto non fa niente, se ne fa due cose insieme, o se il Narratore non annuncia la chiusura, scrivi a Claude quale tasto.
+
+- [ ] (M3.3) «Esporta» mette davvero la lista negli appunti, in Chrome e in Firefox
+  ⏱ 4 minuti · Chrome e Firefox
+  1. TabDeclutter non chiede il permesso «appunti»: scrive negli appunti solo nell'istante in cui clicchi il pulsante, e questo è l'unico modo di sapere se i due browser lo concedono davvero. I test automatici non possono verificarlo.
+  2. In Chrome, con la build di prova caricata, chiudi due o tre schede dal pannello (spuntale e clicca «Chiudi …»), poi apri «Archivio» in alto.
+  3. Clicca «Esporta»: sotto la lista deve comparire per qualche secondo la scritta «Copiato negli appunti».
+  4. Apri una scheda nuova, vai su un posto dove si può scrivere (per esempio il campo di ricerca di Google, o il Blocco note di Windows) e premi Ctrl+V.
+  5. Scrivi «archivio» nella casella di ricerca dell'Archivio, in modo che resti una riga sola, clicca «Esporta» e riincolla da un'altra parte.
+  6. Ripeti i punti da 2 a 4 in Firefox, nella barra laterale.
+  Risultato atteso: quello che si incolla è un elenco, una riga per scheda, della forma `- [Titolo della pagina](https://indirizzo…)` — tante righe quante erano le schede nella lista. Al punto 5 si incolla una riga sola: «Esporta» copia quello che la ricerca ha lasciato sullo schermo, non tutto l'archivio. In Firefox succede la stessa cosa. Se non compare «Copiato negli appunti», se Ctrl+V incolla qualcosa di diverso (o quello che avevi copiato prima), o se uno dei due browser chiede un permesso, scrivi a Claude quale browser e che cosa hai visto.

@@ -1042,7 +1042,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M2.5 Panel opening budget
 - [x] M3.1 Tab actions and safeguards
 - [x] M3.2 Selection, bar, toast and row actions
-- [ ] M3.3 Archive view and periodic cleanup
+- [x] M3.3 Archive view and periodic cleanup
 - [ ] M3.4 Page and tab context menus
 - [ ] M3.5 Actions E2E
 - [ ] M3b.1 Pure guard decision

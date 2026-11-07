@@ -556,3 +556,72 @@ button {
   min-width: 0;
   font-weight: 500;
 }
+
+/* ── The Archive view of §4.5 ──────────────────────────────────────────── */
+
+/*
+ * The search box and the two filters, and below them the archive's own actions.
+ * They wrap, because a 320 px panel cannot hold a search box, two selects and
+ * three buttons on one line (§4.7).
+ */
+.td-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--td-space-2);
+}
+
+.td-tools-actions {
+  margin-bottom: var(--td-space-3);
+}
+
+/* The search takes whatever the filters leave, and at least a readable line. */
+.td-search {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.td-search,
+.td-filter {
+  min-height: var(--td-target);
+  padding: 0 var(--td-space-2);
+  font: inherit;
+  color: inherit;
+  background: var(--td-surface);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius-sm);
+}
+
+.td-filter {
+  flex: none;
+  max-width: 100%;
+  font-size: var(--td-text-meta);
+}
+
+/*
+ * §4.7 keeps `--td-danger` for the one action nothing can undo: "Elimina" on an
+ * archived entry, and "Svuota archivio". Outlined rather than filled, so a red
+ * block is not the loudest thing in the view.
+ */
+.td-action-danger {
+  color: var(--td-danger);
+}
+
+.td-action-danger:hover {
+  background: var(--td-hover);
+}
+
+/*
+ * The archive's checkbox answers for itself (`ArchiveRow`) and is a real tab
+ * stop, unlike the Declutter row's, which is the row's state made visible.
+ */
+.td-check-live {
+  pointer-events: auto;
+}
+
+/* The close date, which must not be broken across lines. */
+.td-row-when {
+  flex: none;
+  white-space: nowrap;
+}

@@ -254,5 +254,105 @@
   "archiveEmpty": {
     "message": "Nessuna scheda in archivio.",
     "description": "Shown in the Archive view when nothing has been closed through TabDeclutter."
+  },
+  "archiveNoMatch": {
+    "message": "Nessuna scheda corrisponde alla ricerca.",
+    "description": "Shown in the Archive view when the archive is not empty but the search and the filters leave no row."
+  },
+  "archiveTools": {
+    "message": "Cerca e filtra l'archivio",
+    "description": "Accessible name of the row holding the Archive view's search box and its two filters, never shown on screen."
+  },
+  "archiveSearch": {
+    "message": "Cerca titolo o indirizzo",
+    "description": "The Archive view's search box: its placeholder and its accessible name."
+  },
+  "archiveWhen": {
+    "message": "Quando è stata chiusa",
+    "description": "Accessible name of the Archive view's date filter, never shown on screen."
+  },
+  "archiveWhenAny": {
+    "message": "Qualsiasi data",
+    "description": "Option of the Archive view's date filter: no date restriction. The one it opens on."
+  },
+  "archiveWhenToday": {
+    "message": "Oggi",
+    "description": "Option of the Archive view's date filter: closed today."
+  },
+  "archiveWhenWeek": {
+    "message": "Ultimi 7 giorni",
+    "description": "Option of the Archive view's date filter: closed in the last seven days, today included."
+  },
+  "archiveWhenOlder": {
+    "message": "Più vecchie",
+    "description": "Option of the Archive view's date filter: closed more than seven days ago."
+  },
+  "archiveOrigin": {
+    "message": "Chi l'ha chiusa",
+    "description": "Accessible name of the Archive view's origin filter, never shown on screen."
+  },
+  "archiveOriginAny": {
+    "message": "Qualsiasi origine",
+    "description": "Option of the Archive view's origin filter: no restriction. The one it opens on."
+  },
+  "archiveOriginMine": {
+    "message": "Chiuse da me",
+    "description": "Option of the Archive view's origin filter: the tabs the user closed."
+  },
+  "archiveOriginDuplicates": {
+    "message": "Duplicati chiusi automaticamente",
+    "description": "Option of the Archive view's origin filter: the tabs the duplicate guard closed on its own."
+  },
+  "archiveList": {
+    "message": "Schede in archivio",
+    "description": "Accessible name of the Archive view's list, never shown on screen."
+  },
+  "archiveReasonManual": {
+    "message": "Chiusa da te",
+    "description": "Why an archived tab was closed: the user closed it from the panel."
+  },
+  "archiveReasonWindow": {
+    "message": "Chiusa con la sua finestra",
+    "description": "Why an archived tab was closed: it went with a whole window the user closed."
+  },
+  "archiveReasonDuplicateAuto": {
+    "message": "Duplicato chiuso automaticamente",
+    "description": "Why an archived tab was closed: the duplicate guard closed it as it opened."
+  },
+  "archiveReasonDuplicateManual": {
+    "message": "Duplicato chiuso da te",
+    "description": "Why an archived tab was closed: the user closed it as a duplicate."
+  },
+  "actionRestore": {
+    "message": "Ripristina",
+    "description": "Button on an archived tab's row that opens it again."
+  },
+  "actionDelete": {
+    "message": "Elimina",
+    "description": "Button on an archived tab's row that removes it from the archive for good."
+  },
+  "archiveExport": {
+    "message": "Esporta",
+    "description": "Button in the Archive view that copies the rows on screen to the clipboard as a Markdown list of links."
+  },
+  "archiveCopied": {
+    "message": "Copiato negli appunti",
+    "description": "Confirmation shown after Export, under the Archive view's list."
+  },
+  "archiveEmptyAll": {
+    "message": "Svuota archivio",
+    "description": "Button in the Archive view that deletes every entry."
+  },
+  "archiveConfirmEmpty": {
+    "message": "Eliminare tutte le $1 schede in archivio?",
+    "description": "The question \"Empty archive\" asks before deleting everything. $1 is the formatted number of entries."
+  },
+  "barRestore": {
+    "message": "Ripristina $1",
+    "description": "Button in the Archive view's selection bar that opens the selected tabs again. $1 is the formatted number."
+  },
+  "barDelete": {
+    "message": "Elimina $1",
+    "description": "Button in the Archive view's selection bar that removes the selected entries from the archive. $1 is the formatted number."
   }
 }

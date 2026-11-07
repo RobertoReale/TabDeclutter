@@ -19,12 +19,16 @@ import {
   addToArchive,
   archiveItem,
   duplicateWhitelistItem,
+  emptyArchive,
   guardStateItem,
   isExempt,
   isKept,
   keepsItem,
   protectedDomainsItem,
+  pruneActivity,
+  pruneArchive,
   pruneKeeps,
+  readArchive,
   readExemptions,
   readKeeps,
   readSettings,
@@ -54,6 +58,18 @@ function archived(id: string, overrides: Partial<ArchivedTab> = {}): ArchivedTab
     reason: 'manual',
     windowId: 1,
     index: 0,
+    ...overrides,
+  };
+}
+
+function activity(tabId: number, overrides: Partial<TabActivity> = {}): TabActivity {
+  return {
+    tabId,
+    url: `https://example.com/${String(tabId)}`,
+    createdAt: NOW - DAY,
+    lastActiveAt: NOW - HOUR,
+    activations: 3,
+    foregroundMs: 42,
     ...overrides,
   };
 }
@@ -263,6 +279,86 @@ describe('the archive', () => {
 
     expect(writes).not.toHaveBeenCalled();
     expect(await archivedIds()).toEqual(['a']);
+  });
+
+  it('reads back what was archived, newest first', async () => {
+    await addToArchive([archived('old')]);
+    await addToArchive([archived('new')]);
+
+    expect((await readArchive()).map((entry) => entry.id)).toEqual(['new', 'old']);
+  });
+
+  it('reads an empty archive as an empty list, not as nothing', async () => {
+    expect(await readArchive()).toEqual([]);
+  });
+
+  it('empties the archive in one write', async () => {
+    await addToArchive([archived('a'), archived('b')]);
+    const writes = countWrites('local');
+
+    await emptyArchive();
+
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(await archivedIds()).toEqual([]);
+  });
+
+  it('writes even when the archive was already empty, so the panel hears the answer', async () => {
+    const writes = countWrites('local');
+
+    await emptyArchive();
+
+    expect(writes).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the 6 h cleanup of PLAN.md §10', () => {
+  it('drops the archive entries past retention, in one write, and counts them', async () => {
+    await addToArchive([
+      archived('fresh', { closedAt: NOW - DAY }),
+      archived('stale', { closedAt: NOW - 31 * DAY }),
+      archived('ancient', { closedAt: NOW - 90 * DAY }),
+    ]);
+    const writes = countWrites('local');
+
+    expect(await pruneArchive(NOW, DEFAULT_SETTINGS.archiveRetentionDays)).toBe(2);
+
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(await archivedIds()).toEqual(['fresh']);
+  });
+
+  it('does not write when every entry is still within retention', async () => {
+    await addToArchive([archived('fresh', { closedAt: NOW - DAY })]);
+    const writes = countWrites('local');
+
+    expect(await pruneArchive(NOW, 30)).toBe(0);
+
+    expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('answers to the moment it is given and not to the clock', async () => {
+    await addToArchive([archived('a', { closedAt: NOW })]);
+
+    expect(await pruneArchive(NOW + 31 * DAY, 30)).toBe(1);
+    expect(await archivedIds()).toEqual([]);
+  });
+
+  it('drops the activity records of tabs that are gone, in one write', async () => {
+    await activityItem.setValue({ 1: activity(1), 2: activity(2), 3: activity(3) });
+    const writes = countWrites('local');
+
+    expect(await pruneActivity([2])).toBe(2);
+
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(Object.keys(await activityItem.getValue())).toEqual(['2']);
+  });
+
+  it('does not write when every record still has its tab', async () => {
+    await activityItem.setValue({ 1: activity(1) });
+    const writes = countWrites('local');
+
+    expect(await pruneActivity([1])).toBe(0);
+
+    expect(writes).not.toHaveBeenCalled();
   });
 });
 

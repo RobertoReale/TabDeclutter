@@ -1777,3 +1777,156 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   tracker race to wait out. Reusing the first tab keeps the panel its window's *active* tab, which
   is what makes the active-tab confirmation reachable and what lets every assertion here use a real
   `click()` instead of a dispatched event on a throttled background page.
+
+## M3.3 — the date filter has a fourth option, and its days are calendar days
+
+- **Context:** PLAN.md §4.5 names three date filters — "Oggi", "Ultimi 7 giorni", "Più vecchie" —
+  and does not say what the view shows before one is chosen, nor whether a day is a calendar day
+  or the last 24 hours.
+- **Decision:** `ArchiveWhen` is `'any' | 'today' | 'week' | 'older'`, and `any` is the option the
+  view opens on and can go back to. "Oggi" is from the local midnight before the snapshot's moment
+  (`startOfDay`); "Ultimi 7 giorni" is from midnight six days before that, today included; "Più
+  vecchie" is the exact complement of that same boundary, so the three are filters over one
+  threshold and no entry is unreachable. All three are computed from `ArchiveData.at`, the moment
+  the archive was read, not from a live clock.
+- **Why:** without a fourth option the view would have to open on one of the three, and "Oggi"
+  would hide the archive on a quiet day while "Più vecchie" would hide everything just closed. A
+  calendar day is what the words mean: a tab closed at 23:50 is yesterday's once the clock passes
+  midnight, and a rolling 24 hours would still call it today at nine the next morning. Judging
+  against the snapshot rather than `Date.now()` is what keeps the list and each row's "2 giorni fa"
+  describing one moment — a panel left open overnight is stale, not inconsistent.
+
+## M3.3 — only the guard's own closes count as "Duplicati chiusi automaticamente"
+
+- **Context:** §4.5's origin filter has two values and `ArchiveReason` has five (`manual`,
+  `window`, `duplicate-auto`, `duplicate-manual`, `stale`).
+- **Decision:** `originOf` maps `duplicate-auto` to `duplicates` and everything else to `mine`.
+- **Why:** the filter exists to separate the closes the user made from the one close in the product
+  they did not make tab by tab — §8's guard closing a duplicate as it opens. "Chiudi tutti i
+  duplicati" (`duplicate-manual`) is a button they pressed, so it belongs with their own closes
+  even though the word "duplicate" is in its reason.
+
+## M3.3 — the export writes the clipboard from the button's own gesture, with no permission
+
+- **Context:** §4.5 wants "Esporta (lista Markdown di link) negli appunti". PLAN.md §5.4 lists the
+  permissions exactly, and invariant 8 forbids adding one.
+- **Decision:** `copyArchived` calls `navigator.clipboard.writeText` inside the click handler's own
+  task, with no `clipboardWrite` permission in either manifest. It returns a boolean, and the view
+  shows "Copiato" in its live region only when that is `true`; a refusal is logged and nothing is
+  claimed. It copies `shownArchive` — what the search and the filters left — and refuses an empty
+  list outright.
+- **Why:** an extension page writing the clipboard during a user gesture needs no permission in
+  either browser, and `clipboardWrite` would be a permission in the store listing that buys
+  nothing. The clipboard is the only action in this view the browser can refuse for a reason
+  outside our control, so it is the only one that reports back instead of being fired and
+  forgotten. Exporting the filtered rows is what makes the search useful for anything but reading:
+  it is how §4.5 lets the user choose *which* links to export.
+
+## M3.3 — the Markdown export escapes the title and the URL it is embedding
+
+- **Context:** a title and a URL are a page's own text (invariant 7), and the export is pasted into
+  somebody's document.
+- **Decision:** `exportArchive` escapes `[`, `]` and `\` in the link text, and wraps a URL
+  containing a space, a parenthesis or an angle bracket in `<…>` with those brackets
+  percent-encoded. An entry with no title is named by its domain, and one with neither by its URL.
+- **Why:** invariant 7 is about markup in the DOM, but the reasoning carries one layer out: a title
+  ending in `](http://evil` would otherwise produce a link in the user's notes pointing somewhere
+  the archive never recorded. Escaping costs nothing and the result is still plain Markdown.
+
+## M3.3 — the archive is read when its view opens, and its actions live beside it
+
+- **Context:** `state/tabs.ts` is started by the panel and followed for the panel's life. The
+  archive is up to `ARCHIVE_CAP` (1000) entries, and PLAN.md §11 budgets the panel's opening.
+- **Decision:** `startArchiveState` is called from `ArchiveView`'s `useEffect` and its `stop()`
+  removes the `storage.onChanged` listener and any pending debounce; `archiveData` is `null` until
+  the first read comes back, and the view renders nothing at all until then. The four actions
+  (`restoreArchived`, `forgetArchived`, `emptyArchived`, `copyArchived`) live in
+  `state/archive.ts`, not in `state/commands.ts`.
+- **Why:** reading 1000 entries nobody asked for to show the Declutter list is exactly the cost
+  §11 is written against, and the view is the one thing that knows whether they are wanted.
+  Rendering nothing rather than an empty state for the first read is because an empty archive and
+  an unread one look identical and mean opposite things. The actions are separate from
+  `commands.ts` because that module is the single door to closing a tab — safeguards, confirmation,
+  undo — and three of these cannot touch a tab at all; the one that can, a restore, calls
+  `platform/tabs.ts`'s `restoreTabs`, the same function "Annulla" uses, so §9 keeps one definition
+  of bringing a tab back.
+
+## M3.3 — a row's "Elimina" acts, "Svuota archivio" asks, and an empty archive has no toolbar
+
+- **Context:** §4.5 asks for an inline confirmation on "Svuota archivio" and §9 forbids
+  `confirm()`. It says nothing about the per-row delete or the multiple one.
+- **Decision:** "Elimina" on a row and "Elimina (N)" in the selection bar happen immediately.
+  "Svuota archivio" sets `asking` and the question replaces the whole actions strip — select-all,
+  export and empty all go, so nothing else there is pressable while it is open — with
+  [Conferma] focused. An archive with no entries renders only the empty state: no search box, no
+  filters, no actions.
+- **Why:** the rows a delete takes are the ones the user is pointing at or has ticked, and the
+  button says how many; the question would be asking them to confirm what they can see. "Svuota"
+  is the one action whose scope is not on screen — it takes the 970 rows the filter is hiding too —
+  which is why it says how many and why it asks. Replacing the strip rather than appearing beside
+  it follows M3.2's confirmation in the bar: one place on screen where something is pending. And a
+  search box over an empty archive is three controls that cannot change the answer.
+
+## M3.3 — the archive list is an ARIA grid without a roving tab stop
+
+- **Context:** §4.8 gives the Declutter list one roving tab stop, with ↑/↓ walking the rows across
+  their section boundaries. The archive list is also rows with a checkbox and two buttons.
+- **Decision:** `role="grid"` with `role="row"`/`role="gridcell"` for the structure, but every
+  control is an ordinary tab stop: no `tabIndex` management, no key handler, and the checkbox has
+  its own click handler so `Space` is the browser's own.
+- **Why:** the roving tab stop exists in §4.8 because that list has sections a plain `Tab` order
+  cannot express, and because its rows are a target the arrow keys must reach. The archive is one
+  flat list under a search box, which is a form: `Tab` into the search, `Tab` through the rows is
+  what a person expects there, and reimplementing arrow navigation would take `Space` and the
+  text caret away from controls that already handle them.
+
+## M3.3 — the cleanup sweeps at registration too, and keeps nothing in a variable
+
+- **Context:** PLAN.md §10 asks for a cleanup "every 6 h" through `chrome.alarms`. An alarm only
+  fires while the browser is running, and `alarms.create` with an existing name restarts the
+  countdown.
+- **Decision:** `registerCleanup` adds its three listeners (`alarms.onAlarm` filtered by the name
+  `cleanup`, `runtime.onStartup`, `runtime.onInstalled`) synchronously, creates the 360-minute
+  alarm only if `alarms.get` says there is none, and runs one sweep immediately. Every sweep reads
+  the stores, decides and writes; `run()` chains, so two triggers cannot read the same store at
+  once, and a failed sweep leaves the queue alive.
+- **Why:** a profile that was off for a month must not wait another 6 h before honouring a 30-day
+  retention, and a service worker that wakes every few minutes would push an unguarded `create`
+  past the period forever, so the sweep would never fire. Nothing is held between sweeps
+  (invariant 6): a worker that dies halfway leaves a store that is merely not yet swept, which the
+  next alarm or the next startup finishes.
+
+## M3.3 — retention is a strict boundary, and an "orphaned" record is one with no open tab
+
+- **Context:** §10 names three things to sweep and §4.6 gives retention in days. Neither says what
+  happens to an entry exactly 30 days old, nor what makes an activity record orphaned.
+- **Decision:** `pruneArchiveEntries` keeps `closedAt > now - retentionDays * DAY`, so the boundary
+  itself goes; retention is applied before the cap, and the cap keeps the newest by `closedAt` with
+  the stored order breaking a tie. `sweepActivity` keeps a record only if its key is the id of a
+  tab `tabs.query({})` reports *and* the value passes `isTabActivity`; everything else is dropped.
+- **Why:** "conserva 30 giorni" is a promise about what is kept, so the entry that has used its
+  thirty days up is not kept — and a strict comparison is the one a test can state exactly.
+  Retention first because dropping month-old entries may bring the rest under the cap for free.
+  The tracker deletes a record the moment its tab goes, so a record for a tab that does not exist
+  means nobody was listening — a crashed worker, a forced restart — and a value that is not a
+  record at all can only be dropped, because nothing downstream could score it.
+
+## M3.3 — the archive E2E seeds `storage.local` and serves the pages it restores
+
+- **Context:** "Done when" asks for a Chromium E2E over search, restore and empty. Search needs a
+  ten-day-old entry, restore needs a URL that actually loads, and invariant 1 forbids any request
+  leaving the extension.
+- **Decision:** `tests/e2e/archive.spec.ts` writes three entries into the raw `archive` key from
+  the panel page — with the browser's real `windowId`, and `closedAt` set to now and to now minus
+  ten days — and their URLs are served by a `node:http` server the spec starts on `127.0.0.1`. It
+  does not drive "Esporta".
+- **Why:** a ten-day-old entry cannot be produced by closing a tab, and `archiveItem` is version 1
+  with no migrations, so a raw `set` is read back by `readArchive` unchanged. Ten days and not
+  eight because the boundary is a calendar day and a suite running near midnight must not land on
+  it. The real `windowId` makes a restore take the ordinary `tabs.create({ windowId, index })` path
+  instead of §9's fallback, which is the path worth covering. Local pages because a restore really
+  opens them: `recorder.initiator()` does not attribute a restored tab's own loads to the
+  extension, but a request to a real site would still be a request this suite must never make.
+  "Esporta" is left to docs/MANUAL-CHECKS.md: granting clipboard permission to an extension origin
+  in Playwright is a browser-configuration risk out of proportion to the three lines it would
+  cover, and `copyArchived` is already covered with a stubbed clipboard in `tests/ext/`.

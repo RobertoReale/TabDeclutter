@@ -254,5 +254,105 @@
   "archiveEmpty": {
     "message": "No archived tabs.",
     "description": "Shown in the Archive view when nothing has been closed through TabDeclutter."
+  },
+  "archiveNoMatch": {
+    "message": "No tab matches the search.",
+    "description": "Shown in the Archive view when the archive is not empty but the search and the filters leave no row."
+  },
+  "archiveTools": {
+    "message": "Search and filter the archive",
+    "description": "Accessible name of the row holding the Archive view's search box and its two filters, never shown on screen."
+  },
+  "archiveSearch": {
+    "message": "Search title or address",
+    "description": "The Archive view's search box: its placeholder and its accessible name."
+  },
+  "archiveWhen": {
+    "message": "When it was closed",
+    "description": "Accessible name of the Archive view's date filter, never shown on screen."
+  },
+  "archiveWhenAny": {
+    "message": "Any date",
+    "description": "Option of the Archive view's date filter: no date restriction. The one it opens on."
+  },
+  "archiveWhenToday": {
+    "message": "Today",
+    "description": "Option of the Archive view's date filter: closed today."
+  },
+  "archiveWhenWeek": {
+    "message": "Last 7 days",
+    "description": "Option of the Archive view's date filter: closed in the last seven days, today included."
+  },
+  "archiveWhenOlder": {
+    "message": "Older",
+    "description": "Option of the Archive view's date filter: closed more than seven days ago."
+  },
+  "archiveOrigin": {
+    "message": "Who closed it",
+    "description": "Accessible name of the Archive view's origin filter, never shown on screen."
+  },
+  "archiveOriginAny": {
+    "message": "Any origin",
+    "description": "Option of the Archive view's origin filter: no restriction. The one it opens on."
+  },
+  "archiveOriginMine": {
+    "message": "Closed by me",
+    "description": "Option of the Archive view's origin filter: the tabs the user closed."
+  },
+  "archiveOriginDuplicates": {
+    "message": "Duplicates closed automatically",
+    "description": "Option of the Archive view's origin filter: the tabs the duplicate guard closed on its own."
+  },
+  "archiveList": {
+    "message": "Archived tabs",
+    "description": "Accessible name of the Archive view's list, never shown on screen."
+  },
+  "archiveReasonManual": {
+    "message": "Closed by you",
+    "description": "Why an archived tab was closed: the user closed it from the panel."
+  },
+  "archiveReasonWindow": {
+    "message": "Closed with its window",
+    "description": "Why an archived tab was closed: it went with a whole window the user closed."
+  },
+  "archiveReasonDuplicateAuto": {
+    "message": "Duplicate closed automatically",
+    "description": "Why an archived tab was closed: the duplicate guard closed it as it opened."
+  },
+  "archiveReasonDuplicateManual": {
+    "message": "Duplicate closed by you",
+    "description": "Why an archived tab was closed: the user closed it as a duplicate."
+  },
+  "actionRestore": {
+    "message": "Restore",
+    "description": "Button on an archived tab's row that opens it again."
+  },
+  "actionDelete": {
+    "message": "Delete",
+    "description": "Button on an archived tab's row that removes it from the archive for good."
+  },
+  "archiveExport": {
+    "message": "Export",
+    "description": "Button in the Archive view that copies the rows on screen to the clipboard as a Markdown list of links."
+  },
+  "archiveCopied": {
+    "message": "Copied to the clipboard",
+    "description": "Confirmation shown after Export, under the Archive view's list."
+  },
+  "archiveEmptyAll": {
+    "message": "Empty archive",
+    "description": "Button in the Archive view that deletes every entry."
+  },
+  "archiveConfirmEmpty": {
+    "message": "Delete all $1 archived tabs?",
+    "description": "The question \"Empty archive\" asks before deleting everything. $1 is the formatted number of entries."
+  },
+  "barRestore": {
+    "message": "Restore $1",
+    "description": "Button in the Archive view's selection bar that opens the selected tabs again. $1 is the formatted number."
+  },
+  "barDelete": {
+    "message": "Delete $1",
+    "description": "Button in the Archive view's selection bar that removes the selected entries from the archive. $1 is the formatted number."
   }
 }
