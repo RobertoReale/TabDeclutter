@@ -1982,3 +1982,77 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Why:** the perf-harness unit test missed its 0 ms budget by wall time, so a saturated CPU could
   read 0 µs; it now burns CPU time. `tests/perf/budget.ts`, the budgets and the retries are
   unchanged: the miss is a property of the run rather than of the machine's load.
+
+## M3.5 — the restart spec launches its own browsers and shares one recorder across both
+
+- **Context:** §13's M3 acceptance asks for an archive that survives a browser restart. Every other
+  Chromium spec takes its browser from the `context` fixture, which is one context per test and
+  closes it afterwards; the auto-use `health` fixture is what checks the console and invariant 1.
+- **Decision:** `launchExtension` and `extensionIdOf` were lifted out of the fixture file and
+  exported, and `tests/e2e/restart.spec.ts` imports the base `@playwright/test` and launches two
+  persistent contexts on one `testInfo.outputPath('profile')` itself. One `createRecorder()` is
+  attached to both, and the spec asserts `takeConsoleErrors()` and `takeForeignRequests()` by hand
+  at the end. Nothing is seeded: the entry is written by a real close through the first panel.
+- **Why:** a restart is two contexts over one profile, which no per-test context fixture can
+  express, and the alternative — a worker-scoped fixture that relaunches — would make every other
+  spec pay for a case only this one has. One recorder because an error logged while the *second*
+  browser boots is the failure this test is most likely to find, and that run would otherwise have
+  nothing watching it; the readers drain what they return, so two contexts appending to the same
+  lists read as one run. Seeding was rejected on purpose: a raw `set` would prove that
+  `storage.local` persists, which is Chrome's job, not that a close followed by a shutdown leaves
+  something behind. The restore afterwards is also the only E2E that takes §9's `tabs.create`
+  fallback, because the window the tab was closed from no longer exists.
+
+## M3.5 — the keep's expiry is simulated by rewriting `local:keeps`, read against the panel's clock
+
+- **Context:** M3.5 asks that a kept tab come back "when the keep expires", and `DEFAULT_KEEP_MS`
+  is seven days. The panel's own `Date.now` is already twelve days ahead (`actions.spec.ts`).
+- **Decision:** the test clicks "Mantieni", reads the raw `keeps` key back, asserts it has exactly
+  one entry whose key contains the page's path and whose value is within an hour of
+  `now + KEEP_MS`, and then writes that same key back with an expiry an hour *before* the panel's
+  shifted now. The row is expected to return without the tab count changing.
+- **Why:** reading the key back instead of computing it keeps `keepKey`'s normalisation out of the
+  test — the assertion is that the panel wrote a keep for *that page*, not that the test can
+  reproduce the hashing. Rewriting the stored value is the only way to move an expiry: the clock
+  is fixed at panel load and `readKeeps(now)` drops expired entries on the `storage.onChanged`
+  refresh, so the past expiry makes the next read behave exactly as a real seven days later would.
+  `keepsItem` is version 1 with no migrations, so a raw `set` is read back unchanged — the same
+  reason the archive spec can seed `archive`.
+
+## M3.5 — §14's undo is checked as sorted `url windowId` pairs across two windows
+
+- **Context:** M3.5 asks that ten closed tabs come back "same URL, same window". A single window
+  cannot show that the window is part of what is restored, and §9's three safeguards must not fire
+  on the path being tested.
+- **Decision:** ten distinct numbered pages, five in the panel's window and five in a second window
+  opened with `windows.create({ focused: false })` whose *first* tab is an eleventh page. The test
+  captures every served tab as `"<url> <windowId>"`, sorted, before the close, and asserts the same
+  list after Annulla. It also asserts the bar says `barClose(10)` rather than `barCloseWithWindows`,
+  and that no inline question is on screen.
+- **Why:** comparing ids would be wrong — a restored tab is a new tab — while the URL and the window
+  are what the user would notice, and sorting makes the comparison independent of the order
+  `restoreTabs` happens to put them back in. The second window's first tab is its active tab and so
+  protected whatever its age (§8.4): it has no row, it keeps §9's active-tab question out of the
+  way, and it stops the close from emptying the window, which would have triggered the whole-window
+  wording instead. Asserting that the safeguards are *absent* is the point: the three tests that
+  drive them already exist in this file, and a 10-tab close that quietly turned into a confirmation
+  would otherwise still pass. `bringToFront()` after `windows.create` because a new window takes the
+  foreground whatever `focused: false` asks, and a background panel's clicks are not real clicks.
+
+## M3.5 — Firefox's actions smoke test clicks in the document, and holds the toast with focus
+
+- **Context:** §14 asks for a Firefox smoke test over close + undo. BiDi refuses
+  `browsingContext.activate` on a privileged document, so the panel cannot be brought in front, and
+  Playwright-style pointer input on a background `moz-extension://` page is not available.
+- **Decision:** `tests/e2e-firefox/fixtures/panel.ts` gained `clickPanel`, `clickButton`,
+  `focusPanel`, `panelText`, `openUrls` and `until`, all of which run inside the document
+  (`element.click()`, `element.focus()`), and the duplicate-pair seed `declutter.spec.ts` had inline
+  moved into the shared `openDuplicatePair`. The new `actions.spec.ts` picks the row, closes it from
+  the bar, calls `focusPanel('.td-toast')` to hold the eight seconds, and undoes.
+- **Why:** an in-document `click()` is a weaker check than a real pointer — it does not prove the
+  element is reachable or unobscured — but that part is Chromium's test, and what this smoke test
+  is for is the platform calls underneath: that `browser.tabs.remove` and the restore path behave
+  the same on Gecko. `focusin` rather than a hover because `Toast.tsx` holds the undo window on
+  either, and focus is the one of the two this harness can produce. The seed moved rather than being
+  copied because it is ~60 lines of tracker-quiescence timing that two specs now need, and two
+  copies would drift.

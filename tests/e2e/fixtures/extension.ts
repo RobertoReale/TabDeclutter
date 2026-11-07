@@ -56,6 +56,58 @@ function seedProfile(userDataDir: string, locale: Locale): void {
   );
 }
 
+export interface LaunchOptions {
+  /** The browser's UI language, Chrome's and the renderer's both. */
+  readonly uiLanguage: Locale;
+  readonly headless: boolean;
+  /** `prefers-color-scheme`, or `null` for the browser's own default. */
+  readonly colorScheme?: 'light' | 'dark' | 'no-preference' | null;
+}
+
+/**
+ * A Chromium with the built extension loaded, on the profile at `userDataDir`.
+ *
+ * Exported because a test that restarts the browser (`restart.spec.ts`) has to launch it
+ * itself: the `context` fixture is one context per test, and a restart is two on one
+ * profile. An existing profile is reused as it is, which is what makes the second launch
+ * a restart rather than a fresh install.
+ */
+export async function launchExtension(
+  userDataDir: string,
+  options: LaunchOptions,
+): Promise<BrowserContext> {
+  seedProfile(userDataDir, options.uiLanguage);
+  return chromium.launchPersistentContext(userDataDir, {
+    // `channel: 'chromium'` is the full Chromium browser. Playwright's default
+    // headless binary is the headless shell, which has no extension support, and
+    // branded Chrome ignores `--load-extension`.
+    channel: 'chromium',
+    headless: options.headless,
+    // What `i18n.getUILanguage()` and `navigator.language` report. Without it the
+    // runner's default (`en-US`) would win and the panel would be in Italian while
+    // calling itself English.
+    locale: options.uiLanguage,
+    // `prefers-color-scheme`, the only way the panel picks its theme (PLAN.md §4.7).
+    // Passed on so `test.use({ colorScheme: 'dark' })` reaches a persistent context,
+    // which does not get the runner's options for free.
+    colorScheme: options.colorScheme ?? undefined,
+    args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`],
+  });
+}
+
+/**
+ * The extension's id, read off its service worker — which is also the wait for the
+ * background to be running at all.
+ *
+ * An unpacked extension's id comes from the directory it was loaded from, so it is the
+ * same id across a restart of the same build.
+ */
+export async function extensionIdOf(context: BrowserContext): Promise<string> {
+  const [existing] = context.serviceWorkers();
+  const worker = existing ?? (await context.waitForEvent('serviceworker'));
+  return new URL(worker.url()).host;
+}
+
 export interface ExtensionFixtures {
   /** The extension's id, read off its service worker. */
   extensionId: string;
@@ -85,24 +137,10 @@ export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
   // The profile lives in the test's own output directory, so Playwright creates
   // it, keeps it when the test fails and removes it when it passes.
   context: async ({ recorder, uiLanguage, headless, colorScheme }, use, testInfo) => {
-    const userDataDir = testInfo.outputPath('profile');
-    seedProfile(userDataDir, uiLanguage);
-
-    const context: BrowserContext = await chromium.launchPersistentContext(userDataDir, {
-      // `channel: 'chromium'` is the full Chromium browser. Playwright's
-      // default headless binary is the headless shell, which has no extension
-      // support, and branded Chrome ignores `--load-extension`.
-      channel: 'chromium',
+    const context: BrowserContext = await launchExtension(testInfo.outputPath('profile'), {
+      uiLanguage,
       headless,
-      // What `i18n.getUILanguage()` and `navigator.language` report. Without it
-      // the runner's default (`en-US`) would win and the panel would be in
-      // Italian while calling itself English.
-      locale: uiLanguage,
-      // `prefers-color-scheme`, the only way the panel picks its theme (PLAN.md
-      // §4.7). Passed on so `test.use({ colorScheme: 'dark' })` reaches a
-      // persistent context, which does not get the runner's options for free.
       colorScheme,
-      args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`],
     });
     recorder.attach(context);
     await use(context);
@@ -110,9 +148,7 @@ export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
   },
 
   extensionId: async ({ context }, use) => {
-    const [existing] = context.serviceWorkers();
-    const worker = existing ?? (await context.waitForEvent('serviceworker'));
-    await use(new URL(worker.url()).host);
+    await use(await extensionIdOf(context));
   },
 
   panel: async ({ context, extensionId }, use) => {
