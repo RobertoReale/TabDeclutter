@@ -57,6 +57,7 @@ function capabilities(overrides: Partial<Capabilities> = {}): Capabilities {
     containers: false,
     sessionTabValues: false,
     duplicateCommandDetection: true,
+    tabContextMenu: false,
     ...overrides,
   };
 }

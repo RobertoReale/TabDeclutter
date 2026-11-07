@@ -8,6 +8,8 @@
  * the budget enforced and so cannot hide a regression.
  */
 
+import process from 'node:process';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { measureBudget, powerSourceFrom, REFERENCE_CPU_MS } from '../perf/budget';
@@ -48,11 +50,25 @@ describe('a budget that is missed', () => {
   });
 
   /**
+   * How much CPU time the run below burns before it returns: more than two of Windows'
+   * ~15.6 ms scheduler ticks, so what `measureBudget` reads can never quantise down to 0.
+   */
+  const MISS_CPU_MS = 40;
+
+  /**
    * A run too expensive for a budget of 0 ms, measured once, with nothing to warm up.
    *
    * `referenceMs` is given rather than measured: this test is about the power source, and a
    * reference measured on whatever machine happens to run it would decide the verdict
    * instead (`REFERENCE_CPU_MS`, so a factor of exactly 1, and a limit still at 0 ms).
+   *
+   * **The run burns CPU time, not wall time.** It used to spin until `performance.now()` had
+   * moved by 25 ms, and that is not the clock being measured: `measureBudget` asserts
+   * `process.cpuUsage()`, charged in ~15.6 ms ticks, and `pnpm test` runs one worker per
+   * file. On a saturated CPU a 25 ms *wall* window can be charged less than one tick, read
+   * as 0 µs, and meet a limit of 0 ms — which failed this gate on whichever of the two tests
+   * below happened to land in the bad window. Spinning on the process's own CPU clock makes
+   * the miss a property of the run rather than of the machine's load.
    */
   async function missTheBudget(powerSource: 'battery' | 'mains') {
     const printed: string[] = [];
@@ -71,8 +87,11 @@ describe('a budget that is missed', () => {
         referenceMs: REFERENCE_CPU_MS,
       },
       () => {
-        const until = performance.now() + 25;
-        while (performance.now() < until);
+        const started = process.cpuUsage();
+        for (;;) {
+          const spent = process.cpuUsage(started);
+          if ((spent.user + spent.system) / 1000 >= MISS_CPU_MS) return;
+        }
       },
     );
     return { report, printed };

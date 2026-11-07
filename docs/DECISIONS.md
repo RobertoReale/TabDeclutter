@@ -1930,3 +1930,55 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   "Esporta" is left to docs/MANUAL-CHECKS.md: granting clipboard permission to an extension origin
   in Playwright is a browser-configuration risk out of proportion to the three lines it would
   cover, and `copyArchived` is already covered with a stubbed clipboard in `tests/ext/`.
+
+## M3.4 — "Consenti duplicati per questo sito" whitelists the host, not the registrable domain
+
+- **Context:** PLAN.md §4.1 says the item adds `*://<domain>/*` to the duplicate whitelist, and
+  does not say which "domain" — the tab's host, or the registrable domain "Proteggi sito" uses.
+- **Decision:** `duplicateWhitelistPattern` builds the pattern from the URL's `host`, port
+  included: `https://www.example.com/a` gives `*://www.example.com/*`, `http://localhost:3000/dev`
+  gives `*://localhost:3000/*`, and a URL with no host (`about:blank`, `file:`, unparseable) gives
+  nothing. `addDuplicateWhitelistPattern` stores the line trimmed but **not** lower-cased, and
+  skips one it already has.
+- **Why:** a whitelist line is matched against the tab's raw URL as a literal anchored at both
+  ends, with `*` for any run of characters (`core/patterns.ts`), so `*://example.com/*` has nothing
+  to match in `https://www.example.com/a` — a pattern built from the registrable domain would fail
+  to whitelist the very tab the user right-clicked on, which is the one thing the item must do. The
+  port is in the raw URL too, so dropping it would break the same way on a dev server. Narrower
+  than the whole site is the recoverable error of the two: another right-click adds the sibling,
+  while nothing in the UI would explain a whitelist entry that covers more than the user pointed
+  at. No lower-casing because that list is matched case-sensitively and a line may be a regex, so
+  re-casing what is written there would change what it matches.
+
+## M3.4 — the `tab` context is a capability, and the items are created on `onInstalled`
+
+- **Context:** PLAN.md §5.5 asks for the common contexts only, "`tab` (Firefox only, added when
+  present)", and invariant 5 forbids application code from checking the browser name.
+- **Decision:** a new capability, `caps.tabContextMenu`, is true when `contextMenus.ContextType`
+  has a `TAB` member; `registerMenus` asks for `['page', 'tab']` when it does and `['page']`
+  otherwise. The items are created in `runtime.onInstalled`, after one `removeAll()`, while the
+  `onClicked` listener is registered synchronously at the top level.
+  The namespace itself is looked up as `browser.menus ?? browser.contextMenus`, in both places,
+  and a profile with neither logs once and leaves the rest of the background alone.
+- **Why:** `ContextType` is each browser's own enum of the contexts it accepts, so reading it is
+  feature detection rather than a browser name, and a browser that stopped exposing it would lose
+  the tab strip entry and keep the page one instead of losing all three items — Chrome rejects the
+  whole `create` call when a context it has no name for is named. `onInstalled` because menu items
+  belong to the browser, which keeps them until the extension updates: a worker woken *by* a click
+  cannot create them first, and `removeAll` covers the update that fires `onInstalled` with the
+  previous version's items still installed, where `create` on an existing id is an error. And
+  `menus` before `contextMenus` because Firefox only aliases the namespace as `contextMenus` for a
+  profile that asked for the `contextMenus` permission, which this manifest does not: it asks for
+  `menus` (PLAN.md §5.4). Reading `contextMenus` alone was `undefined` on Firefox, and the
+  top-level `undefined.onClicked` took the whole background script — tracker, badge and cleanup
+  included — down with it, which the Firefox E2E console check caught before this commit.
+
+## F.1 — the perf-harness unit test burns CPU time instead of wall time
+
+- **Context:** `tests/unit/perf-budget-power.test.ts` has to miss a 0 ms budget, and its workload
+  spun until `performance.now()` had moved by 25 ms.
+- **Decision:** the workload now loops until `process.cpuUsage()` has moved by 40 ms of user +
+  system time, more than two of Windows' ~15.6 ms scheduler ticks.
+- **Why:** the perf-harness unit test missed its 0 ms budget by wall time, so a saturated CPU could
+  read 0 µs; it now burns CPU time. `tests/perf/budget.ts`, the budgets and the retries are
+  unchanged: the miss is a property of the run rather than of the machine's load.
