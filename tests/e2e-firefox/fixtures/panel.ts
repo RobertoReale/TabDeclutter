@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import type { Browser, Page } from 'puppeteer-core';
 
+import type { ActivityStore } from '../../../src/core/types';
 import type { Locale, MessageKey } from '../../../src/platform/i18n';
 
 /** The Firefox build `pnpm e2e:firefox` has just produced. */
@@ -295,4 +296,174 @@ export async function openPanel(options: PanelOptions = {}): Promise<PanelSessio
     errors,
     close: () => firefox.close(),
   };
+}
+
+/** Old enough to clear the two-hour grace period of §6.4, step 1. */
+const HISTORY_MS = 20 * 24 * 60 * 60 * 1_000;
+
+/**
+ * A session with two tabs on `url`, aged into a duplicate pair: exactly one row on the
+ * list, whichever tab Firefox selected.
+ *
+ * The only suggestion Firefox's panel can be made to show. The panel cannot be given a
+ * clock (`evaluateOnNewDocument` does not run on a `moz-extension://` document, see above),
+ * so no suggestion that rests on an idle tab is reachable; a duplicate is, because it needs
+ * two tabs on one URL and a creation time, and the creation time comes from storage alone.
+ */
+export async function openDuplicatePair(url: string): Promise<PanelSession> {
+  const session = await openPanel({ tabs: [url, url] });
+  await trackerQuiet(session);
+  await seedDuplicatePair(session, url);
+  return session;
+}
+
+/**
+ * Waits until the background has stopped writing `local:activity`.
+ *
+ * It holds the store in memory and writes all of it at once, a second after the last tab
+ * event (`src/entrypoints/background/tracker.ts`), so a seed written while it is still
+ * flushing would be overwritten by what it remembers. Two identical, non-empty reads a
+ * debounce apart mean the last event has landed; after that nothing writes unless a tab is
+ * opened, closed or activated.
+ */
+async function trackerQuiet(open: PanelSession): Promise<void> {
+  let previous = '';
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const current = await open.page.evaluate(async () => {
+      const stored = await browser.storage.local.get('activity');
+      return JSON.stringify(stored['activity'] ?? {});
+    });
+    if (current !== '{}' && current === previous) return;
+    previous = current;
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+  }
+  throw new Error('the background never stopped writing local:activity');
+}
+
+/**
+ * The history that makes the two tabs a duplicate pair: both older than the grace period,
+ * and one of them older than the other, so the keep rules of §8.4.3 ("Più vecchia") keep
+ * one and the other is the single row on the list.
+ *
+ * Which one is kept is chosen here rather than left to chance. The active tab of a window
+ * is protected (§6.4, step 1) and would be dropped from the list, and the test cannot tell
+ * Firefox which tab to select (see `PanelOptions`) — so it asks which tab is selected and
+ * makes that one the oldest. Selected or not, the kept tab is off the list and the other
+ * one is on it: exactly one row, whatever Firefox decided.
+ */
+async function seedDuplicatePair(open: PanelSession, url: string): Promise<void> {
+  const { tabs, selected } = await open.page.evaluate(async () => {
+    const found = await browser.tabs.query({});
+    const active = await browser.tabs.query({ active: true });
+    return {
+      tabs: found.map((tab) => ({ id: tab.id ?? -1, url: tab.url ?? '' })),
+      selected: active.map((tab) => tab.id ?? -1),
+    };
+  });
+
+  const pair = tabs.filter((tab) => tab.url === url);
+  if (pair.length !== 2) {
+    throw new Error(`expected two tabs on ${url}, found ${pair.length}`);
+  }
+  // The selected tab first, so the oldest creation time lands on it.
+  const oldestFirst = [...pair].sort(
+    (left, right) => Number(selected.includes(right.id)) - Number(selected.includes(left.id)),
+  );
+
+  const now = Date.now();
+  const activity: ActivityStore = {};
+  for (const [at, tab] of oldestFirst.entries()) {
+    const created = now - HISTORY_MS + at * 60 * 60 * 1_000;
+    activity[tab.id] = {
+      tabId: tab.id,
+      url: tab.url,
+      createdAt: created,
+      lastActiveAt: created,
+      activations: 0,
+      foregroundMs: 0,
+    };
+  }
+
+  // The whole key at once, which also drops the bootstrap record `runtime.onInstalled`
+  // wrote when the extension was installed a moment ago: it protects every tab for a day.
+  await open.page.evaluate(async (next: ActivityStore) => {
+    await browser.storage.local.set({ activity: next });
+  }, activity);
+}
+
+/**
+ * Clicks something in the panel from inside the document.
+ *
+ * Not `page.click`: BiDi's input commands act on the window Firefox has in front, and the
+ * panel cannot be brought there — `browsingContext.activate`, which is Puppeteer's
+ * `bringToFront`, is refused on a privileged document (see `PanelOptions`). `.click()`
+ * dispatches the click Preact's handler is listening for, which is the part under test on
+ * this browser; that a real pointer reaches the button is Chromium's test
+ * (`tests/e2e/actions.spec.ts`).
+ */
+export async function clickPanel(page: Page, selector: string): Promise<void> {
+  const clicked = await page.evaluate((target: string) => {
+    const element = document.querySelector<HTMLElement>(target);
+    if (element === null) return false;
+    element.click();
+    return true;
+  }, selector);
+  if (!clicked) throw new Error(`nothing matched ${selector} in the panel`);
+}
+
+/** Clicks the panel's button with exactly this label, which is how the UI names an action. */
+export async function clickButton(page: Page, label: string): Promise<void> {
+  const clicked = await page.evaluate((text: string) => {
+    const button = [...document.querySelectorAll('button')].find(
+      (candidate) => (candidate.textContent ?? '').trim() === text,
+    );
+    if (button === undefined) return false;
+    button.click();
+    return true;
+  }, label);
+  if (!clicked) throw new Error(`no button labelled "${label}" in the panel`);
+}
+
+/** Puts the focus on an element from inside the document, the way `Tab` would. */
+export async function focusPanel(page: Page, selector: string): Promise<void> {
+  const focused = await page.evaluate((target: string) => {
+    const element = document.querySelector<HTMLElement>(target);
+    if (element === null) return false;
+    element.focus();
+    return true;
+  }, selector);
+  if (!focused) throw new Error(`nothing matched ${selector} in the panel`);
+}
+
+/** The text of one element of the panel, or `null` when it is not there. */
+export async function panelText(page: Page, selector: string): Promise<string | null> {
+  return page.evaluate(
+    (target: string) => document.querySelector(target)?.textContent ?? null,
+    selector,
+  );
+}
+
+/** What the browser's tabs are on: how a close and its undo look from outside the panel. */
+export async function openUrls(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const tabs = await browser.tabs.query({});
+    return tabs.map((tab) => tab.url ?? '');
+  });
+}
+
+/**
+ * Polls `read` until `done` accepts what it returns, and gives back the last value either
+ * way — so the assertion that follows fails on a real value rather than on a timeout.
+ */
+export async function until<T>(
+  read: () => Promise<T>,
+  done: (value: T) => boolean,
+  attempts = 40,
+): Promise<T> {
+  let value = await read();
+  for (let attempt = 0; attempt < attempts && !done(value); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    value = await read();
+  }
+  return value;
 }

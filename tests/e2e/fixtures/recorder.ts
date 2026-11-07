@@ -25,7 +25,10 @@ export interface ExtensionRecorder {
    * recorded request, not only the returned ones.
    */
   takeForeignRequests(extensionId: string): string[];
-  /** Starts recording on a freshly launched context. Call once. */
+  /**
+   * Starts recording on a freshly launched context. Once per context: a test that
+   * restarts the browser attaches the new one too, and both record into the same lists.
+   */
   attach(context: BrowserContext): void;
 }
 

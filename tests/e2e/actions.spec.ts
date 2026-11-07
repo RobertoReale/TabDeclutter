@@ -33,6 +33,9 @@ const DAY = 24 * HOUR;
 /** How far ahead the panel's clock runs. Mirrors `declutter.spec.ts`. */
 const SHIFT_MS = 12 * DAY + HOUR;
 
+/** `DEFAULT_KEEP_MS`: how long "Mantieni" protects a page (PLAN.md §10). */
+const KEEP_MS = 7 * DAY;
+
 /** What `Intl` makes of `SHIFT_MS` in English, inside the window card's sentence. */
 const AGE_SENTENCE = '12 days';
 
@@ -58,6 +61,21 @@ const THREE: readonly LocalPage[] = [ALPHA, BETA, GAMMA];
  */
 const MANY = 27;
 
+/**
+ * How many tabs §14's undo closes in one go, per window: five here, five next door, and the
+ * eleventh page is the second window's anchor.
+ */
+const SPLIT = 5;
+const ANCHOR = 2 * SPLIT;
+
+/**
+ * The nth throwaway page. The server titles it after its number, so ten tabs are ten
+ * different pages and "the same URL in the same window" is something a test can check.
+ */
+function numbered(n: number): string {
+  return `${base}/n/${String(n)}`;
+}
+
 let server: Server;
 let base = '';
 
@@ -68,6 +86,13 @@ test.beforeAll(async () => {
     if (page !== undefined) {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       response.end(html(page.title));
+      return;
+    }
+    // `/n/<number>`, the throwaway pages of `numbered()`.
+    const nth = /^\/n\/(\d+)$/.exec(path);
+    if (nth !== null) {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(html(`Page ${String(nth[1])}`));
       return;
     }
     // Chrome asks for this on its own; "nothing here" keeps the row off the network.
@@ -99,8 +124,19 @@ function html(title: string): string {
 /** The slice of the extension API the panel page is asked for, inside the browser. */
 interface SeedApi {
   tabs: {
-    query(query: Record<string, unknown>): Promise<{ id?: number; status?: string }[]>;
+    query(
+      query: Record<string, unknown>,
+    ): Promise<{ id?: number; status?: string; url?: string; windowId?: number }[]>;
     create(properties: Record<string, unknown>): Promise<{ id?: number }>;
+  };
+  windows: {
+    create(properties: Record<string, unknown>): Promise<{ tabs?: { id?: number }[] }>;
+  };
+  storage: {
+    local: {
+      get(key: string): Promise<Record<string, unknown>>;
+      set(items: Record<string, unknown>): Promise<void>;
+    };
   };
 }
 
@@ -142,6 +178,11 @@ async function openTabs(panel: Page, urls: readonly string[]): Promise<void> {
     );
   }
 
+  await waitLoaded(panel, ids);
+}
+
+/** Waits until every one of `ids` has finished loading, so no row is still "about:blank". */
+async function waitLoaded(panel: Page, ids: readonly number[]): Promise<void> {
   await expect
     .poll(
       async () =>
@@ -154,6 +195,26 @@ async function openTabs(panel: Page, urls: readonly string[]): Promise<void> {
       { timeout: 30_000 },
     )
     .toBe(0);
+}
+
+/**
+ * A second window on `urls`, so that a close and its undo cross a window boundary.
+ *
+ * Its first tab is the window's active tab and so protected whatever its age (§8.4): it has
+ * no row, it keeps §9's active-tab question out of the way, and it keeps the window from
+ * emptying when everything else in it is closed.
+ */
+async function openWindow(panel: Page, urls: readonly string[]): Promise<void> {
+  const ids = await panel.evaluate(async (targets) => {
+    const api = (globalThis as unknown as { chrome: SeedApi }).chrome;
+    const created = await api.windows.create({ url: targets, focused: false });
+    return (created.tabs ?? []).map((tab) => tab.id ?? -1);
+  }, urls);
+
+  await waitLoaded(panel, ids);
+  // A new window can take the foreground whatever `focused: false` asks for. The panel has
+  // to be back on screen, or the clicks below are not the real clicks this spec is for.
+  await panel.bringToFront();
 }
 
 /** The three pages, and the rows the panel makes of them. */
@@ -173,6 +234,36 @@ async function tabsOpen(panel: Page): Promise<number> {
     const api = (globalThis as unknown as { chrome: SeedApi }).chrome;
     return (await api.tabs.query({})).length;
   });
+}
+
+/**
+ * Every tab this spec's server is serving, as `"<url> <windowId>"`, sorted.
+ *
+ * The pair is the whole point: §14's undo has to put each tab back on its own page *and* in
+ * the window it was closed from, and a count of open tabs cannot tell the difference.
+ */
+async function servedTabs(panel: Page): Promise<string[]> {
+  const tabs = await panel.evaluate(async () => {
+    const api = (globalThis as unknown as { chrome: SeedApi }).chrome;
+    return (await api.tabs.query({})).map(
+      (tab) => `${tab.url ?? ''} ${String(tab.windowId ?? -1)}`,
+    );
+  });
+  return tabs.filter((tab) => tab.startsWith(base)).sort();
+}
+
+/** `local:keeps` as it is stored: normalized URL → when the keep runs out, `null` forever. */
+async function storedKeeps(panel: Page): Promise<Record<string, number | null>> {
+  return panel.evaluate(async () => {
+    const api = (globalThis as unknown as { chrome: SeedApi }).chrome;
+    const stored = await api.storage.local.get('keeps');
+    return (stored.keeps as Record<string, number | null> | undefined) ?? {};
+  });
+}
+
+/** The panel's own clock, `SHIFT_MS` ahead of this process's. */
+async function panelNow(panel: Page): Promise<number> {
+  return panel.evaluate(() => Date.now());
 }
 
 /** A row by the page it shows, which is unique wherever this spec uses it. */
@@ -305,6 +396,111 @@ test.describe('in English', () => {
     await toast.getByRole('button', { name: message('en', 'actionUndo') }).click();
     await expect(toast).toHaveCount(0);
     await expect.poll(async () => tabsOpen(panel), { timeout: 20_000 }).toBe(4);
+  });
+
+  test('§14: ten tabs across two windows go together, and Annulla puts every one back', async ({
+    context,
+    extensionId,
+  }) => {
+    const panel = await openPanel(context, extensionId);
+    const dialogs = watchDialogs(panel);
+
+    // Five in the panel's window, five in a second one, all on different pages.
+    const here = Array.from({ length: SPLIT }, (_, at) => numbered(at));
+    const there = Array.from({ length: SPLIT }, (_, at) => numbered(SPLIT + at));
+    await openTabs(panel, here);
+    await openWindow(panel, [numbered(ANCHOR), ...there]);
+
+    // All ten are old and never read, which is one section: so one "Seleziona tutti" picks
+    // exactly the ten under test, and the assertion below says there is nothing else.
+    const section = panel.locator('.td-section');
+    await expect(section).toHaveCount(1);
+    await expect(section.locator('.td-row')).toHaveCount(2 * SPLIT, { timeout: 20_000 });
+
+    const before = await servedTabs(panel);
+    expect(before).toHaveLength(2 * SPLIT + 1);
+
+    await section.getByRole('button', { name: message('en', 'sectionSelectAll') }).click();
+    await expect(panel.locator('.td-row-picked')).toHaveCount(2 * SPLIT);
+
+    /*
+     * Ten is under §9's bulk limit of 25, no tab in use is picked, and neither window
+     * empties — the panel holds one open, the anchor the other — so §9 has nothing to ask
+     * and the click closes them. That the bar says "Close 10" rather than §9's "and the
+     * window" is the assertion that none of the three safeguards is in the way.
+     */
+    const bar = panel.locator('.td-bar');
+    await bar.getByRole('button', { name: barClose(2 * SPLIT) }).click();
+    await expect(panel.locator('.td-row')).toHaveCount(0, { timeout: 20_000 });
+    await expect.poll(async () => (await servedTabs(panel)).length, { timeout: 20_000 }).toBe(1);
+
+    // The pointer holds the 8 s open, so Annulla below is not a race against them.
+    const toast = panel.locator('.td-toast');
+    await toast.hover();
+    await expect(toast.locator('.td-toast-text')).toHaveText(closedText(2 * SPLIT), {
+      timeout: 20_000,
+    });
+
+    await toast.getByRole('button', { name: message('en', 'actionUndo') }).click();
+    await expect(toast).toHaveCount(0);
+
+    /*
+     * §14's undo: not ten tabs again, but the ten that were there — each on its own URL and
+     * back in the window it was closed from. `restoreTabs` reaches for `sessions.restore`
+     * first and falls back to `tabs.create` with the stored window and index; both windows
+     * still exist here, so either path has to land in the right one.
+     */
+    await expect.poll(async () => servedTabs(panel), { timeout: 30_000 }).toEqual(before);
+
+    expect(dialogs, '§9: every confirmation is inline').toEqual([]);
+  });
+
+  test('§14: "Mantieni" takes the row off the list, and the keep running out brings it back', async ({
+    context,
+    extensionId,
+  }) => {
+    const panel = await openPanel(context, extensionId);
+    await seedThree(panel);
+
+    const open = await tabsOpen(panel);
+    const now = await panelNow(panel);
+
+    // The row's own "Mantieni" (§4.3), which is what the `K` of §4.8 does with a key.
+    await rowFor(panel, ALPHA.title)
+      .getByRole('button', { name: message('en', 'actionKeep') })
+      .click();
+
+    // Off the suggestions, still open: a keep is a promise about a page, not an act on a tab.
+    await expect(panel.locator('.td-row-title')).toHaveText([BETA.title, GAMMA.title]);
+    expect(await tabsOpen(panel)).toBe(open);
+
+    // And written down, so it outlives the panel: one entry, keyed by the normalized URL,
+    // running out seven days from now — §10's default, which nothing asked for.
+    const keeps = await storedKeeps(panel);
+    const [key = '', ...others] = Object.keys(keeps);
+    expect(others, 'one keep, for the one row that was kept').toEqual([]);
+    expect(key).toContain(ALPHA.path);
+    const until = keeps[key] ?? 0;
+    expect(until).toBeGreaterThan(now + KEEP_MS - HOUR);
+    expect(until).toBeLessThan(now + KEEP_MS + HOUR);
+
+    /*
+     * Seven days later. The panel's clock is fixed `SHIFT_MS` ahead and no test can wait a
+     * week, so the expiry moves into the past instead — the same moment seen from the keep's
+     * side. The panel watches `local:keeps`, which is what makes this a test of the
+     * expiry and not of a reload.
+     */
+    await panel.evaluate(
+      async (expired: Record<string, number>) => {
+        const api = (globalThis as unknown as { chrome: SeedApi }).chrome;
+        await api.storage.local.set({ keeps: expired });
+      },
+      { [key]: now - HOUR },
+    );
+
+    // The suggestion comes back on its own, and the tab was never touched.
+    await expect(panel.locator('.td-row-title')).toHaveText(THREE.map((page) => page.title));
+    expect(await tabsOpen(panel)).toBe(open);
   });
 
   test('§9 asks before more than 25 tabs go, inline and never with confirm()', async ({
