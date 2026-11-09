@@ -2271,3 +2271,54 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   `flash` is injected because M3b.3 owns the badge's own queue and the guard must not reach into
   it; `capabilities` because the "Duplica scheda" heuristic has to be testable on both browsers
   from one run (invariant 10).
+
+## M3b.3 — what "Chiudi tutti i duplicati" overrules, and what it does not
+
+- **Context:** §8.7 says the sweep works in OFF and in "Solo avvisi" too, which leaves open how
+  much else of §8.4 and §8.6 it is allowed to ignore.
+- **Decision:** `resolveAllDuplicates` overrules the mode, the pause, the start-up grace and the
+  "Duplica scheda" exception, and keeps every other filter: the whitelist, `hidden`, incognito, and
+  empty, auth and browser-internal URLs. It applies no §8.4.4 after-action — no activate, no move,
+  no reload — and archives with `reason: 'duplicate-manual'`.
+- **Why:** mode, pause and grace are all answers to "should the guard act on its own", and the user
+  pressing a key has already answered that; the intentional-duplicate heuristic is a guess at intent
+  that an explicit gesture replaces. The rest are not about acting on its own: the whitelist is a
+  standing instruction about a site, and a hidden or incognito tab is one the extension has no
+  business touching whatever the user asks. No after-action because N closes would otherwise shuffle
+  the tab strip N times and move the user somewhere they did not ask to be.
+
+## M3b.3 — the gestures queue with the events, and only the last close is remembered
+
+- **Context:** a sweep reads every tab, decides, and then closes — while `onCreated` and `onUpdated`
+  may be doing the same for one tab. §8.7 says the undo for the shortcut goes through the icon menu.
+- **Decision:** `GuardActions` (pause, toggle, closeAllDuplicates, reopenLastDuplicate) goes through
+  the same serial queue as the events, and the sweep hands `rememberAutoClosed` its *last* archive
+  entry, so "Riapri l'ultimo duplicato chiuso" reopens one tab and not the whole sweep.
+- **Why:** a sweep running beside a live close lets two steps each pick the other's tab as the one
+  to keep, and a set ends with zero tabs — invariant 2's worst failure. One id rather than a list
+  because `GuardState` already holds `lastAutoClosedId` and widening it is a storage migration this
+  task does not own; the whole sweep is undoable from the Archive view, which is where a batch
+  belongs. A reopen leans on the exemption `restoreTabs` writes before it creates anything, so the
+  guard does not close the tab again the moment it appears.
+
+## M3b.3 — the icon menu is six items, with the pause as a parent
+
+- **Context:** §4.1 asks for an icon menu with a reopen, a reopen-and-whitelist, and a pause of 15
+  min / 1 h / until restart; §4.1 also assigns two shortcuts.
+- **Decision:** `menus.ts` creates the six under `contexts: ['action']`, the three durations as
+  children of a `pause-guard` parent, parent before children, and every child repeats
+  `contexts: ['action']`. `toggle-duplicate-guard` pauses until restart and resumes if paused, and
+  `registerCommands` tolerates a browser with no `commands` API by logging and carrying on.
+- **Why:** three top-level pause items would be half the menu; a parent reads as one choice with
+  three answers. The repeated `contexts` is Firefox's: it defaults an item that does not say to
+  `['page']`, so the children would appear in the page menu instead, while Chrome inherits the
+  parent's and does not mind being told. The toggle has no duration to offer, so it is the one
+  pause that needs no alarm. The missing-API path is not hypothetical — two shortcuts nobody can
+  press are not worth losing the tracker, the badge, the cleanup and the guard with them.
+- **Not verified by hand:** that Chrome and Firefox really draw a `contexts: ['action']` item under
+  the toolbar icon, and that a key the user assigns in `chrome://extensions/shortcuts` or
+  `about:addons` reaches `onCommand` — neither browser exposes the icon's own menu or a global
+  hotkey to a driver. Everything on this side of the API is covered: `tests/unit/manifest.test.ts`
+  for the two declared commands, `tests/ext/commands.test.ts` for each command reaching its gesture,
+  `tests/ext/menus.test.ts` for the six items, their titles, their parent and their `contexts`, and
+  `tests/ext/guard.test.ts` for what each gesture does to the tabs.

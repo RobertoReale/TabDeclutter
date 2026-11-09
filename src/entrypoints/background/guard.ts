@@ -24,15 +24,20 @@
  * cache, rebuilt when the service worker wakes up; the pause, the grace period, the
  * exemptions and the last automatic close are in `storage.session`, where they outlive the
  * worker and die with the browser — which is exactly what each of them means.
+ *
+ * **The gestures go through the same queue.** `GuardActions` is what a shortcut or an icon
+ * menu item asks for (PLAN.md §4.1, §8.5, §8.7): pause, toggle, close every duplicate at
+ * once, reopen the last one closed. They are not events, but a sweep running beside a live
+ * close would let two steps each pick the other's tab as the one to keep, so they queue too.
  */
 
 import { isBlankUrl } from '@/core/classify';
 import type { DuplicateResolution, GuardContext } from '@/core/duplicate-guard';
-import { resolveDuplicate } from '@/core/duplicate-guard';
+import { resolveAllDuplicates, resolveDuplicate } from '@/core/duplicate-guard';
 import type { DuplicateOptions } from '@/core/duplicates';
 import { duplicateKey, duplicateOptions, tabUrl } from '@/core/duplicates';
 import { compile } from '@/core/patterns';
-import type { GuardMode, GuardSettings, MatchOptions, TabInfo } from '@/core/types';
+import type { ArchivedTab, GuardMode, GuardSettings, MatchOptions, TabInfo } from '@/core/types';
 import { STARTUP_GRACE_MS } from '@/core/types';
 import type { Capabilities } from '@/platform/capabilities';
 import { caps } from '@/platform/capabilities';
@@ -40,6 +45,7 @@ import {
   activityItem,
   duplicateWhitelistItem,
   pauseGuard,
+  readArchive,
   readGuardState,
   readSettings,
   rememberAutoClosed,
@@ -47,7 +53,15 @@ import {
   settingsItem,
   startGuardGrace,
 } from '@/platform/storage';
-import { activateTab, closeTabs, getTab, moveTab, navigateTab, queryTabs } from '@/platform/tabs';
+import {
+  activateTab,
+  closeTabs,
+  getTab,
+  moveTab,
+  navigateTab,
+  queryTabs,
+  restoreTabs,
+} from '@/platform/tabs';
 
 /** The alarm that ends a timed pause (PLAN.md §8.1). */
 const RESUME_ALARM = 'guard-resume';
@@ -203,12 +217,33 @@ export interface GuardStatus {
   readonly resumeMode?: GuardMode;
 }
 
-export interface Guard {
+/**
+ * What a shortcut or a menu item can ask of the guard (PLAN.md §4.1, §8.7).
+ *
+ * Named apart from `Guard` so `menus.ts` and `commands.ts` depend on the four gestures and
+ * not on `invalidate`/`settled`, which are the background's own business.
+ */
+export interface GuardActions {
   /**
    * "In pausa" (PLAN.md §8.1): nothing closes for `durationMs`, `null` for until the
    * browser restarts. Sets the alarm that ends it.
    */
   pause(durationMs: number | null): Promise<void>;
+  /** The shortcut's one key for both directions: pauses until restart, or ends the pause. */
+  toggle(): Promise<void>;
+  /**
+   * "Chiudi tutti i duplicati" (PLAN.md §8.7), in every mode. Answers with what it archived,
+   * oldest close first, empty when there was nothing to close.
+   */
+  closeAllDuplicates(): Promise<readonly ArchivedTab[]>;
+  /**
+   * "Riapri l'ultimo duplicato chiuso" (PLAN.md §8.5), with the exemption that keeps the
+   * guard from closing it again. `null` when there is nothing to reopen.
+   */
+  reopenLastDuplicate(): Promise<ArchivedTab | null>;
+}
+
+export interface Guard extends GuardActions {
   /** Ends a pause, whether the alarm brought it or the user did. */
   resume(): Promise<void>;
   status(): Promise<GuardStatus>;
@@ -320,10 +355,13 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     index = null;
   }
 
-  /** PLAN.md §8.2: one `tabs.query({})` when the service worker wakes up. */
-  async function indexed(loaded: Loaded): Promise<GuardIndex> {
+  /**
+   * PLAN.md §8.2: one `tabs.query({})` when the service worker wakes up. `known` is that
+   * same list when the caller has just read it, so a sweep queries once and not twice.
+   */
+  async function indexed(loaded: Loaded, known?: readonly TabInfo[]): Promise<GuardIndex> {
     // Not `??=`: the rebuild is awaited, and two events must not each start one.
-    if (index === null) index = createIndex(await queryTabs(), loaded.keyOptions);
+    if (index === null) index = createIndex(known ?? (await queryTabs()), loaded.keyOptions);
     return index;
   }
 
@@ -554,6 +592,104 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     };
   }
 
+  /** The shortcut's single key (PLAN.md §4.1), which has no duration to offer. */
+  async function toggle(): Promise<void> {
+    const current = await status();
+    if (current.paused) await resume();
+    else await pause(null);
+  }
+
+  /**
+   * "Chiudi tutti i duplicati" (PLAN.md §8.7), the whole tab list at once.
+   *
+   * Inside the queue like every other close, so it cannot interleave with a live-guard close
+   * and leave a set with no tab at all. One `tabs.query({})`, reused for the index, and one
+   * `closeTabs`, so the archive gets a single write and the user a single "Annulla".
+   */
+  async function sweep(at: number): Promise<readonly ArchivedTab[]> {
+    const loaded = await ready();
+    const tabs = await queryTabs();
+    const current = await indexed(loaded, tabs);
+
+    const [state, activity, focusedWindowId] = await Promise.all([
+      readGuardState(),
+      activityItem.getValue(),
+      focusedWindow(),
+    ]);
+    const createdAt: Record<number, number> = {};
+    for (const tab of tabs) {
+      const record = activity[tab.id];
+      if (record !== undefined) createdAt[tab.id] = record.createdAt;
+    }
+
+    const closes = resolveAllDuplicates(tabs, {
+      now: at,
+      settings: loaded.guard,
+      match: loaded.match,
+      createdAt,
+      navigatedTabIds: current.navigated,
+      focusedWindowId,
+      isWhitelisted: loaded.isWhitelisted,
+      ownOrigin: loaded.ownOrigin,
+      exemptions: state.exemptions,
+      // No `pausedUntil` and no `autoClosesAllowedFrom`: the mode, the pause and the
+      // start-up grace do not hold back a key the user has just pressed. See
+      // `resolveAllDuplicates`.
+    });
+    if (closes.length === 0) return [];
+
+    const byId = new Map(tabs.map((tab) => [tab.id, tab]));
+    const targets: TabInfo[] = [];
+    const duplicateOfUrl = new Map<number, string>();
+    for (const close of closes) {
+      const target = byId.get(close.closeTabId);
+      const keep = byId.get(close.keepTabId);
+      // Both came out of `tabs`, so both are there; the lookups are how TypeScript learns it.
+      if (target === undefined || keep === undefined) continue;
+      targets.push(target);
+      duplicateOfUrl.set(target.id, tabUrl(keep));
+    }
+
+    const entries = await closeTabs(targets, at, {
+      // §8.7 is a gesture, not the guard acting on its own, and the Archive view says so.
+      reason: 'duplicate-manual',
+      duplicateOfUrl,
+      capabilities,
+    });
+    for (const target of targets) current.drop(target.id);
+    // §8.7: "undo goes through the icon menu", which reopens one tab — the last one closed.
+    // Everything else stays reachable from the panel's "Annulla" and the Archive view.
+    const last = entries.at(-1);
+    if (last !== undefined) await rememberAutoClosed(last.id);
+    return entries;
+  }
+
+  function closeAllDuplicates(): Promise<readonly ArchivedTab[]> {
+    const at = now();
+    return run(() => sweep(at));
+  }
+
+  /**
+   * "Riapri l'ultimo duplicato chiuso" (PLAN.md §8.5).
+   *
+   * `restoreTabs` writes the URL exemption before it creates anything, which is what keeps
+   * the guard from closing the tab again the moment it appears (§8.6).
+   */
+  function reopenLastDuplicate(): Promise<ArchivedTab | null> {
+    const at = now();
+    return run(async () => {
+      const state = await readGuardState();
+      const id = state.lastAutoClosedId;
+      if (id === undefined) return null;
+      // Read from the archive and not remembered here: the entry may have been reopened
+      // already, or pruned, and `storage.session` outlives neither.
+      const entry = (await readArchive()).find((archived) => archived.id === id);
+      if (entry === undefined) return null;
+      const restored = await restoreTabs([entry], at, { capabilities });
+      return restored.length === 0 ? null : entry;
+    });
+  }
+
   async function settled(): Promise<void> {
     let seen: Promise<unknown> | null = null;
     // The chain grows while it is being awaited — a close starts a flash, and the flash is
@@ -641,7 +777,16 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     if (WATCHED.some((key) => key in changes)) invalidate();
   });
 
-  return { pause, resume, status, invalidate, settled };
+  return {
+    pause,
+    resume,
+    toggle,
+    status,
+    closeAllDuplicates,
+    reopenLastDuplicate,
+    invalidate,
+    settled,
+  };
 }
 
 /**

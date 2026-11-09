@@ -17,7 +17,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { GuardContext } from '../../src/core/duplicate-guard';
-import { resolveDuplicate } from '../../src/core/duplicate-guard';
+import { resolveAllDuplicates, resolveDuplicate } from '../../src/core/duplicate-guard';
 import { compile } from '../../src/core/patterns';
 import type { GuardSettings, TabInfo } from '../../src/core/types';
 import { DEFAULT_GUARD_SETTINGS, DEFAULT_MATCH_OPTIONS, NO_GROUP_ID } from '../../src/core/types';
@@ -518,5 +518,193 @@ describe('"Più vecchia ricaricata con la nuova URL" (PLAN.md §8.4.3.4)', () =>
       const resolution = resolveDuplicate(TRIGGER, [OLD], ctxOf({ keep }));
       expect(resolution, keep).not.toHaveProperty('reloadKeptWith');
     }
+  });
+});
+
+/**
+ * `resolveAllDuplicates`, which is "Chiudi tutti i duplicati" (PLAN.md §8.7).
+ *
+ * The same rules as above, read over the whole tab list instead of one event, with two
+ * deliberate differences the tests pin down: the gate (the mode, the pause and the start-up
+ * grace do not apply, because the user pressed a key) and the shape of the answer (one keep
+ * per set, every other tab of it closed, and nothing done to the tab that stays).
+ */
+describe('“Chiudi tutti i duplicati” (PLAN.md §8.7)', () => {
+  const OTHER = 'https://example.com/other';
+
+  /** Three tabs of one page and one of another, which has no duplicate at all. */
+  const THREE = [tab(1, { index: 0 }), tab(2, { index: 1 }), tab(3, { index: 2 })];
+
+  function sweepCtx(
+    settings: Partial<GuardSettings> = {},
+    rest: Partial<GuardContext> = {},
+  ): GuardContext {
+    return ctxOf(settings, {
+      createdAt: { 1: NOW - 60_000, 2: NOW - 30_000, 3: NOW - 1_000 },
+      ...rest,
+    });
+  }
+
+  it('closes every tab of a set but the one that wins the §8.4.3 rules', () => {
+    expect(resolveAllDuplicates(THREE, sweepCtx())).toEqual([
+      { closeTabId: 2, keepTabId: 1 },
+      { closeTabId: 3, keepTabId: 1 },
+    ]);
+  });
+
+  it('keeps the tab the priorities point at, not the first one in the list', () => {
+    // Pinned beats everything (§8.4.3.1), so the newest tab is the one that stays.
+    const tabs = [tab(1, { index: 0 }), tab(2, { index: 1, pinned: true })];
+    expect(resolveAllDuplicates(tabs, sweepCtx())).toEqual([{ closeTabId: 1, keepTabId: 2 }]);
+  });
+
+  it('leaves a page with only one tab alone', () => {
+    const tabs = [tab(1, { index: 0 }), tab(2, { index: 1, url: OTHER })];
+    expect(resolveAllDuplicates(tabs, sweepCtx())).toEqual([]);
+  });
+
+  it('handles several sets at once, each with its own survivor', () => {
+    const tabs = [
+      tab(1, { index: 0 }),
+      tab(2, { index: 1, url: OTHER }),
+      tab(3, { index: 2 }),
+      tab(4, { index: 3, url: OTHER }),
+    ];
+    const ctx = sweepCtx({}, { createdAt: { 1: NOW - 4, 2: NOW - 3, 3: NOW - 2, 4: NOW - 1 } });
+    expect(resolveAllDuplicates(tabs, ctx)).toEqual([
+      { closeTabId: 3, keepTabId: 1 },
+      { closeTabId: 4, keepTabId: 2 },
+    ]);
+  });
+
+  it('works in OFF and in "Solo avvisi" too, which the live guard does not', () => {
+    // §8.7: the action is the user's own gesture, and the mode only governs what the guard
+    // does on its own.
+    for (const mode of ['off', 'warn', 'auto'] as const) {
+      expect(resolveAllDuplicates(THREE, sweepCtx({ mode })), mode).toHaveLength(2);
+    }
+  });
+
+  it('is not held back by a pause or by the start-up grace', () => {
+    const excused = sweepCtx(
+      {},
+      { pausedUntil: NOW + 60_000, autoClosesAllowedFrom: NOW + 60_000 },
+    );
+    // Both stop the guard from acting *by itself* (§8.1, §8.6). Neither has anything to
+    // say about a key the user has just pressed.
+    expect(resolveAllDuplicates(THREE, excused)).toHaveLength(2);
+  });
+
+  it('closes a duplicate the user made on purpose with "Duplica scheda"', () => {
+    // §8.6's heuristic reads an opener and guesses at intent; an explicit "close them all"
+    // is not a guess. The live guard's own test above keeps the opposite case.
+    const ctx = sweepCtx({ allowIntentionalDuplicates: true });
+    const tabs = [tab(1, { index: 0 }), tab(2, { index: 1, openerTabId: 1 })];
+    expect(resolveAllDuplicates(tabs, ctx)).toEqual([{ closeTabId: 2, keepTabId: 1 }]);
+  });
+
+  it('asks for nothing to be done to the tabs that stay', () => {
+    // §8.4.4's "Attivala" and "Sposta e attiva" answer one close the user did not ask for.
+    // Twenty of them would shuffle the tab strip twenty times.
+    const ctx = sweepCtx({ after: 'move-activate', keep: 'oldest-reloaded' });
+    for (const close of resolveAllDuplicates(THREE, ctx)) {
+      expect(Object.keys(close).sort()).toEqual(['closeTabId', 'keepTabId']);
+    }
+  });
+
+  it('leaves a whitelisted site alone', () => {
+    const ctx = sweepCtx({}, { isWhitelisted: compile(['*://example.com/*']).match });
+    expect(resolveAllDuplicates(THREE, ctx)).toEqual([]);
+  });
+
+  it('leaves the browser’s pages, ours, and an empty tab alone', () => {
+    const ctx = sweepCtx({}, { ownOrigin: 'chrome-extension://tabdeclutter/' });
+    for (const url of [
+      'chrome://settings/',
+      'chrome-extension://tabdeclutter/panel.html',
+      'about:blank',
+    ]) {
+      const tabs = [tab(1, { index: 0, url }), tab(2, { index: 1, url })];
+      expect(resolveAllDuplicates(tabs, ctx), url).toEqual([]);
+    }
+  });
+
+  it('leaves a sign-in page alone while "Ignora pagine di login" is on', () => {
+    const login = 'https://example.com/login';
+    const tabs = [tab(1, { index: 0, url: login }), tab(2, { index: 1, url: login })];
+    expect(resolveAllDuplicates(tabs, sweepCtx())).toEqual([]);
+    expect(resolveAllDuplicates(tabs, sweepCtx({ ignoreAuthPages: false }))).toEqual([
+      { closeTabId: 2, keepTabId: 1 },
+    ]);
+  });
+
+  it('leaves an incognito tab alone', () => {
+    const tabs = [tab(1, { index: 0, incognito: true }), tab(2, { index: 1, incognito: true })];
+    expect(resolveAllDuplicates(tabs, sweepCtx())).toEqual([]);
+  });
+
+  it('leaves a hidden tab alone', () => {
+    const tabs = [tab(1, { index: 0 }), tab(2, { index: 1, hidden: true })];
+    expect(resolveAllDuplicates(tabs, sweepCtx())).toEqual([]);
+  });
+
+  it('leaves a tab the extension has just reopened alone', () => {
+    // The exemption behind "Annulla" and "Riapri l'ultimo duplicato chiuso" (§8.5): closing
+    // that tab would undo the reopen the user made a second ago.
+    const ctx = sweepCtx({}, { exemptions: [{ tabId: 3, until: NOW + 10_000 }] });
+    expect(resolveAllDuplicates(THREE, ctx)).toEqual([{ closeTabId: 2, keepTabId: 1 }]);
+  });
+
+  it('forgets an exemption that has expired', () => {
+    const ctx = sweepCtx({}, { exemptions: [{ tabId: 3, until: NOW - 1 }] });
+    expect(resolveAllDuplicates(THREE, ctx)).toHaveLength(2);
+  });
+
+  it('leaves a tab with no URL at all alone', () => {
+    const tabs = [tab(1, { index: 0, url: '' }), tab(2, { index: 1, url: '' })];
+    expect(resolveAllDuplicates(tabs, sweepCtx())).toEqual([]);
+  });
+
+  describe('with the "Stessa finestra" scope (PLAN.md §8.3)', () => {
+    const SPREAD = [
+      tab(1, { index: 0 }),
+      tab(2, { index: 1 }),
+      tab(3, { windowId: 2, index: 0 }),
+      tab(4, { windowId: 2, index: 1 }),
+    ];
+    const SPREAD_AGES = { 1: NOW - 4, 2: NOW - 3, 3: NOW - 2, 4: NOW - 1 };
+
+    it('keeps one tab of the page in each window', () => {
+      const ctx = sweepCtx({ scope: 'window' }, { createdAt: SPREAD_AGES });
+      expect(resolveAllDuplicates(SPREAD, ctx)).toEqual([
+        { closeTabId: 2, keepTabId: 1 },
+        { closeTabId: 4, keepTabId: 3 },
+      ]);
+    });
+
+    it('keeps one in the whole browser with "Tutte le finestre"', () => {
+      const ctx = sweepCtx({ scope: 'all-windows' }, { createdAt: SPREAD_AGES });
+      expect(resolveAllDuplicates(SPREAD, ctx)).toEqual([
+        { closeTabId: 2, keepTabId: 1 },
+        { closeTabId: 3, keepTabId: 1 },
+        { closeTabId: 4, keepTabId: 1 },
+      ]);
+    });
+
+    it('leaves a window holding a single tab of the page alone', () => {
+      const tabs = [tab(1, { index: 0 }), tab(2, { windowId: 2, index: 0 })];
+      const ctx = sweepCtx({ scope: 'window' }, { createdAt: SPREAD_AGES });
+      expect(resolveAllDuplicates(tabs, ctx)).toEqual([]);
+    });
+
+    it('ignores the focused window, which is a rule about all of them', () => {
+      // §8.4.3.5 applies "only with the 'Tutte le finestre' scope", and inside one window
+      // there is nothing for it to prefer.
+      const ctx = sweepCtx({ scope: 'window' }, { createdAt: SPREAD_AGES, focusedWindowId: 2 });
+      expect(resolveAllDuplicates(SPREAD, ctx)).toEqual([
+        { closeTabId: 2, keepTabId: 1 },
+        { closeTabId: 4, keepTabId: 3 },
+      ]);
+    });
   });
 });

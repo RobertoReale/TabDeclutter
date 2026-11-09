@@ -27,6 +27,7 @@ import {
   chooseTabToKeep,
   duplicateKey,
   duplicateOptions,
+  findDuplicateSets,
   tabUrl,
   type KeepContext,
 } from './duplicates';
@@ -84,6 +85,14 @@ export interface DuplicateResolution {
   readonly after: GuardAfterAction;
   /** Present only for "Più vecchia ricaricata": the URL to load in the kept tab (§8.4.3.4). */
   readonly reloadKeptWith?: string;
+}
+
+/** One close of "Chiudi tutti i duplicati" (PLAN.md §8.7): a tab goes, another stays. */
+export interface DuplicateSweep {
+  /** The tab to close. It goes to the archive with the reason `duplicate-manual`. */
+  readonly closeTabId: number;
+  /** The tab of the same set that stays. */
+  readonly keepTabId: number;
 }
 
 /** While the user has the guard on hold, every event is someone else's business. */
@@ -300,4 +309,77 @@ export function resolveDuplicate(
     after: actionAfterClose(trigger, closed, ctx),
     ...(reloadKeptWith !== undefined ? { reloadKeptWith } : {}),
   };
+}
+
+/**
+ * The §8.4.1 and §8.6 filters that are about a single tab, for the sweep below. `hidden` and
+ * the whitelist are left to `findDuplicateSets`, which excludes both everywhere already.
+ */
+function isSweepable(tab: TabInfo, ctx: GuardContext): boolean {
+  if (tab.incognito) return false;
+  const url = tabUrl(tab);
+  if (url === '') return false;
+  if (!isGuardedUrl(url, ctx)) return false;
+  return !isExempt(tab, url, ctx);
+}
+
+/**
+ * One set as the scope sees it: a single group, or one group per window for "Stessa finestra"
+ * (PLAN.md §8.3). A window left with one tab of the page has no duplicate to close.
+ */
+function perScope(tabs: readonly TabInfo[], ctx: GuardContext): readonly (readonly TabInfo[])[] {
+  if (ctx.settings.scope !== 'window') return [tabs];
+
+  const byWindow = new Map<number, TabInfo[]>();
+  for (const tab of tabs) {
+    const group = byWindow.get(tab.windowId);
+    if (group === undefined) byWindow.set(tab.windowId, [tab]);
+    else group.push(tab);
+  }
+  return [...byWindow.values()].filter((group) => group.length > 1);
+}
+
+/** No whitelist was given, so no URL is whitelisted. */
+function noWhitelist(): boolean {
+  return false;
+}
+
+/**
+ * Every close "Chiudi tutti i duplicati" would make, over the whole tab list (PLAN.md §8.7).
+ *
+ * **The same priorities, but not the same gate.** §8.7 says the action "works in OFF/Solo
+ * avvisi mode too", so the mode is not consulted — and neither is the pause nor the start-up
+ * grace, which exist to stop the guard from acting *on its own* (§8.1, §8.6) and have nothing
+ * to say about a key the user has just pressed. Every other exit filter of §8.4.1 and §8.6
+ * still holds: the browser's pages and ours, `about:blank`, sign-in pages, the whitelist,
+ * `hidden`, incognito, and the tabs the extension itself has just opened — closing one of
+ * those would undo an "Annulla" the user made a second ago (docs/DECISIONS.md).
+ *
+ * **One keep per set, not one close per event.** The live guard closes exactly one tab per
+ * event and leaves the rest to the events that follow (§8.4.2); here the whole list is known
+ * at once, so each set keeps `chooseTabToKeep`'s winner and every other tab of it goes.
+ *
+ * Nothing is said about the tab that stays: §8.4.4's "Attivala" and "Sposta e attiva" are a
+ * reaction to one close the user did not ask for, and a sweep of twenty of them would shuffle
+ * the tab strip twenty times (docs/DECISIONS.md).
+ */
+export function resolveAllDuplicates(
+  tabs: readonly TabInfo[],
+  ctx: GuardContext,
+): readonly DuplicateSweep[] {
+  const options = duplicateOptions({ match: ctx.match, guard: ctx.settings });
+  const closable = tabs.filter((tab) => isSweepable(tab, ctx));
+
+  const sweeps: DuplicateSweep[] = [];
+  for (const set of findDuplicateSets(closable, options, ctx.isWhitelisted ?? noWhitelist)) {
+    for (const group of perScope(set.tabs, ctx)) {
+      // Non-null: `findDuplicateSets` only answers with sets of more than one tab, and
+      // `perScope` only with groups of more than one.
+      const keep = chooseTabToKeep(group, ctx) as TabInfo;
+      for (const tab of group) {
+        if (tab.id !== keep.id) sweeps.push({ closeTabId: tab.id, keepTabId: keep.id });
+      }
+    }
+  }
+  return sweeps;
 }

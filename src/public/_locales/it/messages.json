@@ -366,5 +366,29 @@
   "menuAllowDuplicates": {
     "message": "Consenti duplicati per questo sito",
     "description": "Item in the right-click menu on a page or a tab: the site joins the duplicate whitelist, so opening the same page twice is no longer blocked."
+  },
+  "menuReopenDuplicate": {
+    "message": "Riapri l'ultimo duplicato chiuso",
+    "description": "Item in the menu on the extension icon: brings back the tab the duplicate guard closed most recently, and does not close it again."
+  },
+  "menuReopenAllowSite": {
+    "message": "…e consenti sempre duplicati per questo sito",
+    "description": "Item in the menu on the extension icon: reopens the last duplicate closed and adds its site to the duplicate whitelist."
+  },
+  "menuPauseGuard": {
+    "message": "Pausa protezione duplicati",
+    "description": "Parent item in the menu on the extension icon: holds the three pause durations below."
+  },
+  "menuPause15Min": {
+    "message": "15 minuti",
+    "description": "Pause duration under 'Pause duplicate protection' in the menu on the extension icon."
+  },
+  "menuPause1Hour": {
+    "message": "1 ora",
+    "description": "Pause duration under 'Pause duplicate protection' in the menu on the extension icon."
+  },
+  "menuPauseRestart": {
+    "message": "Fino al riavvio",
+    "description": "Pause duration under 'Pause duplicate protection' in the menu on the extension icon: the pause lasts until the browser is restarted."
   }
 }

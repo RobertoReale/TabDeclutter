@@ -366,5 +366,29 @@
   "menuAllowDuplicates": {
     "message": "Allow duplicates for this site",
     "description": "Item in the right-click menu on a page or a tab: the site joins the duplicate whitelist, so opening the same page twice is no longer blocked."
+  },
+  "menuReopenDuplicate": {
+    "message": "Reopen the last duplicate closed",
+    "description": "Item in the menu on the extension icon: brings back the tab the duplicate guard closed most recently, and does not close it again."
+  },
+  "menuReopenAllowSite": {
+    "message": "…and always allow duplicates for this site",
+    "description": "Item in the menu on the extension icon: reopens the last duplicate closed and adds its site to the duplicate whitelist."
+  },
+  "menuPauseGuard": {
+    "message": "Pause duplicate protection",
+    "description": "Parent item in the menu on the extension icon: holds the three pause durations below."
+  },
+  "menuPause15Min": {
+    "message": "15 minutes",
+    "description": "Pause duration under 'Pause duplicate protection' in the menu on the extension icon."
+  },
+  "menuPause1Hour": {
+    "message": "1 hour",
+    "description": "Pause duration under 'Pause duplicate protection' in the menu on the extension icon."
+  },
+  "menuPauseRestart": {
+    "message": "Until restart",
+    "description": "Pause duration under 'Pause duplicate protection' in the menu on the extension icon: the pause lasts until the browser is restarted."
   }
 }

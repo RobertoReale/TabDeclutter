@@ -24,20 +24,36 @@
  * `tab` context and rejects the whole `create` call when it is named, so the capability
  * decides (PLAN.md §5.5, `caps.tabContextMenu`). Nothing here asks what browser it is.
  *
- * **What the items belong to.** `contexts: ['action']` — the menu on the icon — is the
- * guard's, and arrives with M3b.3 together with the items it holds.
+ * **The menu on the icon** (`contexts: ['action']`, PLAN.md §4.1) is the guard's, and holds
+ * what §8.5 and §8.7 ask for: reopening the last duplicate closed, reopening it and
+ * whitelisting its site in one move, and pausing the protection for a while. It is on the
+ * icon and not on the page because none of the three is about the page in front of the user
+ * — a tab that is gone has no page left to right-click.
  */
 
+import { HOUR, MINUTE } from '@/core/time';
 import { caps } from '@/platform/capabilities';
 import { t } from '@/platform/i18n';
 import type { MessageKey } from '@/platform/i18n';
 import { addDuplicateWhitelistPattern } from '@/platform/storage';
 import { keepTab, protectSite } from '@/platform/tabs';
 
+import type { GuardActions } from './guard';
+
 /** The ids are ours and stable: `onClicked` reports the one that was chosen. */
 export const KEEP_ALWAYS_ID = 'keep-always';
 export const PROTECT_SITE_ID = 'protect-site';
 export const ALLOW_DUPLICATES_ID = 'allow-duplicates';
+export const REOPEN_DUPLICATE_ID = 'reopen-duplicate';
+export const REOPEN_ALLOW_SITE_ID = 'reopen-allow-site';
+export const PAUSE_GUARD_ID = 'pause-guard';
+export const PAUSE_15_MIN_ID = 'pause-guard-15m';
+export const PAUSE_1_HOUR_ID = 'pause-guard-1h';
+export const PAUSE_RESTART_ID = 'pause-guard-restart';
+
+/** The two timed pauses of PLAN.md §8.1. "Fino al riavvio" has no duration (`null`). */
+export const PAUSE_15_MIN_MS = 15 * MINUTE;
+export const PAUSE_1_HOUR_MS = HOUR;
 
 /** The three items, in the order they are shown, each with the key of its title. */
 const ITEMS: readonly { readonly id: string; readonly titleKey: MessageKey }[] = [
@@ -46,11 +62,37 @@ const ITEMS: readonly { readonly id: string; readonly titleKey: MessageKey }[] =
   { id: ALLOW_DUPLICATES_ID, titleKey: 'menuAllowDuplicates' },
 ];
 
+/** The context of the menu on the icon, which is where the guard's items live. */
+const ACTION_CONTEXTS: readonly string[] = ['action'];
+
+/**
+ * The icon menu, in order: the two reopens, then "Pausa protezione duplicati" with its
+ * three durations under it.
+ *
+ * Every child names `ACTION_CONTEXTS` as well. Firefox defaults an item with no `contexts`
+ * to `['page']`, which would file the children on the page menu instead of under their
+ * parent; Chrome inherits the parent's, so saying it is right on both.
+ */
+const ACTION_ITEMS: readonly {
+  readonly id: string;
+  readonly titleKey: MessageKey;
+  readonly parentId?: string;
+}[] = [
+  { id: REOPEN_DUPLICATE_ID, titleKey: 'menuReopenDuplicate' },
+  { id: REOPEN_ALLOW_SITE_ID, titleKey: 'menuReopenAllowSite' },
+  { id: PAUSE_GUARD_ID, titleKey: 'menuPauseGuard' },
+  { id: PAUSE_15_MIN_ID, titleKey: 'menuPause15Min', parentId: PAUSE_GUARD_ID },
+  { id: PAUSE_1_HOUR_ID, titleKey: 'menuPause1Hour', parentId: PAUSE_GUARD_ID },
+  { id: PAUSE_RESTART_ID, titleKey: 'menuPauseRestart', parentId: PAUSE_GUARD_ID },
+];
+
 /** What one item is created with. The shape both browsers accept. */
 export interface MenuItemProperties {
   readonly id: string;
   readonly title: string;
   readonly contexts: readonly string[];
+  /** Only on a child of a submenu. */
+  readonly parentId?: string | undefined;
 }
 
 /** What a click reports. `menuItemId` is typed wider than our ids by both browsers. */
@@ -75,6 +117,8 @@ export interface MenusApi {
 }
 
 export interface MenusOptions {
+  /** The guard, for the icon menu's items. The same object the shortcuts act on. */
+  readonly guard: GuardActions;
   /** The clock, injected so a test can be exact about when a keep was made. */
   readonly now?: () => number;
   readonly api?: MenusApi;
@@ -93,7 +137,8 @@ export interface Menus {
  * Registers the menus. Called at the top level of the background, before any `await`,
  * because a worker woken by a click must already be listening for it (invariant 6).
  */
-export function registerMenus(options: MenusOptions = {}): Menus {
+export function registerMenus(options: MenusOptions): Menus {
+  const { guard } = options;
   const now = options.now ?? Date.now;
   const api = options.api ?? menusApi();
   const tabContext = options.tabContext ?? caps.tabContextMenu;
@@ -105,9 +150,58 @@ export function registerMenus(options: MenusOptions = {}): Menus {
     // that already exists is an error, and an update fires `onInstalled`.
     await api.removeAll();
     for (const item of ITEMS) api.create({ id: item.id, title: t(item.titleKey), contexts });
+    // The parent before its children: `create` with a `parentId` that does not exist yet is
+    // an error, and `ACTION_ITEMS` is in that order.
+    for (const item of ACTION_ITEMS) {
+      api.create({
+        id: item.id,
+        title: t(item.titleKey),
+        contexts: ACTION_CONTEXTS,
+        parentId: item.parentId,
+      });
+    }
+  }
+
+  /**
+   * The icon menu's items (PLAN.md §8.5, §8.7), which are about the guard and not about a
+   * page. `true` when the click was one of them.
+   *
+   * Handled before the URL is looked at: the tab these act on is one the guard closed, so
+   * there is no page under the menu and often no tab at all.
+   */
+  async function guardClicked(menuItemId: string | number): Promise<boolean> {
+    switch (menuItemId) {
+      case REOPEN_DUPLICATE_ID:
+        await guard.reopenLastDuplicate();
+        return true;
+      case REOPEN_ALLOW_SITE_ID: {
+        // The reopen first, and the whitelist from the entry it answers with: the archive
+        // holds the URL, and nothing else here knows which site it was.
+        const entry = await guard.reopenLastDuplicate();
+        if (entry === null) return true;
+        const pattern = duplicateWhitelistPattern(entry.url);
+        if (pattern !== null) await addDuplicateWhitelistPattern(pattern);
+        return true;
+      }
+      case PAUSE_15_MIN_ID:
+        await guard.pause(PAUSE_15_MIN_MS);
+        return true;
+      case PAUSE_1_HOUR_ID:
+        await guard.pause(PAUSE_1_HOUR_MS);
+        return true;
+      case PAUSE_RESTART_ID:
+        // `null`: until the browser restarts, which needs no alarm (see `guard.ts`).
+        await guard.pause(null);
+        return true;
+      // `PAUSE_GUARD_ID` among them: a parent opens its submenu and never reports a click.
+      default:
+        return false;
+    }
   }
 
   async function clicked(info: MenuClickInfo, tab?: ClickedTab): Promise<void> {
+    if (await guardClicked(info.menuItemId)) return;
+
     // The tab's own URL first: it is the page as the browser currently has it, while
     // `pageUrl` is the URL the menu was opened on. They differ only if the page navigated
     // with the menu open, and then the tab is what the user is now looking at. On the

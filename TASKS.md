@@ -1059,7 +1059,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M3.5 Actions E2E
 - [x] M3b.1 Pure guard decision
 - [x] M3b.2 Live guard in the background
-- [ ] M3b.3 Guard commands and menus
+- [x] M3b.3 Guard commands and menus
 - [ ] M3b.4 Guard interface and whitelist
 - [ ] M3b.5 Duplicate protection E2E
 - [ ] M4.1 Grouping by site and by topic
