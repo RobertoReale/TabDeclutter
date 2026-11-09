@@ -35,6 +35,7 @@ import type {
   ArchivedTab,
   ForegroundPeriod,
   GuardExemption,
+  GuardMode,
   GuardState,
   Keeps,
   Settings,
@@ -370,6 +371,67 @@ export function addDuplicateWhitelistPattern(pattern: string): Promise<void> {
 
 function activeOf(exemptions: readonly GuardExemption[], now: number): GuardExemption[] {
   return exemptions.filter((exemption) => exemption.until > now);
+}
+
+/**
+ * The guard's whole volatile state: the pause, the grace period, the exemptions and the
+ * last automatic close, in one read.
+ *
+ * The live guard needs all four on every event it evaluates (PLAN.md §8.2), and they are
+ * one stored object, so asking for them separately would be four reads for one answer.
+ */
+export function readGuardState(): Promise<GuardState> {
+  return guardStateItem.getValue();
+}
+
+/**
+ * "In pausa" (PLAN.md §8.1): nothing closes until `until`, and the mode the user was in is
+ * written down next to it.
+ *
+ * **The stored mode is not touched.** Writing `off` into the settings and putting the old
+ * value back later would be a pause that outlives the browser: `storage.session` is cleared
+ * by a restart while `storage.local` is not, so a restart during a pause would leave the
+ * guard off for good, with nothing left to say why. The pause is therefore a deadline the
+ * guard reads, and `resumeMode` is only what the icon menu shows ("torna a: …").
+ */
+export function pauseGuard(until: number, resumeMode: GuardMode): Promise<void> {
+  return serialize(guardStateItem.key, async () => {
+    const state = await guardStateItem.getValue();
+    await guardStateItem.setValue({ ...state, pausedUntil: until, resumeMode });
+  });
+}
+
+/** The end of a pause, whether the alarm brought it or the user did (PLAN.md §8.1). */
+export function resumeGuard(): Promise<void> {
+  return serialize(guardStateItem.key, async () => {
+    const state = await guardStateItem.getValue();
+    const next = { ...state };
+    delete next.pausedUntil;
+    delete next.resumeMode;
+    await guardStateItem.setValue(next);
+  });
+}
+
+/** The start-up grace period of PLAN.md §8.6 begins: no automatic close before `until`. */
+export function startGuardGrace(until: number): Promise<void> {
+  return serialize(guardStateItem.key, async () => {
+    const state = await guardStateItem.getValue();
+    await guardStateItem.setValue({ ...state, graceUntil: until });
+  });
+}
+
+/**
+ * Which archive entry the last automatic close wrote, for "Riapri l'ultimo duplicato
+ * chiuso" (PLAN.md §8.5).
+ *
+ * Only the guard knows which of the entries in the archive was its own, and only the one
+ * most recent matters: the menu item reopens the last tab, not a history.
+ */
+export function rememberAutoClosed(archiveId: string): Promise<void> {
+  return serialize(guardStateItem.key, async () => {
+    const state = await guardStateItem.getValue();
+    await guardStateItem.setValue({ ...state, lastAutoClosedId: archiveId });
+  });
 }
 
 /** The exemptions still standing at `now`. */

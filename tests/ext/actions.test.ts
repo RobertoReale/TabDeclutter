@@ -16,6 +16,8 @@ import {
   closeWindow,
   discardTab,
   keepTab,
+  moveTab,
+  NO_WINDOW,
   protectSite,
   restoreTabs,
 } from '../../src/platform/tabs';
@@ -134,6 +136,11 @@ function fakeApi(options: FakeOptions = {}) {
     calls.push(`discard ${String(tabId)}`);
     return Promise.resolve(undefined);
   });
+  const move = vi.fn((tabId: number, properties: { windowId?: number; index: number }) => {
+    const where = properties.windowId === undefined ? '' : `window ${String(properties.windowId)} `;
+    calls.push(`move ${String(tabId)} -> ${where}index ${String(properties.index)}`);
+    return Promise.resolve(undefined);
+  });
   const group = vi.fn((options_: { tabIds: readonly number[]; groupId: number }) => {
     calls.push(`group ${options_.tabIds.join(',')} -> ${String(options_.groupId)}`);
     return Promise.resolve(undefined);
@@ -158,9 +165,11 @@ function fakeApi(options: FakeOptions = {}) {
   const api: ActionsApi = {
     tabs: {
       query: vi.fn(() => Promise.resolve<BrowserTab[]>([])),
+      get: vi.fn(() => Promise.resolve<BrowserTab | undefined>(undefined)),
       update: vi.fn(() => Promise.resolve(undefined)),
       create,
       remove,
+      move,
       discard,
       group,
     },
@@ -177,6 +186,7 @@ function fakeApi(options: FakeOptions = {}) {
     calls,
     create,
     remove,
+    move,
     discard,
     group,
     removeWindow,
@@ -640,5 +650,29 @@ describe('discardTab', () => {
     fake.discard.mockResolvedValue(undefined);
 
     expect(await discardTab(tab(1), { api: fake.api })).toBe(true);
+  });
+});
+
+describe('moveTab', () => {
+  it('moves the tab into the window and the place it was given', async () => {
+    const fake = fakeApi();
+
+    expect(await moveTab(1, 2, 3, { api: fake.api })).toBe(true);
+    expect(fake.calls).toEqual(['move 1 -> window 2 index 3']);
+  });
+
+  /* `NO_WINDOW`: a closed tab need not have had a window of its own to give up its place. */
+  it('only changes the place when there is no window to move to', async () => {
+    const fake = fakeApi();
+
+    expect(await moveTab(1, NO_WINDOW, 3, { api: fake.api })).toBe(true);
+    expect(fake.move).toHaveBeenCalledWith(1, { index: 3 });
+  });
+
+  it('reports a failure instead of throwing: the window may be gone', async () => {
+    const fake = fakeApi();
+    fake.move.mockRejectedValue(new Error('No window with id: 2.'));
+
+    expect(await moveTab(1, 2, 3, { api: fake.api })).toBe(false);
   });
 });

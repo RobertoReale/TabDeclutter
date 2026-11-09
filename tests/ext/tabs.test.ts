@@ -2,7 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { NO_GROUP_ID } from '../../src/core/types';
 import type { BrowserTab, TabsApi } from '../../src/platform/tabs';
-import { activateTab, asTabInfos, NO_WINDOW, queryTabs } from '../../src/platform/tabs';
+import {
+  activateTab,
+  asTabInfos,
+  getTab,
+  navigateTab,
+  NO_WINDOW,
+  queryTabs,
+} from '../../src/platform/tabs';
 
 /**
  * The boundary between the browser's tabs and the `TabInfo` the rules reason about
@@ -22,8 +29,13 @@ function fakeApi(found: readonly BrowserTab[] = []) {
       calls.push(`query ${JSON.stringify(query)}`);
       return Promise.resolve([...found]);
     }),
-    updateTab: vi.fn((tabId: number, properties: { active: boolean }) => {
-      calls.push(`tab ${String(tabId)} active=${String(properties.active)}`);
+    get: vi.fn((tabId: number) => {
+      calls.push(`get ${String(tabId)}`);
+      return Promise.resolve(found.find((tab) => tab.id === tabId));
+    }),
+    updateTab: vi.fn((tabId: number, properties: { active?: boolean; url?: string }) => {
+      const change = properties.url ?? `active=${String(properties.active)}`;
+      calls.push(`tab ${String(tabId)} ${change}`);
       return Promise.resolve(undefined);
     }),
     updateWindow: vi.fn((windowId: number, properties: { focused: boolean }) => {
@@ -32,7 +44,7 @@ function fakeApi(found: readonly BrowserTab[] = []) {
     }),
   };
   const api: TabsApi = {
-    tabs: { query: spies.query, update: spies.updateTab },
+    tabs: { query: spies.query, get: spies.get, update: spies.updateTab },
     windows: { update: spies.updateWindow },
   };
   return { api, calls, ...spies };
@@ -136,5 +148,51 @@ describe('activateTab', () => {
 
     await expect(activateTab(7, 2, fake.api)).rejects.toThrow('No tab with id: 7.');
     expect(fake.updateWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe('getTab', () => {
+  it('maps the one tab it was asked for', async () => {
+    const fake = fakeApi([{ id: 7, url: 'https://example.com/a' }]);
+
+    expect(await getTab(7, fake.api)).toMatchObject({ id: 7, url: 'https://example.com/a' });
+    expect(fake.calls).toEqual(['get 7']);
+  });
+
+  /* Firefox's answer for a tab that is no longer there. */
+  it('answers null when the browser resolves with nothing', async () => {
+    const fake = fakeApi();
+
+    expect(await getTab(7, fake.api)).toBeNull();
+  });
+
+  /* Chrome's answer to the same question, which the guard must not have to tell apart. */
+  it('answers null when the browser rejects instead', async () => {
+    const fake = fakeApi();
+    fake.get.mockRejectedValueOnce(new Error('No tab with id: 7.'));
+
+    expect(await getTab(7, fake.api)).toBeNull();
+  });
+
+  it('answers null for a hidden tab, as the list does', async () => {
+    const fake = fakeApi([{ id: 7, hidden: true }]);
+
+    expect(await getTab(7, fake.api)).toBeNull();
+  });
+});
+
+describe('navigateTab', () => {
+  it('sends the tab to the URL', async () => {
+    const fake = fakeApi();
+
+    expect(await navigateTab(7, 'https://example.com/b', fake.api)).toBe(true);
+    expect(fake.calls).toEqual(['tab 7 https://example.com/b']);
+  });
+
+  it('reports a failure instead of throwing: the tab may be gone', async () => {
+    const fake = fakeApi();
+    fake.updateTab.mockRejectedValueOnce(new Error('No tab with id: 7.'));
+
+    expect(await navigateTab(7, 'https://example.com/b', fake.api)).toBe(false);
   });
 });
