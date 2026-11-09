@@ -39,7 +39,7 @@ calling again until it answers, not waiting to be told. A task whose last words 
 the result when the run completes" ends with its work uncommitted.
 
 Finish with exactly one commit that contains the change, the documentation it invalidated, any
-new DECISIONS.md / MANUAL-CHECKS.md entries, and the ticked ledger row for {{TASK}}. All gates
+new DECISIONS.md entries, and the ticked ledger row for {{TASK}}. All gates
 must be green immediately before that commit. Then write the report AGENT-RULES.md asks for and
 stop.
 

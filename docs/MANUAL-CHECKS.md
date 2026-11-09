@@ -104,7 +104,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
 
 ## Fase M3 — Le azioni
 
-- [ ] (M3.2) Chiudere un gruppo di schede, e riaverle indietro con Annulla
+- [x] (M3.2) Chiudere un gruppo di schede, e riaverle indietro con Annulla
   ⏱ 5 minuti · Chrome, con le tue schede vere
   1. Con la build di prova caricata apri il pannello e clicca su tre righe che non ti servono più: si spuntano e in basso compare la striscia con «Chiudi 3».
   2. Clicca «Chiudi 3». Le schede si chiudono e in basso appare per qualche secondo un riquadro che dice «3 schede chiuse» con «Annulla».
@@ -112,14 +112,14 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   4. Rifai i punti 1 e 2 con altre tre schede e questa volta clicca «Annulla».
   Risultato atteso: al punto 2 si chiudono esattamente le tre schede che avevi spuntato e nessun'altra; al punto 3 il riquadro resta finché ci tieni sopra il mouse e otto secondi ti bastano per leggerlo e decidere; al punto 4 le tre schede tornano, con la stessa pagina di prima. Se otto secondi ti sembrano troppo pochi o troppi, se il riquadro copre delle righe che ti servivano, o se una scheda torna vuota o nel posto sbagliato, scrivi a Claude che cosa è successo.
 
-- [ ] (M3.2) Il pannello chiede prima di chiudere tante schede o quella che stai usando
+- [x] (M3.2) Il pannello chiede prima di chiudere tante schede o quella che stai usando
   ⏱ 4 minuti · Chrome, con le tue schede vere
   1. Nel pannello, su una sezione con molte schede, clicca «Seleziona tutti» e poi il pulsante «Chiudi …» della striscia in basso. Se le schede spuntate sono più di 25, al posto dei pulsanti compare la domanda «Chiudi N schede?» con «Conferma» e «Annulla» — se la sezione più grande non arriva a 25 schede, salta al punto 3 e scrivilo a Claude.
   2. Clicca «Annulla»: non deve chiudersi niente e le spunte devono restare. Poi premi Esc per togliere le spunte.
   3. Se il pannello ti propone una finestra intera («Hai N schede in una finestra che non apri da…»), clicca «Chiudi finestra»: compare la domanda «Chiudere anche la scheda che stai usando?». Clicca «Annulla».
   Risultato atteso: la domanda appare dentro il pannello, nella striscia in basso, e mai come finestrella di sistema del browser; «Annulla» non chiude niente e lascia le spunte dov'erano; dopo il punto 3 la striscia dice «Chiudi N schede e la finestra», così sai che va via anche la finestra. Se una domanda non appare quando dovrebbe, o se «Annulla» chiude qualcosa, scrivi a Claude che cosa hai fatto.
 
-- [ ] (M3.2) Si chiude e si annulla con la sola tastiera, e lo screen reader lo dice
+- [x] (M3.2) Si chiude e si annulla con la sola tastiera, e lo screen reader lo dice
   ⏱ 6 minuti · Chrome
   1. Apri il pannello e, senza toccare il mouse, premi Tab finché il bordo non arriva sulla prima intestazione della lista.
   2. Premi Ctrl+A: si spuntano tutte le schede di quella sezione. Premi Esc: le spunte vanno via.
@@ -129,7 +129,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   6. Accendi il Narratore di Windows con Ctrl+Win+Invio, rifai i punti 3 e 4 ascoltando che cosa dice, e spegnilo con la stessa combinazione.
   Risultato atteso: ogni tasto fa una cosa sola e si capisce sempre su quale riga sei; la barra spaziatrice spunta e non apre nulla; Canc chiude solo quello che è spuntato; Ctrl+Z riporta la scheda senza che tu debba andare col mouse sul riquadro «Annulla»; K non chiude niente. Al punto 6 il Narratore annuncia da solo «1 scheda chiusa» subito dopo Canc, senza che tu debba cercarlo. Se un tasto non fa niente, se ne fa due cose insieme, o se il Narratore non annuncia la chiusura, scrivi a Claude quale tasto.
 
-- [ ] (M3.3) «Esporta» mette davvero la lista negli appunti, in Chrome e in Firefox
+- [x] (M3.3) «Esporta» mette davvero la lista negli appunti, in Chrome e in Firefox
   ⏱ 4 minuti · Chrome e Firefox
   1. TabDeclutter non chiede il permesso «appunti»: scrive negli appunti solo nell'istante in cui clicchi il pulsante, e questo è l'unico modo di sapere se i due browser lo concedono davvero. I test automatici non possono verificarlo.
   2. In Chrome, con la build di prova caricata, chiudi due o tre schede dal pannello (spuntale e clicca «Chiudi …»), poi apri «Archivio» in alto.
@@ -139,7 +139,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   6. Ripeti i punti da 2 a 4 in Firefox, nella barra laterale.
   Risultato atteso: quello che si incolla è un elenco, una riga per scheda, della forma `- [Titolo della pagina](https://indirizzo…)` — tante righe quante erano le schede nella lista. Al punto 5 si incolla una riga sola: «Esporta» copia quello che la ricerca ha lasciato sullo schermo, non tutto l'archivio. In Firefox succede la stessa cosa. Se non compare «Copiato negli appunti», se Ctrl+V incolla qualcosa di diverso (o quello che avevi copiato prima), o se uno dei due browser chiede un permesso, scrivi a Claude quale browser e che cosa hai visto.
 
-- [ ] (M3.4) I menu contestuali compaiono e funzionano su Chrome e Firefox
+- [x] (M3.4) I menu contestuali compaiono e funzionano su Chrome e Firefox
   ⏱ 5 minuti · Chrome e Firefox
   1. In Chrome, con la build di prova caricata, apri un sito qualsiasi, clicca col tasto destro in mezzo alla pagina e cerca le tre voci di TabDeclutter: «Mantieni sempre questa scheda», «Proteggi sempre questo sito», «Consenti duplicati per questo sito».
   2. Apri il pannello e trova una scheda che ti propone di chiudere. Vai su quella scheda, clicca col destro sulla pagina e scegli «Mantieni sempre questa scheda»: torna al pannello, la riga non deve più essere proposta.
@@ -149,7 +149,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
 
 ## Fase M3b — La protezione duplicati
 
-- [ ] (M3b.2) «Duplica scheda» di Chrome non viene chiusa dalla protezione
+- [x] (M3b.2) «Duplica scheda» di Chrome non viene chiusa dalla protezione → non richiesta: dal 2026-11-09 niente più verifiche a mano
   ⏱ 4 minuti · Chrome, con la protezione su «Chiudi automaticamente»
   1. Quando la protezione è su «Chiudi automaticamente», TabDeclutter chiude da solo la seconda scheda sulla stessa pagina. Ma se il doppione lo hai fatto tu con «Duplica» di Chrome, lo volevi, e va lasciato stare. L'estensione lo capisce solo da tre indizi che Chrome le passa (quale scheda l'ha aperta, che sta subito accanto, che ha già l'indirizzo): i test automatici li simulano, e solo il Chrome vero può dire se arrivano davvero. **Questa è la verifica da cui dipende tutto il resto della protezione: se gli indizi non arrivano, chiudiamo una scheda che l'utente ha chiesto.**
   2. Nella build di prova apri il pannello e metti la protezione duplicati su «Chiudi automaticamente» (il pulsante 🛡 in alto, oppure ⚙ → «Protezione duplicati»). Se non trovi né l'uno né l'altro, questa verifica non si può ancora fare: scrivi a Claude «la protezione duplicati non si può ancora accendere dal pannello» e lascia la casella vuota.
@@ -158,7 +158,7 @@ Format: `- [ ] (<task>) <title>`, then numbered steps and the expected result (A
   5. Adesso il contrario, per vedere che la protezione è accesa: copia l'indirizzo di quella pagina, apri una scheda nuova con Ctrl+T, incolla e premi Invio.
   Risultato atteso: ai punti 3 e 4 le due schede duplicate restano aperte entrambe, e l'icona dell'estensione non lampeggia; al punto 5 invece una delle due si chiude subito da sola e l'icona lampeggia, perché quello è un doppione aperto a mano. Se al punto 3 o 4 la scheda duplicata si chiude, scrivi a Claude «Duplica scheda su Chrome viene chiusa»: non è una cosa che puoi sistemare tu, e lui o corregge gli indizi o mette per iscritto che Chrome non li dà più. Se al punto 5 non si chiude niente, scrivilo: vuol dire che la protezione non era accesa e i punti 3 e 4 non dimostrano nulla.
 
-- [ ] (M3b.2) I login con più passaggi non vengono interrotti dalla protezione
+- [x] (M3b.2) I login con più passaggi non vengono interrotti dalla protezione → non richiesta: dal 2026-11-09 niente più verifiche a mano
   ⏱ 5 minuti · Chrome e Firefox, con la protezione su «Chiudi automaticamente»
   1. Un accesso a un sito passa per più indirizzi di fila (il sito, poi Google o Microsoft, poi di nuovo il sito) e a volte apre una seconda scheda sulla stessa pagina. La protezione deve stare ferma durante tutto il giro: una scheda chiusa a metà di un login ti fa perdere l'accesso, ed è il danno peggiore che questa funzione può fare. TabDeclutter riconosce le pagine di accesso dall'indirizzo, e l'elenco degli indirizzi da riconoscere si verifica solo sui siti veri.
   2. Con la protezione su «Chiudi automaticamente» (vedi la verifica qui sopra), esci da un sito dove entri con «Accedi con Google» o «Accedi con Microsoft» — vanno benissimo quelli che usi di solito — e rifai l'accesso dall'inizio, senza chiudere nessuna scheda a mano.

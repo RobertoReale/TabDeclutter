@@ -23,7 +23,12 @@ The build runs on its own; a scheduled task (`tabdeclutter-assistant`, every 10 
 and when something needs him it plays a sound, shows a notification and opens
 `Desktop\TabDeclutter - cosa fare.html`. That page sends him to you with a sentence to type. Your
 job is to turn that sentence into the right action, so he only ever does the part a person must
-do: answer a product question, or try the extension by hand.
+do: answer a real product question.
+
+**Since 2026-11-09 he wants no more manual checks and wants the sequence simply to keep going.**
+Never propose a manual check. When a stop has a technical answer (a flaky test, the machine, a gate),
+decide it yourself, send it with `-Answer` and only tell him afterwards. Ask him only for a genuine
+product choice.
 
 Speak to him in **Italian, plainly, briefly**. He is not reading the code. Run every tool from the
 repository root with `pwsh -NoProfile -File tools/assistant.ps1 <mode>`.

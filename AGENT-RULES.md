@@ -10,7 +10,7 @@ says what the product is, and this file says how to behave while doing it.
 | `PLAN.md` | The product spec, ~74 KB. **Binding.** | Never read it whole. `grep -n '^#' PLAN.md` gives the section line numbers; read only the sections your task lists under **Spec**, plus §3 (design principles) the first time you touch product code in a session. |
 | `TASKS.md` | The execution plan: one section per task, the invariants (§2) and the ledger (§12). | Your task's section is quoted in your prompt. Grep for anything else (the ledger row, the invariants). |
 | `docs/DECISIONS.md` | Every choice the spec did not make for you. | Never read it whole: it grows with every task. `grep -n '^## ' docs/DECISIONS.md` lists the titles with their line numbers; read only the entries your task touches, by line range. |
-| `docs/MANUAL-CHECKS.md` | What only a person can verify. | Append to it; never tick anything in it. |
+| `docs/MANUAL-CHECKS.md` | Closed: no more manual checks (see Recording). | Never add to it and never tick anything in it. |
 
 Code, identifiers, comments, commit messages and documentation are in **English**. User-facing
 strings go through i18n (`en` and `it`); the Italian strings PLAN.md quotes (labels, reasons,
@@ -96,42 +96,12 @@ Keep each entry short: a title that names the decision (it is how later tasks fi
 two sentences per bullet. No code listings, no narrative of what you tried. Every later task greps
 this file.
 
-`docs/MANUAL-CHECKS.md`: the owner is not a developer of this code, his time is the scarcest
-resource of the project, and a script shows him these entries word for word when the phase ends.
-
-**Add a manual check only when it is indispensable**: something a person must see or judge in the
-real browser (a visible result, a real restart, whether a suggestion makes sense) and no automated
-test can cover. Before adding one, ask whether a unit or E2E test could check it instead; if so,
-write that test and no entry. Never write a check that needs developer tools, reading stored values,
-copying numbers, `chrome://` internals, or a conversation with Claude to inspect data. If the
-behaviour is not visible in the UI yet, do not write the check now: write it under the later task
-that makes it visible (its id in the parentheses), so it is shown when he can just look at it.
-Merge checks that share a setup. Most tasks add no entry at all; a phase should end with at most
-two or three.
-
-Each entry is **in Italian, short, and needs no explanation**:
-
-- a title of at most 12 words saying what he should see;
-- a line `⏱ <minutes> · <where>`;
-- at most 4 numbered steps of one short sentence each, using the test build he is given
-  (`%USERPROFILE%\TabDeclutter-prova\chrome` and `...\firefox`, loaded as his page explains);
-  never ask him to build, run a command or open the repository;
-- one sentence of expected result, saying what to write to Claude if it is not so.
-
-Before writing a step, make sure it is actually possible: a Firefox *temporary* add-on disappears
-when Firefox closes, so a check that needs a Firefox restart belongs to "Before publishing" (the
-signed build). Add new entries at the end of the file, outside the "Before publishing" section
-unless that is where they belong.
-
-```markdown
-- [ ] (M2.2) Dopo il riavvio di Chrome le schede non tornano «nuove»
-  ⏱ 2 minuti · Chrome
-  1. Apri il pannello e guarda l'età di due o tre schede.
-  2. Chiudi Chrome del tutto, riaprilo con le stesse schede e riapri il pannello.
-  Risultato atteso: le stesse schede mostrano la stessa età di prima, non «appena aperta».
-```
-
-A check whose phase id has no dot (for example `setup`) is shown only at release time.
+`docs/MANUAL-CHECKS.md`: **closed to new entries.** On 2026-11-09 the owner decided there will be
+no more manual checks: the sequence must simply keep going. Do not add entries to it. Where a task's
+**Done when** asks for a manual check, cover the behaviour with an automated test (unit, `tests/ext`
+or E2E on both browsers) instead. If something truly cannot be automated, record it as one line in
+your DECISIONS.md entry ("not verified by hand: …") and carry on. Never stop or wait for a person
+because of it. The existing `(setup)` entries stay for release time.
 
 ## Committing
 
@@ -167,7 +137,7 @@ End every run with:
 1. The commit you made: hash and subject.
 2. The exact gate results: per gate, numbers and not "all green" (tests passed/failed, coverage
    percentage, error counts), as the last `pnpm gates` printed them.
-3. The DECISIONS.md and MANUAL-CHECKS.md entries you added.
+3. The DECISIONS.md entries you added.
 4. Anything you noticed and did not act on.
 
 ## Verification honesty

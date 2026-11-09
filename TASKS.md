@@ -708,6 +708,18 @@ The M3b acceptance, case by case, on the real extension.
   - "Più vecchia ricaricata";
   - the navigated active tab rule.
 - Firefox smoke: guard on a duplicate URL.
+- These two replace the dropped M3b.2 manual checks, since the owner wants no manual checks. They
+  run with the guard on "Chiudi automaticamente":
+  - **Duplicate tab is never closed.** Use the real `chrome.tabs.duplicate()` from the extension
+    context, on a home page and on a deep page with a long query string. This is the same browser
+    path as the tab menu's "Duplica", so the opener, index and URL signals are Chrome's own, not
+    simulated. Both tabs survive at least 10 s. Then a hand-opened duplicate (a new tab, then
+    navigate to the same URL) is closed, which proves the guard was on.
+  - **Multi-step logins are never interrupted.** Serve a local multi-host flow (site → identity
+    provider → site), on hosts and paths matching the login patterns the guard recognises. Run it
+    once in one tab, and once with the login page opened twice in two tabs. No tab may close while
+    the flow is in progress; a duplicate closed after the flow ends is fine. Run it on Chromium and
+    on Firefox.
 
 **Scope.** Tests only (plus the fixes they reveal, in the same commit).
 
@@ -1073,8 +1085,8 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 Tasks added during the work, when a manual check finds a problem. Each one has the same shape as
 the others: a `### F.<n> — …` title, the check that gave rise to it, what happens and what should
 happen (in the owner's words), **Spec**, **What to do**, **Scope**, **Done when**. "Done when"
-always includes an automated test that reproduces the problem, when one is possible, and a new
-entry in MANUAL-CHECKS to try it again by hand. The ledger row goes at the end of section 12 and the
+always includes an automated test that reproduces the problem, when one is possible. Since
+2026-11-09 there are no new manual checks (AGENT-RULES.md, Recording). The ledger row goes at the end of section 12 and the
 target goes into `autoSequence` right after the task in progress.
 
 ### F.1 — Perf budgets judged against the machine's own speed

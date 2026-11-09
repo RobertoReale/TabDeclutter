@@ -17,15 +17,12 @@ It calls you when:
 
 - **it has stopped and is waiting for an answer.** Claude explains the question to you, proposes
   the answer, sends it and restarts everything;
-- **a phase finishes** (M0, M1…) that has manual checks. You find a test build ready in
-  `C:\Users\Admin\TabDeclutter-prova` and instructions for each check. Then you tell Claude how it
-  went, in your own words: Claude ticks the checks and, if something is wrong, adds a fix task that
-  the agent does straight away;
 - **the process has died** and has not restarted on its own;
 - **everything is finished.** What remains are the publishing steps, which you do with Claude.
 
-If you leave something pending it reminds you: a stop every 3 hours, the checks once a day, only
-between 9:00 and 22:00.
+Since 2026-11-09 there are no manual checks: the agents cover everything with automated tests.
+
+If you leave something pending it reminds you: a stop every 3 hours, only between 9:00 and 22:00.
 
 ## The sentences to type to Claude
 
@@ -36,7 +33,6 @@ Open Claude Code (in VS Code) in the TabDeclutter folder:
 | start everything the first time | «Avvia la sequenza» |
 | know where things stand and whether you have to do something | «Cosa devo fare?» |
 | answer a stop | «La sequenza si è fermata, cosa devo fare?» |
-| say how a check went | «Ho fatto le verifiche della fase M1: …» |
 | try the extension whenever you like | «Voglio provare l'estensione» |
 | stop everything for a while | «Metti in pausa» / «Riprendi la sequenza» |
 | change something in the plan | describe it in your own words |
