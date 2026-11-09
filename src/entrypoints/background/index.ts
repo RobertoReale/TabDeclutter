@@ -5,6 +5,7 @@ import { registerPanelOpening } from '@/platform/panel';
 
 import { registerBadge } from './badge';
 import { registerCleanup } from './cleanup';
+import { registerCommands } from './commands';
 import { registerGuard } from './guard';
 import { registerMenus } from './menus';
 import { registerTracker } from './tracker';
@@ -14,8 +15,11 @@ export default defineBackground(() => {
   registerTracker();
   const badge = registerBadge();
   registerCleanup();
-  registerMenus();
   // The flash of PLAN.md §8.5 is the badge's; the guard is handed it so it does not have to
   // know there is a badge at all.
-  registerGuard({ flash: badge.flash });
+  const guard = registerGuard({ flash: badge.flash });
+  // The guard first: the icon menu and the shortcuts act on it, and both must do the same
+  // thing for the same gesture (PLAN.md §4.1).
+  registerMenus({ guard });
+  registerCommands({ guard });
 });

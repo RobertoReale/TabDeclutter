@@ -666,3 +666,220 @@ describe('after a close', () => {
     expect(updates).not.toHaveBeenCalled();
   });
 });
+
+describe('“Chiudi tutti i duplicati” (PLAN.md §8.7)', () => {
+  it('leaves one tab of each page, with the guard switched off', async () => {
+    // §8.7: "works in OFF and in Solo avvisi too". The guard has closed nothing here —
+    // these four tabs are the mess the user is asking to be rid of in one gesture.
+    await configure({ mode: 'off' });
+    const a = await open(URL_A);
+    const b = await open(URL_B);
+    await open(URL_A);
+    await open(URL_B);
+    const guard = start();
+
+    const closed = await guard.closeAllDuplicates();
+    await settle(guard);
+
+    expect(await ids()).toEqual([a, b]);
+    expect(closed).toHaveLength(2);
+  });
+
+  it('archives every close as the user’s own, with the tab that stayed', async () => {
+    await configure({ mode: 'warn' });
+    const a = await open(URL_A);
+    await open(TRACKED);
+    const guard = start();
+
+    const closed = await guard.closeAllDuplicates();
+    await settle(guard);
+
+    expect(await ids()).toEqual([a]);
+    // `duplicate-manual` and not `duplicate-auto`: the Archive view says which closes were
+    // the guard's own and which were asked for (PLAN.md §8.4.5).
+    expect(await readArchive()).toMatchObject([
+      { url: TRACKED, reason: 'duplicate-manual', duplicateOfUrl: URL_A },
+    ]);
+    expect(closed).toHaveLength(1);
+  });
+
+  it('remembers the last close, which is what the icon menu reopens', async () => {
+    await configure({ mode: 'off' });
+    await open(URL_A);
+    await open(URL_A);
+    await open(URL_A);
+    const guard = start();
+
+    const closed = await guard.closeAllDuplicates();
+    await settle(guard);
+
+    // §8.7: "from the shortcut, undo goes through the icon menu", which reopens one tab.
+    expect(closed).toHaveLength(2);
+    expect((await readGuardState()).lastAutoClosedId).toBe(closed.at(-1)?.id);
+  });
+
+  it('closes them even while the protection is paused', async () => {
+    await configure({ mode: 'auto' });
+    const a = await open(URL_A);
+    const guard = start();
+    await guard.pause(PAUSE);
+    const b = await open(URL_A);
+    await settle(guard);
+    expect(await ids()).toEqual([a, b]);
+
+    await guard.closeAllDuplicates();
+    await settle(guard);
+
+    // The pause stops the guard from acting on its own (§8.1); it is not an answer to a
+    // key the user has just pressed. And it is still a pause afterwards.
+    expect(await ids()).toEqual([a]);
+    expect((await guard.status()).paused).toBe(true);
+  });
+
+  it('closes nothing, and archives nothing, when there is nothing to close', async () => {
+    await configure({ mode: 'auto' });
+    const a = await open(URL_A);
+    const b = await open(URL_B);
+    const guard = start();
+
+    expect(await guard.closeAllDuplicates()).toEqual([]);
+    await settle(guard);
+
+    expect(await ids()).toEqual([a, b]);
+    expect(await readArchive()).toEqual([]);
+  });
+
+  it('leaves everything §8.6 protects where it is', async () => {
+    await configure({ mode: 'off' });
+    await duplicateWhitelistItem.setValue([URL_A]);
+    const a = await open(URL_A);
+    const b = await open(URL_A);
+    const guard = start();
+
+    await guard.closeAllDuplicates();
+    await settle(guard);
+
+    // The whitelist is the user's standing answer about this site, and a sweep is not a
+    // reason to overrule it.
+    expect(await ids()).toEqual([a, b]);
+  });
+
+  it('keeps one tab of the page in each window with the "Stessa finestra" scope', async () => {
+    await configure({ mode: 'off', scope: 'window' });
+    const a = await open(URL_A);
+    const b = await open(URL_A);
+    describeTab(b, { windowId: WINDOW + 1 });
+    await open(URL_A);
+    const guard = start();
+
+    await guard.closeAllDuplicates();
+    await settle(guard);
+
+    // The third tab shares a window with `a`, so one of them goes; `b` is alone in its own.
+    expect(await ids()).toEqual([a, b]);
+  });
+});
+
+describe('“Riapri l’ultimo duplicato chiuso” (PLAN.md §8.5)', () => {
+  it('brings the tab back, and the guard does not close it again', async () => {
+    await configure({ mode: 'auto' });
+    const a = await open(URL_A);
+    const guard = start();
+    await open(URL_A);
+    await settle(guard);
+    expect(await ids()).toEqual([a]);
+
+    const reopened = await guard.reopenLastDuplicate();
+    await settle(guard);
+
+    // The whole point of the exemption (§8.6): the tab appears on a page another tab is
+    // already showing, and a guard that closed it again would make the item a no-op.
+    expect(reopened).toMatchObject({ url: URL_A, reason: 'duplicate-auto' });
+    expect(await ids()).toHaveLength(2);
+    // And it is out of the archive, because it is a tab again.
+    expect(await readArchive()).toEqual([]);
+  });
+
+  it('closes it again once the exemption has run out', async () => {
+    await configure({ mode: 'auto' });
+    const a = await open(URL_A);
+    const guard = start();
+    await open(URL_A);
+    await settle(guard);
+    await guard.reopenLastDuplicate();
+    await settle(guard);
+    const [, back] = await ids();
+
+    clock += EXEMPTION_TTL_MS + 1;
+    if (back !== undefined) await navigate(guard, back, URL_A);
+
+    // The exemption covers the moment of the reopen and not the tab for ever: the user
+    // navigating that tab onto the same page again is an ordinary duplicate.
+    expect(await ids()).toEqual([a]);
+  });
+
+  it('answers with nothing when the guard has closed nothing yet', async () => {
+    await configure({ mode: 'auto' });
+    const a = await open(URL_A);
+    const guard = start();
+
+    expect(await guard.reopenLastDuplicate()).toBeNull();
+    await settle(guard);
+
+    expect(await ids()).toEqual([a]);
+  });
+
+  it('answers with nothing when the entry has already left the archive', async () => {
+    await configure({ mode: 'auto' });
+    await open(URL_A);
+    const guard = start();
+    await open(URL_A);
+    await settle(guard);
+
+    // Reopened once already — or pruned by the 7-day sweep. `storage.session` keeps the
+    // id, so the archive is the only thing that knows whether it is still there.
+    expect(await guard.reopenLastDuplicate()).not.toBeNull();
+    await settle(guard);
+    expect(await guard.reopenLastDuplicate()).toBeNull();
+    await settle(guard);
+
+    expect(await ids()).toHaveLength(2);
+  });
+});
+
+describe('the shortcut that turns the protection on and off', () => {
+  it('pauses until the browser restarts, and ends the pause when pressed again', async () => {
+    await configure({ mode: 'auto' });
+    const a = await open(URL_A);
+    const guard = start();
+
+    await guard.toggle();
+
+    // One key has no duration to offer, so it is §8.1's "fino al riavvio" — which needs no
+    // alarm, because `storage.session` dies with the browser.
+    const paused = await guard.status();
+    expect(paused.paused).toBe(true);
+    expect(paused.mode).toBe('auto');
+    expect(await fakeBrowser.alarms.getAll()).toEqual([]);
+    const b = await open(URL_A);
+    await settle(guard);
+    expect(await ids()).toEqual([a, b]);
+
+    await guard.toggle();
+
+    expect(await guard.status()).toEqual({ mode: 'auto', paused: false });
+    await navigate(guard, b, URL_A);
+    expect(await ids()).toEqual([a]);
+  });
+
+  it('ends a timed pause too, alarm and all', async () => {
+    await configure({ mode: 'auto' });
+    const guard = start();
+    await guard.pause(PAUSE);
+
+    await guard.toggle();
+
+    expect((await guard.status()).paused).toBe(false);
+    expect(await fakeBrowser.alarms.get(RESUME_ALARM)).toBeUndefined();
+  });
+});
