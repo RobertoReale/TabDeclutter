@@ -269,6 +269,15 @@ export interface GuardState {
   pausedUntil?: number;
   /** The mode to return to when the pause ends. */
   resumeMode?: GuardMode;
+  /**
+   * ms epoch at which the start-up grace period ends, `STARTUP_GRACE_MS` after
+   * `runtime.onStartup` (PLAN.md §8.6).
+   *
+   * Stored rather than kept in a variable because the background may be torn down and
+   * woken again inside those 15 s (invariant 6), and a grace period the second worker
+   * knew nothing about would close the duplicates of a session restore.
+   */
+  graceUntil?: number;
   exemptions: GuardExemption[];
   /** The `ArchivedTab.id` of the last automatic close, for "Riapri l'ultimo duplicato". */
   lastAutoClosedId?: string;

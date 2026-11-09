@@ -68,7 +68,9 @@ export interface BrowserTab {
 export interface TabsApi {
   tabs: {
     query(query: Record<string, unknown>): Promise<BrowserTab[]>;
-    update(tabId: number, properties: { active: boolean }): Promise<unknown>;
+    /** One tab. Rejects on Chrome, resolves with nothing on Firefox, when it is gone. */
+    get(tabId: number): Promise<BrowserTab | undefined>;
+    update(tabId: number, properties: { active?: boolean; url?: string }): Promise<unknown>;
   };
   windows: {
     update(windowId: number, properties: { focused: boolean }): Promise<unknown>;
@@ -161,6 +163,7 @@ export interface ActionsApi extends TabsApi {
       active: boolean;
     }): Promise<BrowserTab>;
     remove(tabIds: readonly number[]): Promise<unknown>;
+    move(tabId: number, properties: { windowId?: number; index: number }): Promise<unknown>;
     discard(tabId: number): Promise<unknown>;
     group(options: { tabIds: readonly number[]; groupId: number }): Promise<unknown>;
   };
@@ -479,4 +482,57 @@ export async function discardTab(
   const api = options.api ?? actionsApi();
   const discarded = await attempt(() => api.tabs.discard(tab.id));
   return discarded.ok;
+}
+
+/**
+ * One tab as the core sees it, or `null` when it is not there to be acted on.
+ *
+ * The guard re-reads a tab between deciding about it and touching it (PLAN.md §8.6, "Tab
+ * closed in the meantime"), and the two browsers disagree about what gone looks like:
+ * Chrome rejects the call, Firefox resolves with nothing. Both answer `null` here, and so
+ * does a tab another extension has hidden — for the same reason `asTabInfos` drops it, it
+ * is not on screen (PLAN.md §5.5).
+ */
+export async function getTab(tabId: number, tabsApi: TabsApi = api()): Promise<TabInfo | null> {
+  const found = await attempt(() => tabsApi.tabs.get(tabId));
+  if (!found.ok || found.value === undefined) return null;
+  const [tab] = asTabInfos([found.value]);
+  return tab ?? null;
+}
+
+/**
+ * "Sposta e attiva" (PLAN.md §8.4.4), the moving half: the tab that stays takes the place
+ * of the one that went.
+ *
+ * `NO_WINDOW` means "leave it where it is and only change the index", which is what a
+ * closed tab with no window of its own can ask for. Failure is not an error: the tab, or
+ * the window it was going to, may be gone by now.
+ */
+export async function moveTab(
+  tabId: number,
+  windowId: number,
+  index: number,
+  options: ActionContext = {},
+): Promise<boolean> {
+  const api = options.api ?? actionsApi();
+  const moved = await attempt(() =>
+    api.tabs.move(tabId, { ...(windowId === NO_WINDOW ? {} : { windowId }), index }),
+  );
+  return moved.ok;
+}
+
+/**
+ * `reloadKeptWith` (PLAN.md §8.4.3.4): the tab that stays loads the URL that triggered the
+ * close, which is the whole point of "Più vecchia ricaricata con la nuova URL".
+ *
+ * `tabs.update` and not `tabs.reload`: the tab is being sent to a *different* URL, one that
+ * differs from its own in a part the comparison ignores.
+ */
+export async function navigateTab(
+  tabId: number,
+  url: string,
+  tabsApi: TabsApi = api(),
+): Promise<boolean> {
+  const navigated = await attempt(() => tabsApi.tabs.update(tabId, { url }));
+  return navigated.ok;
 }

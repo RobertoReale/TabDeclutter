@@ -2150,3 +2150,124 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   winner and the function never has to reason about more than two tabs. Three tabs of one page
   converge to one through the events that arrive on their own account, which is also what keeps a
   single resolution small enough to be carried out without going stale.
+
+## M3b.2 — the index holds tab ids, and every tab is read again before anything is done to it
+
+- **Context:** PLAN.md §8.2 asks for a `Map<duplicateKey, Set<tabId>>` rebuilt on wake-up, and §11
+  gives the event 50 ms with the worker running and 300 ms when it has to be woken. §8.6 lists "tab
+  closed in the meantime" as a case to survive.
+- **Decision:** the index stores ids and nothing else. Every step that needs a tab calls
+  `getTab`: the trigger once per event, the candidates of its bucket in one `Promise.all`, and both
+  ends of a resolution once more immediately before the close. An id that answers `null` is dropped
+  from the index on the spot, and a missing *kept* tab cancels the close as surely as a missing
+  target.
+- **Why:** a `TabInfo` cached in the index would be a second copy of the browser's state that no
+  event updates completely — `onUpdated` carries only what changed, pinning and audio arrive as
+  events the guard does not listen for — and a close decided on a stale copy is a tab the user
+  loses. Ids are cheap to keep and the re-read is the only thing that makes the decision true at
+  the moment it is acted on. The re-read is also §8.6's answer for free: the burst that closed a
+  tab a microsecond ago gets a `null` rather than an exception. The cost is one `tabs.get` per tab
+  of the bucket, which for the pair or triple a duplicate set actually is stays well inside §11.
+
+## M3b.2 — a tab is still arriving until it has an address, which is how Firefox is handled
+
+- **Context:** §8.4.3.2 keeps "the active tab the user navigated", and the guard has to tell a
+  navigation from a tab that is merely finishing being created. Chrome says so with `pendingUrl`;
+  Firefox has none, and every tab there is created on `about:blank` with its real address arriving
+  in the first `onUpdated` (PLAN.md §5.5).
+- **Decision:** the index keeps two sets of ids: `navigated`, which the core reads through
+  `GuardContext.navigatedTabIds`, and `awaiting`, the tabs whose last known URL was blank. An
+  `onUpdated` for a tab in `awaiting` does **not** mark it navigated; `onCreated` clears the flag;
+  the index built on wake-up marks every tab it finds as navigated. A blank tab also returns
+  early, before any candidate is looked for, while "Ignora schede vuote" is on.
+- **Why:** without `awaiting` the first `onUpdated` of a Firefox tab would look exactly like a
+  navigation, so opening a link in the foreground onto a page already open would close the tab the
+  link was in — the behaviour §8.4.3.2 exists to prevent — and the option it depends on is not
+  Firefox-specific, so a `capabilities` check would not have fixed it. Tabs found by
+  `tabs.query({})` count as navigated because a tab that was already open when this worker started
+  is not a tab the user is in the middle of opening; treating a restored session as twenty fresh
+  creations would make the newest tab win every tie. The early return for a blank tab is where the
+  Chrome and Firefox paths rejoin: `about:blank` is nobody's duplicate yet, and the `onUpdated`
+  that gives it an address brings it back here.
+
+## M3b.2 — "Niente" and "Solo avvisi" cost no API call at all
+
+- **Context:** §8.1's three modes, and §11's budget for a guard that runs on every navigation of
+  every tab.
+- **Decision:** `evaluate` awaits the settings and returns immediately unless the mode is `auto`.
+  No index is built, no `tabs.get` is made, no session state is read. A change of mode arrives as
+  `storage.onChanged` on `local:settings` or `local:duplicateWhitelist` and invalidates both the
+  settings and the index.
+- **Why:** two of the three modes close nothing, and in those two the cheapest correct guard is one
+  that does nothing: the duplicates are still shown, by the panel, which reads the same rules over
+  the list it already has (§8.1). Invalidating rather than re-reading on change keeps the cost on
+  the next event instead of on the write, and the index goes with the settings because the key
+  options are part of them — the same tabs filed under `ignoreAllParams` and without it are two
+  different indexes.
+
+## M3b.2 — one event at a time, with the badge flash deliberately outside the queue
+
+- **Context:** §8.2 asks for a serial queue. §8.5 wants the badge to flash when the guard closes
+  something, and that flash lasts 1.5 s.
+- **Decision:** every listener hands its work to one `chain` of promises, so no two events are ever
+  resolved at once; a step that closed a tab starts the flash **after** leaving the queue, and a
+  flash already running is left to finish rather than queued behind itself. `settled()` waits for
+  the chain and the flash both, and loops until neither moves.
+- **Why:** the queue is what makes twenty simultaneous openings of one page leave one tab instead
+  of none: each event sees an index the previous one has already had its close removed from.
+  Awaiting a 1.5 s flash inside it would hold the next event up for thirty times the 50 ms §11
+  allows and would turn a burst into half a minute of flashing, so the flash is a side effect of
+  the burst rather than a step of it — one flash for the burst is also what the user can actually
+  perceive. `settled()` exists for the tests and for the worker's own lifetime: the colour has to
+  go back before the service worker may be torn down.
+
+## M3b.2 — the pause is a deadline in `storage.session` and an alarm, and never touches the mode
+
+- **Context:** §8.1's "Sospendi" offers 15 min, 1 h and "fino al riavvio". Invariant 6 forbids
+  keeping anything in a variable, and the service worker dies long before any of those durations.
+- **Decision:** `pause` writes `pausedUntil` and `resumeMode` to `session:guardState` and creates a
+  `guard-resume` alarm; the stored `guard.mode` is left exactly as the user set it. "Fino al
+  riavvio" gets a deadline a year out and **no** alarm. The alarm's handler goes through the same
+  serial queue as the events, and `resume` clears both the state and the alarm.
+- **Why:** rewriting the mode to `off` and back would make a pause indistinguishable from a
+  setting, and a worker that died between the two writes would leave the guard switched off with
+  nothing to switch it back on. A deadline in `storage.session` cannot survive the restart, which
+  is exactly what "fino al riavvio" means — so that case needs no alarm, and the year is only there
+  so the number is in the future for any session that reads it. The alarm is on the queue because
+  the end of a pause must not land halfway through an event that read `pausedUntil` a moment
+  earlier, which would close a tab under a guard that was still paused when the decision was made.
+
+## M3b.2 — `getTab`, `moveTab` and `navigateTab` join `platform/tabs.ts`
+
+- **Context:** the guard needs one tab by id, the move of "Sposta e attiva" (§8.4.4) and the reload
+  of "Più vecchia ricaricata" (§8.4.3.4). Invariant 5 keeps browser calls in `src/platform/`.
+- **Decision:** three functions beside the existing actions. `getTab` answers `TabInfo | null`,
+  mapping Chrome's rejection, Firefox's `undefined` and a hidden tab onto the same `null`.
+  `moveTab` takes `NO_WINDOW` for "only change the index" and returns a boolean. `navigateTab` is
+  `tabs.update(id, { url })` — not `tabs.reload` — and returns a boolean too.
+- **Why:** the guard is the first caller that acts on a tab it did not get from `queryTabs`, and
+  letting it call `browser.tabs` itself would put the two browsers' disagreement about a missing tab
+  into the background script. `null` for a hidden tab is the same rule `asTabInfos` already applies
+  (§5.5), stated once. Booleans rather than exceptions because every one of these races the user:
+  the tab, or the window it was going to, may be gone, and none of the three is worth abandoning
+  the rest of the close for. `tabs.update` because the kept tab is being sent to a *different* URL —
+  one that differs from its own only in a part the comparison ignores — which a reload would not do.
+
+## M3b.2 — the guard takes a clock, the capabilities and the flash, and no browser
+
+- **Context:** `registerBadge` and `registerTracker` take an injected API object; `fakeBrowser`
+  implements most of what the guard needs and drops the fields a duplicate decision turns on
+  (`cookieStoreId`, `openerTabId`, `index`, `windowId` on a created tab).
+- **Decision:** `GuardOptions` has `now`, `capabilities` and `flash` only. Everything else goes
+  through `platform/`'s own functions against the real `browser`, and `tests/ext/guard.test.ts`
+  arranges the gaps by spying on `fakeBrowser.tabs.get` and `tabs.query` to add the missing fields
+  back, firing `onAttached` and `onReplaced` itself because the fake's `addListener` throws for
+  those two.
+- **Why:** an injected tabs API would have meant the tests never exercising the index against real
+  `onCreated`/`onUpdated` ordering, which is the half of the guard that cannot be unit-tested —
+  `core/duplicate-guard.ts` already covers the rules. Decorating the fake's two read calls is a
+  smaller lie than a hand-written browser: the events, the storage, the alarms and the closes are
+  all real, and what the test invents is only what the browser would have reported about a tab.
+  `flash` is injected because M3b.3 owns the badge's own queue and the guard must not reach into
+  it; `capabilities` because the "Duplica scheda" heuristic has to be testable on both browsers
+  from one run (invariant 10).
