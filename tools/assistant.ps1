@@ -266,10 +266,11 @@ function Get-BuildState {
 }
 
 function Get-PendingChecks($S) {
-    # Due now: unticked checks of every phase that has finished. Checks of a phase still in
-    # progress wait for the phase, and release checks wait for the end.
-    $completeKeys = @($S.phases | Where-Object { $_.complete } | ForEach-Object { $_.key })
-    return @($S.checks | Where-Object { -not $_.done -and $completeKeys -contains $_.phase })
+    # Since 2026-11-09 the owner wants no manual checks: the agents automate them instead
+    # (AGENT-RULES.md, Recording). An entry a session started before that rule still adds
+    # must not call him, so phase checks are never due. Release-time `(setup)` items are
+    # handled with him at the end, outside this list.
+    return @()
 }
 
 function Get-RowLabel($S, [string] $Id) {
@@ -364,9 +365,52 @@ function Get-StatusLine($S) {
     }
 }
 
+$script:ForecastCache = $null
+function Get-ForecastLines($S) {
+    <#
+        phasekit's forecast in the owner's words: the day it should end, and how full the
+        usage limits are. Computed once per run of this script. A failure only removes the
+        lines; it never costs the report.
+    #>
+    if ($S.status -eq 'finished') { return @() }
+    if ($null -ne $script:ForecastCache) { return $script:ForecastCache }
+    $lines = @()
+    try {
+        $frame = Get-DashboardFrame -Config $Cfg
+        $f = $frame.forecast
+        if ($null -eq $f -or $null -eq $f.typical) {
+            $lines = @('Fine prevista: non ancora calcolabile.')
+        } else {
+            $it = [Globalization.CultureInfo]::GetCultureInfo('it-IT')
+            $day = { param($utc) $utc.ToLocalTime().ToString('ddd d/MM', $it) }
+            $hour = { param($utc) $utc.ToLocalTime().ToString('HH:mm', $it) }
+            $lines += ('Fine prevista: {0} verso le {1} (tra {2} e {3}), se il PC resta acceso e attaccato alla corrente.' -f `
+                       (& $day $f.typical.finish), (& $hour $f.typical.finish), (& $day $f.quick.finish), (& $day $f.slow.finish))
+            $parts = @()
+            $five = $f.allowance.five_hour
+            if ($five -and $null -ne $five.size) {
+                $r = if ($null -ne $five.resetsAt) { ' (si azzera alle ' + (& $hour (ConvertFrom-UnixSeconds $five.resetsAt)) + ')' } else { '' }
+                $parts += ('limite delle 5 ore al {0:0}%{1}' -f (100 * $five.used), $r)
+            }
+            $week = $f.allowance.seven_day
+            if ($week -and $null -ne $week.size) {
+                $r = if ($null -ne $week.resetsAt) {
+                    $w = ConvertFrom-UnixSeconds $week.resetsAt
+                    ' (si azzera ' + (& $day $w) + ' alle ' + (& $hour $w) + ')'
+                } else { '' }
+                $parts += ('limite settimanale al {0:0}%{1}' -f (100 * $week.used), $r)
+            }
+            if ($parts.Count) { $lines += ('Uso: ' + ($parts -join ' · ') + '.') }
+        }
+    } catch { $lines = @() }
+    $script:ForecastCache = $lines
+    return $lines
+}
+
 function Format-TodoText($S, $Items) {
     $sb = [System.Text.StringBuilder]::new()
     [void] $sb.AppendLine("STATO: $(Get-StatusLine $S)")
+    foreach ($l in @(Get-ForecastLines $S)) { [void] $sb.AppendLine($l) }
     [void] $sb.AppendLine("status=$($S.status) stopTarget=$($S.stopTarget) current=$($S.currentTarget) next=$(if ($S.next) { $S.next.id })")
     [void] $sb.AppendLine('')
     if (-not $Items.Count) { [void] $sb.AppendLine('Niente da fare per il proprietario adesso.') }
@@ -451,7 +495,7 @@ code { font-size: 13px; }
 </head>
 <body><main>
 <h1>TabDeclutter – cosa fare</h1>
-<p class="status">$(& $h (Get-StatusLine $S))</p>
+<p class="status">$(& $h (Get-StatusLine $S))$((@(Get-ForecastLines $S) | ForEach-Object { '<br>' + (& $h $_) }) -join '')</p>
 $($cards -join "`n")
 <h3>Avanzamento</h3>
 <table>$phaseRows</table>
