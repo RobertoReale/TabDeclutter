@@ -97,7 +97,16 @@ describe('a budget that is missed', () => {
     return { report, printed };
   }
 
-  it('fails on mains, where the number means something', async () => {
+  /**
+   * The verdict below is decided by construction — a limit of 0 ms, a given `referenceMs`,
+   * and a run that spins on the process's own CPU clock — but getting there still burns
+   * `MISS_CPU_MS` of real CPU time, twice. On a saturated machine that CPU time is handed
+   * out in slices and the wall time it takes is unbounded, which is not something either
+   * test asserts. So the timeout is generous: idle, these finish in tens of milliseconds.
+   */
+  const MISS_TIMEOUT_MS = 30_000;
+
+  it('fails on mains, where the number means something', { timeout: MISS_TIMEOUT_MS }, async () => {
     const { report } = await missTheBudget('mains');
 
     expect(report.withinBudget).toBe(false);
@@ -105,14 +114,18 @@ describe('a budget that is missed', () => {
     expect(report.passed).toBe(false);
   });
 
-  it('passes on battery, and says on stdout that it was not enforced', async () => {
-    const { report, printed } = await missTheBudget('battery');
+  it(
+    'passes on battery, and says on stdout that it was not enforced',
+    { timeout: MISS_TIMEOUT_MS },
+    async () => {
+      const { report, printed } = await missTheBudget('battery');
 
-    expect(report.withinBudget).toBe(false);
-    expect(report.enforced).toBe(false);
-    expect(report.passed).toBe(true);
-    expect(printed[0]).toBe('perf budget NOT ENFORCED: running on battery (CPU throttled)');
-    // Measured and reported all the same: the medians follow the line that excuses them.
-    expect(printed[1]).toContain('over budget on every attempt');
-  });
+      expect(report.withinBudget).toBe(false);
+      expect(report.enforced).toBe(false);
+      expect(report.passed).toBe(true);
+      expect(printed[0]).toBe('perf budget NOT ENFORCED: running on battery (CPU throttled)');
+      // Measured and reported all the same: the medians follow the line that excuses them.
+      expect(printed[1]).toContain('over budget on every attempt');
+    },
+  );
 });

@@ -133,35 +133,56 @@ describe('the verdict on a perf budget (PLAN.md §11)', () => {
   });
 });
 
+/**
+ * These three tests actually run the yardstick, so they are the only ones here whose wall
+ * time depends on the machine. What they assert is structural — the workload is
+ * deterministic, self-contained, and reports one run — and none of it is a speed claim, so
+ * the default 5 s timeout was gating a shape check on how loaded the CPU happened to be.
+ * `pnpm test` spawns one worker per file, and `referenceWorkloadExpression` runs the
+ * workload `PAGE_REFERENCE_RUNS` times in a cold VM context with no JIT warm-up: with 33
+ * workers competing, that crossed 5 s and turned the whole gate red (docs/DECISIONS.md,
+ * M3b.1). A generous timeout costs nothing when the machine is idle and still catches a
+ * genuine hang.
+ */
+const WORKLOAD_TIMEOUT_MS = 30_000;
+
 describe('the reference workload', () => {
-  it('always costs the same and answers the same', () => {
+  it('always costs the same and answers the same', { timeout: WORKLOAD_TIMEOUT_MS }, () => {
     const first = referenceWorkload();
 
     expect(Number.isInteger(first)).toBe(true);
     expect(referenceWorkload()).toBe(first);
   });
 
-  it('is self-contained, so the panel budget can run it inside the browser', () => {
-    // An empty context with nothing of this module in it: a reference to anything outside
-    // the function throws here, which is what it would do in the page.
-    const source = `const workload = ${referenceWorkload.toString()}; workload();`;
-    expect(runInNewContext(source, {})).toBe(referenceWorkload());
-  });
+  it(
+    'is self-contained, so the panel budget can run it inside the browser',
+    { timeout: WORKLOAD_TIMEOUT_MS },
+    () => {
+      // An empty context with nothing of this module in it: a reference to anything outside
+      // the function throws here, which is what it would do in the page.
+      const source = `const workload = ${referenceWorkload.toString()}; workload();`;
+      expect(runInNewContext(source, {})).toBe(referenceWorkload());
+    },
+  );
 
-  it('times itself on the clock of whoever evaluates its expression', () => {
-    let reads = 0;
-    const ms = runInNewContext(referenceWorkloadExpression(), {
-      performance: {
-        now: () => {
-          reads += 1;
-          // 80 ms over however many runs the expression makes: what it reports is one run.
-          return reads === 1 ? 1_000 : 1_080;
+  it(
+    'times itself on the clock of whoever evaluates its expression',
+    { timeout: WORKLOAD_TIMEOUT_MS },
+    () => {
+      let reads = 0;
+      const ms = runInNewContext(referenceWorkloadExpression(), {
+        performance: {
+          now: () => {
+            reads += 1;
+            // 80 ms over however many runs the expression makes: what it reports is one run.
+            return reads === 1 ? 1_000 : 1_080;
+          },
         },
-      },
-    }) as number;
+      }) as number;
 
-    expect(reads).toBe(2);
-    expect(ms).toBeGreaterThan(0);
-    expect(80 % ms).toBe(0);
-  });
+      expect(reads).toBe(2);
+      expect(ms).toBeGreaterThan(0);
+      expect(80 % ms).toBe(0);
+    },
+  );
 });

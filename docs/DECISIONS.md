@@ -2056,3 +2056,97 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   either, and focus is the one of the two this harness can produce. The seed moved rather than being
   copied because it is ~60 lines of tracker-quiescence timing that two specs now need, and two
   copies would drift.
+
+## M3b.1 — unit tests of the perf harness never depend on machine speed
+
+- **Context:** F.1's harness judges a budget against the machine's own measured speed, and its unit
+  tests had inherited that dependence: `perf-budget-verdict.test.ts:151` timed out at 5892 ms under
+  the load of 33 vitest workers, red on a structural assertion, after M3.4 had already had to fix
+  one such test.
+- **Decision:** unit tests of the perf harness never depend on machine speed — generous timeouts
+  (30 s) for the ones that run a workload or a measurement, verdicts decided by construction for
+  the rest. `PAGE_REFERENCE_RUNS`, the global `testTimeout`, the budgets of PLAN.md §11 and
+  `tests/perf/budget.ts` are unchanged.
+- **Why:** none of these tests asserts how fast anything is — they assert the shape of the workload
+  and the branches of `judgeBudget` — so wall time was gating them on something they do not claim.
+  A generous timeout costs nothing on an idle machine and still catches a genuine hang.
+
+## M3b.1 — the guard reads `TabInfo.active` and `navigatedTabIds`, not an `activeTabIds` set
+
+- **Context:** PLAN.md §8.4's sketch of the decision's context lists an `activeTabIds` set.
+- **Decision:** `GuardContext` has no such field. It extends `KeepContext`, so whether a tab is
+  active comes from `TabInfo.active` and whether it got here by navigating from
+  `KeepContext.navigatedTabIds`.
+- **Why:** §8.4.3.2 keeps "the active tab the user navigated to a URL already open elsewhere", and
+  a tab opened from a link in the foreground is active too — keeping that one would close the tab
+  the user came from. The rule therefore needs *active and navigated*, both of which M1.4's
+  comparator already reads. A third set would be a second place where "active" is recorded, and the
+  guard's close could then disagree with the tab Declutter would have kept (TASKS.md §2.9).
+
+## M3b.1 — a tab opened in the background is closed without moving the focus
+
+- **Context:** §8.4.4's action after a close is "Attivala" or "Sposta e attiva", and §8.6 says a
+  middle-click or Ctrl+click duplicate must not pull the user anywhere.
+- **Decision:** when the tab being closed is the trigger, newly created and not active, the
+  resolution's `after` is `none` whatever the setting says. It applies only to that tab: closing an
+  *older* duplicate while a background tab survives still activates.
+- **Why:** §8.4's result has no "move without focusing" value, and inventing one would be worse
+  than `none` — "Sposta e attiva" exists to put the surviving tab under the user's eyes, so moving
+  it silently would shuffle the tab strip for someone who is looking elsewhere. The restriction to
+  the trigger matters because an event about an old tab is not a gesture the user made in the
+  background.
+
+## M3b.1 — `about:blank` is the only blank page "Ignora schede vuote" governs
+
+- **Context:** §8.3 documents "Ignora schede vuote" as switchable but notes it is "always true for
+  `chrome://newtab`". `classify` calls every entry of `BLANK_URLS` — `about:blank`, the new tab
+  pages, the home and private-browsing pages — `blank`.
+- **Decision:** a `blank` URL is closable only when the option is off *and* the canonical URL is
+  exactly `about:blank`. Every other blank URL is never closed, like `browser-internal`.
+- **Why:** reading the option as governing all of `BLANK_URLS` would make the note in §8.3 false;
+  reading it as governing none would make the option dead, since every blank URL also carries an
+  internal scheme. `about:blank` is the one of them that is a page the user can really have two of.
+
+## M3b.1 — an exempt tab is neither closed nor a reason to close another
+
+- **Context:** §8.6 exempts the tabs the extension itself opened or restored, for
+  `EXEMPTION_TTL_MS`, so that an "Annulla" is not immediately undone by the guard.
+- **Decision:** exemptions are filtered out of the candidate set as well as checked on the trigger,
+  and an exemption naming neither a tab id nor a URL matches nothing rather than everything.
+- **Why:** closing a new tab "because the restored one exists" undoes the undo just as surely as
+  closing the restored tab, so the exemption has to remove the tab from the comparison entirely.
+  Reading an empty exemption as matching everything would turn one malformed stored record into a
+  guard that has silently stopped working.
+
+## M3b.1 — the start-up grace period arrives as a deadline, not as a flag
+
+- **Context:** §8.6 gives session restore a `STARTUP_GRACE_MS` window in which no automatic close
+  may happen.
+- **Decision:** `GuardContext.autoClosesAllowedFrom` is an optional ms epoch; absent means no grace
+  period is running, and `now < autoClosesAllowedFrom` is the filter.
+- **Why:** the core is pure and takes its `now` injected (TASKS.md §2.4), so a deadline is
+  something it can decide about, while a boolean would have to be computed against a clock the
+  background owns. It also makes the expiry a unit test rather than a timer.
+
+## M3b.1 — "Duplica scheda" is recognized without asking which browser this is
+
+- **Context:** §8.6's heuristic for Chrome's own "Duplica scheda" is a newly created tab, opened by
+  one of the tabs it duplicates, sitting immediately after it, with its URL already set. The
+  setting behind it is Chrome-only and hidden on Firefox (PLAN.md §5.5).
+- **Decision:** `resolveDuplicate` applies the heuristic exactly when `allowIntentionalDuplicates`
+  is on, and "newly created" is `!navigatedTabIds.has(id)`. It never looks at the browser.
+- **Why:** TASKS.md §2.5 keeps browser checks out of `src/core/`, and the flag is enough: on
+  Firefox the UI never turns it on, so the branch is simply not taken. The `url !== ''` condition
+  is what separates a duplicated tab from one opened from a link, which arrives with an empty `url`
+  and its address in `pendingUrl`.
+
+## M3b.1 — one close per event, decided against the best candidate
+
+- **Context:** §8.4.2 requires exactly one tab closed per event, while a set can hold three or more
+  tabs on one page.
+- **Decision:** `resolveDuplicate` picks the best candidate with M1.4's `chooseTabToKeep`, compares
+  the trigger with that one tab, and closes the loser. The rest of the set is untouched.
+- **Why:** the comparator is a total order (its last rule is the tab id), so a pair always has a
+  winner and the function never has to reason about more than two tabs. Three tabs of one page
+  converge to one through the events that arrive on their own account, which is also what keeps a
+  single resolution small enough to be carried out without going stale.
