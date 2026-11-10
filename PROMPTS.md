@@ -19,7 +19,9 @@ sections your task lists under **Spec**. Grep TASKS.md for the ledger and the in
 CHECK FIRST, and report each item as pass or fail:
   1. The working tree is clean and you are on the branch plan/phase-{{TASK}}.
   2. `pnpm gates`, run once in the foreground, ends with every gate green (it runs the `gates`
-     array of phasekit.json in order; see AGENT-RULES.md, The gates).
+     array of phasekit.json in order; see AGENT-RULES.md, The gates). If this prompt opens
+     with an ALREADY VERIFIED note, phasekit measured exactly this tree green: report the item
+     as passed by that note and do not run the gates now.
   3. The target immediately before {{TASK}} in the `autoSequence` array of phasekit.json is
      ticked in the TASKS.md ledger AND has a matching commit in `git log`. (Skip this item if
      {{TASK}} is the first entry.) Use autoSequence, not ledger order: fix tasks (F.n) are
