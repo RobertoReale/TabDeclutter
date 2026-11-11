@@ -79,7 +79,7 @@ test.describe('in English', () => {
     await expect(items.first()).toHaveAttribute('aria-current', 'page');
   });
 
-  test('the other views and the settings are reachable and empty', async ({ panel }) => {
+  test('the other views are empty and the settings are reachable', async ({ panel }) => {
     const main = panel.getByRole('main');
     // Freshly opened tabs are all within the grace period, so nothing is due.
     await expect(main).toHaveText(message('en', 'declutterEmpty'));
@@ -90,8 +90,14 @@ test.describe('in English', () => {
     await panel.getByRole('button', { name: message('en', 'navArchive') }).click();
     await expect(main).toHaveText(message('en', 'archiveEmpty'));
 
+    // The gear leads to the settings, whose only sub-page so far is "Duplicate protection"
+    // (§8.3; the rest is M6.1). What that page contains is `guard-ui.spec.ts`'s business.
     await panel.getByRole('button', { name: message('en', 'navSettings') }).click();
-    await expect(main).toHaveText(message('en', 'navSettings'));
+    await expect(
+      panel.getByRole('heading', { name: message('en', 'settingsDuplicates') }),
+    ).toBeVisible();
+    // And it is not one of the three views: no navigation item claims the page.
+    await expect(panel.locator('.td-nav-item[aria-current="page"]')).toHaveCount(0);
   });
 
   test('the panel is titled and labelled with the extension name', async ({ panel }) => {

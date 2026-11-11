@@ -205,6 +205,21 @@ export function relativeAge(ms: number, language: string): string {
   return ages(language).format(-value, unit);
 }
 
+const clocks = reuse(
+  (language: string) => language,
+  (language: string) => new Intl.DateTimeFormat(language, { hour: 'numeric', minute: '2-digit' }),
+);
+
+/**
+ * A moment as a clock time: §4.2's "In pausa fino alle 15:40".
+ *
+ * A deadline minutes away is better read as a time than as a duration — the duration keeps
+ * changing while the panel sits open, and the time does not.
+ */
+export function timeText(at: number, language: string): string {
+  return clocks(language).format(at);
+}
+
 /**
  * The same duration as a plain quantity, for inside a sentence: "12 giorni", "3 ore".
  *

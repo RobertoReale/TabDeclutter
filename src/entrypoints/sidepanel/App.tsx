@@ -12,29 +12,27 @@
  * JSX children are text by construction.
  */
 
-import { useSignal } from '@preact/signals';
-
-import { panelLanguage, t } from '@/platform/i18n';
+import { panelLanguage, t, type MessageKey } from '@/platform/i18n';
+import { GuardChip } from './components/GuardChip';
 import { countsText } from './format';
 import { tabCount, windowCount } from './state/tabs';
+import type { ViewId } from './state/view';
+import { settingsOpen, showView, toggleSettings, view } from './state/view';
 import { ArchiveView } from './views/ArchiveView';
 import { DeclutterView } from './views/DeclutterView';
+import { SettingsView } from './views/SettingsView';
 
 /** The views the navigation of §4.2 switches between, in its order. */
-const VIEWS = [
+const VIEWS: readonly { readonly id: ViewId; readonly label: MessageKey }[] = [
   { id: 'declutter', label: 'navDeclutter' },
   { id: 'organize', label: 'navOrganize' },
   { id: 'archive', label: 'navArchive' },
-] as const;
-
-type ViewId = (typeof VIEWS)[number]['id'];
+];
 
 export function App() {
   // The panel's language is fixed for the document's lifetime, so it is read
   // once rather than on every render.
   const language = panelLanguage();
-  const view = useSignal<ViewId>('declutter');
-  const settingsOpen = useSignal(false);
 
   return (
     <div class="td-panel">
@@ -45,15 +43,15 @@ export function App() {
           <span class="td-counts" aria-live="polite">
             {countsText(tabCount.value, windowCount.value, t, language)}
           </span>
+          {/* §4.2 puts the protection's state on the counts line. */}
+          <GuardChip language={language} />
           <button
             type="button"
             class="td-icon-button"
             aria-label={t('navSettings')}
             title={t('navSettings')}
             aria-pressed={settingsOpen.value}
-            onClick={() => {
-              settingsOpen.value = !settingsOpen.value;
-            }}
+            onClick={toggleSettings}
           >
             {/* Decorative: the button already has its name from `aria-label`. */}
             <span aria-hidden="true">⚙</span>
@@ -70,8 +68,7 @@ export function App() {
             class="td-nav-item"
             aria-current={view.value === item.id && !settingsOpen.value ? 'page' : undefined}
             onClick={() => {
-              view.value = item.id;
-              settingsOpen.value = false;
+              showView(item.id);
             }}
           >
             {t(item.label)}
@@ -80,7 +77,11 @@ export function App() {
       </nav>
 
       <main class="td-main">
-        {settingsOpen.value ? <SettingsView /> : <View id={view.value} language={language} />}
+        {settingsOpen.value ? (
+          <SettingsView language={language} />
+        ) : (
+          <View id={view.value} language={language} />
+        )}
       </main>
     </div>
   );
@@ -95,9 +96,4 @@ function View({ id, language }: { id: ViewId; language: string }) {
     case 'archive':
       return <ArchiveView language={language} />;
   }
-}
-
-/** The settings are M6.1; the heading is here so the gear leads somewhere. */
-function SettingsView() {
-  return <h2 class="td-section-title">{t('navSettings')}</h2>;
 }

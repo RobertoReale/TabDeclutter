@@ -390,5 +390,273 @@
   "menuPauseRestart": {
     "message": "Until restart",
     "description": "Pause duration under 'Pause duplicate protection' in the menu on the extension icon: the pause lasts until the browser is restarted."
+  },
+  "guardChip": {
+    "message": "Duplicates: $1",
+    "description": "The duplicate-protection chip in the panel's header. $1 is the state: ON, Warnings only, OFF, or paused."
+  },
+  "guardStateOff": {
+    "message": "OFF",
+    "description": "State in the duplicate-protection chip: no live checks at all."
+  },
+  "guardStateWarn": {
+    "message": "Warnings only",
+    "description": "State in the duplicate-protection chip: duplicates are reported but never closed."
+  },
+  "guardStateAuto": {
+    "message": "ON",
+    "description": "State in the duplicate-protection chip: duplicates are closed automatically."
+  },
+  "guardStatePausedUntil": {
+    "message": "Paused until $1",
+    "description": "State in the duplicate-protection chip while it is paused. $1 is a clock time, such as 15:40."
+  },
+  "guardStatePausedRestart": {
+    "message": "Paused until restart",
+    "description": "State in the duplicate-protection chip while it is paused until the browser is restarted."
+  },
+  "guardMenuLabel": {
+    "message": "Duplicate protection",
+    "description": "Name of the menu that opens from the duplicate-protection chip, for screen readers."
+  },
+  "guardMenuResume": {
+    "message": "Resume now",
+    "description": "Menu item on the duplicate-protection chip that ends the pause immediately."
+  },
+  "guardMenuCloseAll": {
+    "message": "Close all duplicates now ($1)",
+    "description": "Menu item on the duplicate-protection chip that closes every duplicate tab. $1 is how many would close."
+  },
+  "guardMenuSettings": {
+    "message": "Duplicate settings…",
+    "description": "Menu item on the duplicate-protection chip that opens the duplicate settings."
+  },
+  "guardClosedTodayOne": {
+    "message": "$1 duplicate closed today",
+    "description": "Counter under the chip after the protection closes a tab, when the count is one. $1 is the number."
+  },
+  "guardClosedTodayOther": {
+    "message": "$1 duplicates closed today",
+    "description": "Counter under the chip after the protection closes a tab. $1 is the formatted number."
+  },
+  "guardNoticeSee": {
+    "message": "View",
+    "description": "Link beside the counter under the chip: opens the archive filtered to the duplicates closed automatically."
+  },
+  "settingsDuplicates": {
+    "message": "Duplicate protection",
+    "description": "Heading of the duplicate-protection settings page."
+  },
+  "guardGroupBehaviour": {
+    "message": "Behaviour",
+    "description": "Heading of the first group of duplicate settings: what happens when a duplicate is found."
+  },
+  "guardGroupPriority": {
+    "message": "Priority and exclusions",
+    "description": "Heading of the group of duplicate settings that decide which tab stays open."
+  },
+  "guardGroupPriorityHint": {
+    "message": "They decide which tab stays open.",
+    "description": "Explanation under the 'Priority and exclusions' heading."
+  },
+  "guardGroupMatch": {
+    "message": "URL comparison",
+    "description": "Heading of the group of duplicate settings that define when two URLs count as the same."
+  },
+  "guardGroupMatchHint": {
+    "message": "Defines what counts as a duplicate, in Declutter too.",
+    "description": "Explanation under the 'URL comparison' heading."
+  },
+  "guardGroupWhitelist": {
+    "message": "Exceptions",
+    "description": "Heading of the duplicate whitelist: the URLs for which duplicates are always allowed."
+  },
+  "guardGroupWhitelistHint": {
+    "message": "URLs for which duplicates are always allowed.",
+    "description": "Explanation under the 'Exceptions' heading."
+  },
+  "guardFieldMode": {
+    "message": "When a duplicate is detected",
+    "description": "Label of the setting that chooses what the protection does."
+  },
+  "guardModeOff": {
+    "message": "Do nothing",
+    "description": "Value of 'When a duplicate is detected': no live checks."
+  },
+  "guardModeWarn": {
+    "message": "Warn only",
+    "description": "Value of 'When a duplicate is detected': report the duplicate but never close it."
+  },
+  "guardModeAuto": {
+    "message": "Close automatically",
+    "description": "Value of 'When a duplicate is detected': close the duplicate tab."
+  },
+  "guardFieldAfter": {
+    "message": "On the remaining tab",
+    "description": "Label of the setting that chooses what happens to the tab that was kept."
+  },
+  "guardAfterNone": {
+    "message": "No action",
+    "description": "Value of 'On the remaining tab': leave it where it is."
+  },
+  "guardAfterActivate": {
+    "message": "Activate it",
+    "description": "Value of 'On the remaining tab': bring it to the foreground."
+  },
+  "guardAfterMoveActivate": {
+    "message": "Move it to the closed tab's position and activate it",
+    "description": "Value of 'On the remaining tab': move it where the closed tab was, then activate it."
+  },
+  "guardFieldScope": {
+    "message": "Where to look",
+    "description": "Label of the setting that chooses how far the protection looks for duplicates."
+  },
+  "guardScopeWindow": {
+    "message": "Same window",
+    "description": "Value of 'Where to look': only tabs of the same window are duplicates."
+  },
+  "guardScopeAllWindows": {
+    "message": "All windows",
+    "description": "Value of 'Where to look': tabs of any window are duplicates."
+  },
+  "guardFieldKeep": {
+    "message": "Which tab to keep",
+    "description": "Label of the setting that chooses which of two duplicates stays open."
+  },
+  "guardKeepOldest": {
+    "message": "The oldest",
+    "description": "Value of 'Which tab to keep': the one opened first."
+  },
+  "guardKeepNewest": {
+    "message": "The newest",
+    "description": "Value of 'Which tab to keep': the one opened last."
+  },
+  "guardKeepOldestReloaded": {
+    "message": "The oldest, reloaded with the new URL",
+    "description": "Value of 'Which tab to keep': keep the first tab but load the URL of the newer one in it."
+  },
+  "guardPreferHttps": {
+    "message": "Prefer the HTTPS tab, and treat http and https as equivalent",
+    "description": "Checkbox among the duplicate priorities."
+  },
+  "guardKeepPinned": {
+    "message": "Keep the pinned tab",
+    "description": "Checkbox among the duplicate priorities."
+  },
+  "guardKeepActive": {
+    "message": "Keep the active tab, the one you are working on",
+    "description": "Checkbox among the duplicate priorities."
+  },
+  "guardPreferActiveWindow": {
+    "message": "Prefer the active window, with the 'All windows' scope",
+    "description": "Checkbox among the duplicate priorities."
+  },
+  "guardIgnoreEmptyTabs": {
+    "message": "Ignore empty tabs, such as about:blank and the new tab page",
+    "description": "Checkbox among the duplicate exclusions."
+  },
+  "guardIgnoreAuthPages": {
+    "message": "Ignore sign-in and OAuth pages, so logins are not interrupted",
+    "description": "Checkbox among the duplicate exclusions."
+  },
+  "guardAllowIntentional": {
+    "message": "Allow duplicates made on purpose with 'Duplicate tab'",
+    "description": "Checkbox among the duplicate exclusions. Only shown where the browser lets the extension recognise that command."
+  },
+  "guardContainersSeparate": {
+    "message": "Treat containers as separate: the same URL in two containers is not a duplicate",
+    "description": "Checkbox among the duplicate exclusions. Only shown in browsers that have containers."
+  },
+  "matchIgnoreCase": {
+    "message": "Ignore upper and lower case in the URL",
+    "description": "Checkbox among the URL comparison options."
+  },
+  "matchIgnoreWww": {
+    "message": "Ignore www.",
+    "description": "Checkbox among the URL comparison options."
+  },
+  "matchIgnoreHash": {
+    "message": "Ignore #hash, except app routes such as #/page",
+    "description": "Checkbox among the URL comparison options."
+  },
+  "matchIgnoreTracking": {
+    "message": "Ignore tracking parameters, such as utm_source and fbclid",
+    "description": "Checkbox among the URL comparison options."
+  },
+  "matchIgnoreAllParams": {
+    "message": "Ignore every query parameter",
+    "description": "Checkbox among the URL comparison options."
+  },
+  "matchIgnorePath": {
+    "message": "Ignore the path, comparing the domain only",
+    "description": "Checkbox among the URL comparison options."
+  },
+  "guardWarnNewest": {
+    "message": "With 'The newest' the protection can close a tab you were working on.",
+    "description": "Warning shown in the settings when the tab kept is the newest one."
+  },
+  "guardWarnIgnorePath": {
+    "message": "Ignoring the path is very aggressive: two different pages of the same site count as duplicates.",
+    "description": "Warning shown in the settings when only the domain is compared."
+  },
+  "guardCoexistence": {
+    "message": "If you still use Duplicate Tabs Closer, turn it off to avoid conflicts.",
+    "description": "Note in the duplicate settings. The other extension cannot be detected, so this is only information."
+  },
+  "whitelistLabel": {
+    "message": "One pattern per line",
+    "description": "Label of the duplicate whitelist editor."
+  },
+  "whitelistHint": {
+    "message": "* stands for any text. A line between slashes, /…/, is a regular expression. The syntax is Duplicate Tabs Closer's, so you can paste the list you already use.",
+    "description": "Explanation under the duplicate whitelist editor's label."
+  },
+  "whitelistSave": {
+    "message": "Save",
+    "description": "Button that saves the duplicate whitelist as it has been typed."
+  },
+  "whitelistDefaults": {
+    "message": "Restore the defaults",
+    "description": "Button that puts this browser's default patterns back into the whitelist editor."
+  },
+  "whitelistImport": {
+    "message": "Import from Duplicate Tabs Closer",
+    "description": "Button that explains how to bring another extension's whitelist over."
+  },
+  "whitelistImportHow": {
+    "message": "An extension cannot read another extension's data. Open Duplicate Tabs Closer's options, copy its whitelist and paste it here.",
+    "description": "Explanation shown by the 'Import from Duplicate Tabs Closer' button."
+  },
+  "whitelistLine": {
+    "message": "Line $1",
+    "description": "Prefix of the feedback under the whitelist editor. $1 is the line number."
+  },
+  "whitelistIgnored": {
+    "message": "ignored, $1",
+    "description": "Feedback for a whitelist line that does not compile. $1 is the reason."
+  },
+  "whitelistMatchesNone": {
+    "message": "matches no open tab",
+    "description": "Feedback for a whitelist line that currently matches nothing."
+  },
+  "whitelistMatchesOne": {
+    "message": "matches $1 open tab",
+    "description": "Feedback for a whitelist line that matches exactly one tab. $1 is the number."
+  },
+  "whitelistMatchesOther": {
+    "message": "matches $1 open tabs",
+    "description": "Feedback for a whitelist line and how many open tabs it matches. $1 is the formatted number."
+  },
+  "whitelistErrorTooLong": {
+    "message": "too long: 500 characters at most",
+    "description": "Why a whitelist line was ignored."
+  },
+  "whitelistErrorTooManyWildcards": {
+    "message": "too many *: five at most",
+    "description": "Why a whitelist line was ignored."
+  },
+  "whitelistErrorInvalidRegex": {
+    "message": "not a valid regular expression",
+    "description": "Why a whitelist line was ignored."
   }
 }
