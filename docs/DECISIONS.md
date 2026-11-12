@@ -2322,3 +2322,93 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   for the two declared commands, `tests/ext/commands.test.ts` for each command reaching its gesture,
   `tests/ext/menus.test.ts` for the six items, their titles, their parent and their `contexts`, and
   `tests/ext/guard.test.ts` for what each gesture does to the tabs.
+
+## M3b.4 — the panel changes the guard by writing settings, and sweeps with its own hands
+
+- **Context:** the chip of §4.2 changes the mode, pauses the protection and offers §8.7's "Chiudi
+  tutti i duplicati", all of which the background also does — and §5.2 forbids the panel to send the
+  background a message.
+- **Decision:** `state/guard.ts` writes `local:settings` for a mode or an option, writes
+  `session:guardState` for a pause, and performs the sweep itself with `resolveAllDuplicates` plus
+  `closeTabs`. Every write is read-change-write (`readSettings()` at the moment of the change), never
+  a snapshot the panel took when it opened. The chip's state comes back from storage rather than
+  from a local copy.
+- **Why:** §5.2 is binding, and the background already drops its cache on `storage.onChanged`, so a
+  write is the message. Read-change-write because the background may have changed `pausedUntil` or
+  `lastAutoClosedId` since the panel loaded, and a whole-object write would undo it. The sweep is
+  `core/duplicate-guard.ts`'s own pure decision, so the count the menu shows and the closes it makes
+  are one definition of "duplicate" (invariant 9).
+
+## M3b.4 — the panel's sweep has no navigation index, and its pause sets no alarm
+
+- **Context:** the background keeps a `navigatedTabIds` set and creates a `guard-resume` alarm; the
+  panel has neither.
+- **Decision:** the panel's `duplicateSweeps` passes no `navigatedTabIds`, so the one §8.4.3 rule
+  that softens there is "keep the tab the user navigated"; and `pauseGuardFor` creates no alarm.
+- **Why:** the index is built from `onUpdated` over the session and a panel that opened a second ago
+  cannot reconstruct it — inventing an empty set is honest, while guessing is not, and the rule only
+  decides which of two identical tabs survives. No alarm because every guard decision compares
+  `pausedUntil` with the clock: a pause that nothing announces still ends on time, and the panel
+  cannot be relied on to be open when it does. "Fino al riavvio" needs no alarm at all, since
+  `storage.session` dies with the browser.
+
+## M3b.4 — "until restart" is a deadline further out than a day, not a flag
+
+- **Context:** the chip has to say "In pausa fino alle 15:40" for a timed pause and "In pausa fino al
+  riavvio" for the other, but `GuardState` stores one `pausedUntil` for both (M3b.2's decision).
+- **Decision:** `guardStateText` reads any deadline more than 24 h out as "until restart"
+  (`PAUSE_UNTIL_RESTART_FROM_MS`), and anything closer as a time of day.
+- **Why:** the alternative is a second field and a storage migration this task does not own. The two
+  cases cannot be confused: the longest pause the UI offers is one hour, so a deadline a year out can
+  only be the restart one, and a stale value from a future version still reads as a pause rather than
+  as a wrong clock time.
+
+## M3b.4 — the whitelist defaults are chosen by `sidebarAction`, not by the containers capability
+
+- **Context:** §8.3 wants the list pre-filled with the pages the running browser has
+  (`chrome://*`, `chrome-extension://*` on one side, `about:*`, `moz-extension://*` on the other),
+  and invariant 5 forbids asking for the browser's name.
+- **Decision:** `platform/whitelist.ts`'s `defaultWhitelist` branches on `capabilities.sidebarAction`.
+- **Why:** `sidebarAction` is the one capability that is exactly "this is the Firefox build" and needs
+  no permission: `containers` would have been the obvious reading of "Firefox", but it is detected
+  through `contextualIdentities`, which PLAN.md §5.4 does not grant — so a Firefox without that
+  permission would have been handed Chrome's list of pages that do not exist in it.
+
+## M3b.4 — the options write themselves, the whitelist waits for a gesture
+
+- **Context:** §8.3 is one page holding switches and a free-text list, and nothing in it says when
+  either is saved.
+- **Decision:** every switch and every `<select>` writes on change, and the page has no "Salva" of
+  its own; the whitelist keeps its draft in the editor and saves on blur or on "Salva", with live
+  validation and the "matches N open tabs" preview running on the draft all along.
+- **Why:** a settings object is small and `storage.local` is cheap, so a switch that needs confirming
+  is a switch that gets forgotten. A half-typed pattern is not a choice yet, though: saving per
+  keystroke would hand the guard `https://exam` as a standing instruction and write `local:` once per
+  character. Validating the draft rather than the stored list is what lets the user see a pattern is
+  wrong before relying on it.
+
+## M3b.4 — the mode is a menu of three in the chip, a `<select>` in the settings
+
+- **Context:** the same four choices (mode, after-action, scope, which tab to keep) are offered in
+  §4.2's chip menu and in §8.3's page.
+- **Decision:** the chip's menu is `role="menu"` with the three modes as `menuitemradio` in a group,
+  the tick drawn with a `::before` rather than with colour alone; the settings page uses a labelled
+  `<select>` per choice, with `visibleGuardToggles(caps)` deciding which checkboxes exist at all.
+- **Why:** a mode is one choice between three and `menuitemradio` is the role that says so, which a
+  row of switches would not. In the page, four `<select>`s read as four questions in a column where
+  twelve radio buttons would read as a wall; and an option the running browser cannot honour is left
+  out entirely (§5.5), because a switch that does nothing is worse than no switch.
+- **Not verified by hand:** that a screen reader announces the menu the way the roles promise.
+  `tests/e2e/guard-ui.spec.ts` covers the roles, the names, `aria-checked` moving with the mode and
+  Escape dismissing the menu, which is everything the markup can be held to; the announcement itself
+  is the reader's.
+
+## M3b.4 — "Importa da Duplicate Tabs Closer" explains instead of importing
+
+- **Context:** §8.3 asks for an import from Duplicate Tabs Closer and §8.6 for coexistence with it.
+- **Decision:** the button expands an explanation of how to copy the list across, and the note about
+  turning the other extension off is always visible rather than conditional.
+- **Why:** an extension cannot read another extension's storage, on either browser, so an "Import"
+  that did anything would be a lie; the whitelist syntax is the same one, which is what makes a paste
+  enough. The note is unconditional because the presence of another extension cannot be detected
+  either — it can only be said, once, where the duplicate settings are.

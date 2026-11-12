@@ -24,6 +24,7 @@ import { formatCount } from '../format';
 import { rowStopId, sectionStopId } from '../keyboard';
 import type { DeclutterSection, SectionId } from '../sections';
 import { requestClose } from '../state/commands';
+import { closeAllDuplicates, duplicateCount } from '../state/guard';
 import { allSelected, deselectTabs, selectTabs } from '../state/selection';
 import { TabRow } from './TabRow';
 
@@ -83,17 +84,7 @@ export function Section({
            * and `Del` on the header doing from the keyboard what they do.
            */}
           <SelectAllButton tabIds={tabIds} />
-          <button
-            type="button"
-            class="td-action td-section-action"
-            tabIndex={-1}
-            onClick={(event) => {
-              event.stopPropagation();
-              requestClose(tabIds);
-            }}
-          >
-            {t('sectionCloseAll', formatCount(tabIds.length, language))}
-          </button>
+          <CloseAllButton section={section} tabIds={tabIds} language={language} />
         </span>
       </div>
 
@@ -109,6 +100,45 @@ export function Section({
           />
         ))}
     </div>
+  );
+}
+
+/**
+ * §4.3's "Chiudi tutti (N)".
+ *
+ * In the "Duplicati" section this is §8.7's action, not a close of the rows as listed: the
+ * guard's own decision is recomputed, so the priorities are the ones in the settings and the
+ * archive records the entries as duplicates with the tab each one lost to. The two close the
+ * same tabs — the section lists exactly the ones the keep rules did not choose — but only §8.7's
+ * path says *why* in the archive, which is what makes those entries findable later (§4.5).
+ *
+ * Its own component so that only the duplicates section subscribes to the sweep.
+ */
+function CloseAllButton({
+  section,
+  tabIds,
+  language,
+}: {
+  section: DeclutterSection;
+  tabIds: readonly number[];
+  language: string;
+}) {
+  const duplicates = section.id === 'duplicates';
+  const count = duplicates ? duplicateCount.value : tabIds.length;
+
+  return (
+    <button
+      type="button"
+      class="td-action td-section-action"
+      tabIndex={-1}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (duplicates) closeAllDuplicates();
+        else requestClose(tabIds);
+      }}
+    >
+      {t('sectionCloseAll', formatCount(count, language))}
+    </button>
   );
 }
 
