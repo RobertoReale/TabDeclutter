@@ -2607,3 +2607,95 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Why:** a branch no test can reach is not coverage that was lost, it is a branch that should not
   exist; writing it away keeps the gate honest and keeps a comparison out of the loops that have to
   finish inside 50 ms. `as` is used rather than `!` because `tseslint` bans the non-null assertion.
+
+## M4.2 — the groups live in `src/platform/groups.ts`, and `attempt()` is shared from `tabs.ts`
+
+- **Context:** PLAN.md §5.3 lists `src/platform/` as "thin, typed wrappers" without naming a file per
+  API, and the "already gone is not an error" wrapper of §8.6 was private to `tabs.ts`.
+- **Decision:** applying and undoing the groups is one module, `src/platform/groups.ts`, with its own
+  injected `GroupsApi`; `Attempt<T>` and `attempt()` became exports of `tabs.ts` instead of being
+  copied.
+- **Why:** `tabs.ts` is already the largest file in `src/platform/` and these calls (`tabs.group`,
+  `tabs.ungroup`, `tabGroups.*`) are the only ones a browser without native groups does not have, so
+  they are easier to keep behind one capability check on their own. `attempt()` is shared because
+  §7.4 asks groups to survive "a tab closed in the meantime", which is the same rule §8.6 states for
+  closing: two copies could drift apart.
+
+## M4.2 — the snapshot is read from the browser, and covers every tab of the affected windows
+
+- **Context:** §7.4 asks for a `{tabId, windowId, index, groupId}` snapshot before applying, and the
+  preview that produced the proposal may have been on screen for minutes.
+- **Decision:** `applyGroups` queries the tabs itself and snapshots every live tab of every window a
+  group lands in — not only the tabs named in the proposal — and records `pinned` next to `groupId`,
+  plus the title, colour and collapsed state of the group each tab was in.
+- **Why:** the indexes undo has to put back are the ones the tabs have the instant before they move,
+  so taking them from the proposal would restore an order that no longer existed. Whole windows,
+  because sorting by group slides tabs that are in no group at all. `pinned`, because grouping a
+  pinned tab unpins it in both browsers: without it, undo would leave the tab unpinned after the
+  user had turned "Lascia fuori le schede fissate" off.
+
+## M4.2 — `skipped` counts only what the browser lost, and the message is a plural key pair
+
+- **Context:** §7.4 wants partial failures "reported in one short message", and tabs also stay out of
+  a group for two reasons that are not failures at all (pinned, already in one of the user's groups).
+- **Decision:** `skipped` counts only the tabs the browser could not group — closed, moved to another
+  window, or refused — and the options' exclusions are silent. `applyMessage` returns the
+  `organizeSkippedOne` / `organizeSkippedOther` pair with the count, or `null`, and formats nothing.
+- **Why:** a message saying four tabs "could not be grouped" when the user asked for the pinned ones
+  to be left alone would read as a bug. One message and not one per group, because a window where a
+  dozen tabs went while the preview was open would otherwise raise a dozen toasts for one gesture.
+  The keys come back unformatted because invariant 11 puts the plural and the number in the panel's
+  language, through `counted()`.
+
+## M4.2 — undo runs in four passes, and a grouped tab is only ever moved by `tabGroups.move`
+
+- **Context:** §4.4.5 wants "Annulla" to put the window back as it was, and the state to put back
+  mixes membership, pinned tabs and indexes, which the browser couples: a tab cannot be regrouped
+  while it is in another group, and moving a grouped tab to an index outside its group takes it out.
+- **Decision:** ungroup everything we made, pin again what we unpinned, restore the membership, then
+  restore the order last — walking each window in ascending index and moving a run of tabs that
+  shared a group with one `tabGroups.move`, never a grouped tab on its own.
+- **Why:** each pass needs the one before it to have happened, and the order restore has to be last
+  because the earlier passes move tabs themselves. Ascending index with a clamp at the end of the
+  strip is what makes the result right even when a tab was closed in the meantime: the tabs that are
+  left come out in the order they were in. Moving whole groups is the only way the restore cannot
+  break a group apart.
+
+## M4.2 — a group the ungroup emptied is found by title, then built again from the snapshot
+
+- **Context:** §5.5 says a group id does not survive a restart on Firefox and that `sessions` never
+  reports one, so undo "uses the group title as a fallback"; and neither browser has a
+  `tabGroups.create`.
+- **Decision:** undo puts a tab back by group id when that group still exists, otherwise into a group
+  of exactly the same title (the tab's own window first), otherwise into a group created by grouping
+  the tabs and then naming it with the title, colour and collapsed state from the snapshot.
+- **Why:** taking a tab out of one of the user's groups can leave it empty, and both browsers delete
+  an empty group, so "restore the membership" has to be able to mean "build that group again" — which
+  is only possible because the snapshot carries what the group looked like. The title is compared
+  exactly rather than through `tabGroups.query({ title })`, which Chrome treats as a pattern.
+
+## M4.2 — sorting by group places only the groups we made, after the pinned tabs
+
+- **Context:** §4.4.4 offers "Ordina le schede nella finestra per gruppo" without saying what happens
+  to everything else in the window.
+- **Decision:** the groups just created are moved to the head of their window in the proposal's
+  order, starting after the tabs that are still pinned; the user's own groups and the ungrouped tabs
+  are never moved and only slide down.
+- **Why:** the proposal's order is the order the preview showed, so the strip ends up looking like the
+  list the user accepted. Pinned tabs cannot be preceded by anything, so the cursor starts after
+  them — counting the ones that are *still* pinned, since a pinned tab the user chose to include is
+  not pinned any more once it is in a group. Leaving everything else alone is what keeps §4.4's
+  promise that the user's groups are not touched.
+
+## M4.2 — what undo does not promise when the user changes things in between
+
+- **Context:** undo works from a snapshot, and between the apply and the "Annulla" the user can group
+  tabs themselves, and "include the user's groups" can take a tab out of a group it then rejoins.
+- **Decision:** two gaps are accepted rather than papered over. A tab put back into a group that
+  still exists is appended to it, not returned to its old slot inside it. A tab that was ungrouped in
+  the snapshot and is in a group the user has made since is still moved back to its index, which the
+  browser may read as taking it out of that group.
+- **Why:** both would need state the browsers do not offer (an index inside a group; a way to move a
+  tab without leaving its group), and both only appear after the user has edited the very thing being
+  restored. The order and the groups are restored exactly in the case §4.4.5 is about, which is the
+  user undoing what they just applied.

@@ -205,6 +205,8 @@ describe('the message catalogues', () => {
       'navOrganize',
       'navSettings',
       'organizeEmpty',
+      'organizeSkippedOne',
+      'organizeSkippedOther',
       'panelCounts',
       'reasonAuth',
       'reasonBlank',
