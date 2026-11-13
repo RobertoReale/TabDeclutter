@@ -156,10 +156,15 @@ function isNewlyCreated(tab: TabInfo, ctx: GuardContext): boolean {
 /**
  * Chrome's own "Duplicate tab", which the user asked for on purpose (PLAN.md §8.6).
  *
- * The heuristic is that table's, verbatim: a tab that has just been created, whose opener
- * is one of the tabs it duplicates, which sits immediately after that opener, and which
- * already had its URL at creation — a tab opened from a link arrives with a `pendingUrl`
- * and an empty `url` instead, so the last condition is what tells the two apart.
+ * PLAN.md §8.6 asks for that table's heuristic *verified empirically*, and one of its
+ * conditions did not survive the browser (see `docs/DECISIONS.md`, M3b.5): Chrome gives the
+ * copy the `openerTabId` of whichever tab was **active** when the command ran, not of the
+ * tab being duplicated, so requiring the opener to be the tab it duplicates misses every
+ * duplicate of a background tab. The three signals that did hold are kept: the copy has an
+ * opener at all — a tab an extension made with `tabs.create` has none — it sits immediately
+ * after the tab it came from, and it already carries its URL. A tab opened from a link
+ * arrives with a `pendingUrl` and an empty `url` instead, so that last condition is what
+ * tells those two apart.
  *
  * Firefox has no such command and reports openers differently (PLAN.md §5.5), which is why
  * the setting behind this is Chrome-only and hidden there; the core only honours the flag
@@ -175,8 +180,9 @@ function isIntentionalDuplicate(
   if (trigger.url === '') return false;
   if (trigger.openerTabId === undefined) return false;
 
-  const opener = sameKey.find((tab) => tab.id === trigger.openerTabId);
-  return opener !== undefined && trigger.index === opener.index + 1;
+  return sameKey.some(
+    (tab) => tab.windowId === trigger.windowId && tab.index === trigger.index - 1,
+  );
 }
 
 /**

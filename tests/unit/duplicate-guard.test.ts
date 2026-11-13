@@ -253,7 +253,7 @@ describe('the exit filters of a duplicate close (PLAN.md §8.4.1, §8.6)', () =>
 });
 
 describe('Chrome\'s own "Duplica scheda" (PLAN.md §8.6)', () => {
-  /** The heuristic's own case: created from its opener, just after it, URL already set. */
+  /** The heuristic's own case: an opener, right after the tab it copies, URL already set. */
   const DUPLICATED = tab(2, { index: 1, url: PAGE, openerTabId: 1 });
 
   it('is left alone while the option allows intentional duplicates', () => {
@@ -265,19 +265,34 @@ describe('Chrome\'s own "Duplica scheda" (PLAN.md §8.6)', () => {
     expect(resolveDuplicate(DUPLICATED, [OLD], ctx)?.closeTabId).toBe(2);
   });
 
-  it('is not recognized when the new tab is not next to its opener', () => {
+  it('is recognized whatever opener Chrome reports for the copy', () => {
+    // Measured on stable Chrome: the copy's `openerTabId` is the tab that was active when
+    // the command ran, not the tab it copies (`docs/DECISIONS.md`, M3b.5).
+    const fromElsewhere = tab(2, { index: 1, url: PAGE, openerTabId: 99 });
+    expect(resolveDuplicate(fromElsewhere, [OLD], ctxOf())).toBeNull();
+  });
+
+  it('is not recognized when the new tab is not next to the tab it copies', () => {
     const elsewhere = tab(2, { index: 4, url: PAGE, openerTabId: 1 });
     expect(resolveDuplicate(elsewhere, [OLD], ctxOf())?.closeTabId).toBe(2);
   });
 
-  it('is not recognized when the opener is not showing that page', () => {
+  it('is not recognized when the tab before it is showing another page', () => {
     const other = tab(3, { url: 'https://example.com/other', index: 0 });
-    const fromOther = tab(2, { index: 1, url: PAGE, openerTabId: 3 });
-    expect(resolveDuplicate(fromOther, [OLD, other], ctxOf())?.closeTabId).toBe(2);
+    const far = tab(1, { index: 5 });
+    expect(resolveDuplicate(DUPLICATED, [far, other], ctxOf())?.closeTabId).toBe(2);
   });
 
-  it('is not recognized without an opener at all', () => {
-    expect(resolveDuplicate(tab(2, { index: 1, url: PAGE }), [OLD], ctxOf())?.closeTabId).toBe(2);
+  it('is not recognized when the tab it would copy is in another window', () => {
+    const elsewhere = tab(2, { index: 1, url: PAGE, windowId: 2, openerTabId: 1 });
+    expect(resolveDuplicate(elsewhere, [OLD], ctxOf())?.closeTabId).toBe(2);
+  });
+
+  it('is not recognized without an opener, which is how an extension-made tab arrives', () => {
+    // `tabs.create({ url })` also lands with its URL already set, and the panel opens tabs
+    // that way: no opener is what keeps those under the guard (PLAN.md §8.6).
+    const made = tab(2, { index: 1, url: PAGE });
+    expect(resolveDuplicate(made, [OLD], ctxOf())?.closeTabId).toBe(2);
   });
 
   it('is not recognized for a tab opened from a link, which arrives without its URL', () => {
