@@ -115,6 +115,8 @@ interface GuardIndex {
   rename(from: number, to: number): void;
   /** PLAN.md §8.4.3.2: the tabs that reached their URL by navigating to it. */
   readonly navigated: Set<number>;
+  /** The URL the index last filed the tab under: what the browser last said about it. */
+  knownUrl(tabId: number): string | undefined;
   /** Tabs with no address yet, waiting for their first `onUpdated` (PLAN.md §8.2). */
   readonly awaiting: Set<number>;
 }
@@ -122,6 +124,7 @@ interface GuardIndex {
 function createIndex(tabs: readonly TabInfo[], keyOptions: DuplicateOptions): GuardIndex {
   const byKey = new Map<string, Set<number>>();
   const keys = new Map<number, string>();
+  const urls = new Map<number, string>();
   const navigated = new Set<number>();
   const awaiting = new Set<number>();
 
@@ -150,21 +153,25 @@ function createIndex(tabs: readonly TabInfo[], keyOptions: DuplicateOptions): Gu
   function put(tab: TabInfo): void {
     unlink(tab.id);
     link(tab.id, keyOf(tab));
+    urls.set(tab.id, tabUrl(tab));
   }
 
   function drop(tabId: number): void {
     unlink(tabId);
+    urls.delete(tabId);
     navigated.delete(tabId);
     awaiting.delete(tabId);
   }
 
   function rename(from: number, to: number): void {
     const key = keys.get(from);
+    const url = urls.get(from);
     const wasNavigated = navigated.has(from);
     drop(from);
     if (key === undefined) return;
     unlink(to);
     link(to, key);
+    if (url !== undefined) urls.set(to, url);
     if (wasNavigated) navigated.add(to);
   }
 
@@ -174,7 +181,15 @@ function createIndex(tabs: readonly TabInfo[], keyOptions: DuplicateOptions): Gu
     return [...found].filter((tabId) => tabId !== tab.id);
   }
 
-  const index: GuardIndex = { bucket, put, drop, rename, navigated, awaiting };
+  const index: GuardIndex = {
+    bucket,
+    put,
+    drop,
+    rename,
+    navigated,
+    awaiting,
+    knownUrl: (tabId) => urls.get(tabId),
+  };
   for (const tab of tabs) {
     index.put(tab);
     // A tab found by `tabs.query` rather than watched into existence has had its URL for as
@@ -401,6 +416,9 @@ export function registerGuard(options: GuardOptions = {}): Guard {
    * the browser never says: whether the tab reached this URL by navigating (§8.4.3.2).
    */
   function remember(current: GuardIndex, tab: TabInfo, origin: Origin, blank: boolean): void {
+    const url = tabUrl(tab);
+    // What the browser said about this tab last time, read before `put` overwrites it.
+    const before = current.knownUrl(tab.id);
     current.put(tab);
 
     // Firefox has no `pendingUrl` (PLAN.md §5.5): every tab is created on `about:blank` and
@@ -411,8 +429,15 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     if (blank) current.awaiting.add(tab.id);
     else current.awaiting.delete(tab.id);
 
+    // An `onUpdated` carrying the URL the tab already had is the same thing one step later:
+    // the load of the page it was created on finishing. Chrome reports a duplicated tab
+    // that way — created with its URL, then `loading` and `complete` on that same URL — and
+    // counting it as a navigation would both lose §8.6's exemption and, if the copy is the
+    // active tab, make rule 2 close the tab it was copied from (`docs/DECISIONS.md`, M3b.5).
+    const moved = url !== before;
+
     if (origin === 'created') current.navigated.delete(tab.id);
-    else if (origin === 'navigated' && !arriving) current.navigated.add(tab.id);
+    else if (origin === 'navigated' && !arriving && moved) current.navigated.add(tab.id);
   }
 
   /** §8.4's decision, over tabs read now and the session state read now. */

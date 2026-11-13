@@ -2412,3 +2412,95 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   that did anything would be a lie; the whitelist syntax is the same one, which is what makes a paste
   enough. The note is unconditional because the presence of another extension cannot be detected
   either — it can only be said, once, where the duplicate settings are.
+
+## M3b.5 — §8.6's opener signal did not survive the browser: adjacency and a URL at creation did
+
+- **Context:** PLAN.md §8.6 describes Chrome's own "Duplicate tab" as a copy whose `openerTabId` is
+  the tab it copies, sitting right after it, arriving with its URL already set — and asks for that
+  heuristic to be **verified empirically**, with instructions to record it here if a signal turns out
+  to be unreliable.
+- **Decision:** `isIntentionalDuplicate` no longer asks *which* tab the opener is. It asks that the
+  copy have an opener at all, that it sit immediately after a tab on the same key in the same window,
+  and that it already carry its URL.
+- **Why:** measured on stable Chrome through `tabs.duplicate`, the copy's `openerTabId` is whichever
+  tab was **active** when the command ran, not the tab being duplicated — so duplicating a background
+  tab from the tab strip produced an opener pointing somewhere else entirely, and the exemption missed
+  the gesture it exists for. The three remaining signals still tell the two gestures apart: a tab an
+  extension makes with `tabs.create` has no opener at all, which is what keeps every tab this suite
+  and the panel open under the guard; a tab opened from a link arrives with a `pendingUrl` and an
+  empty `url`, which is what the URL condition excludes; and adjacency is Chrome's own placement
+  (`index = source.index + 1`). Firefox has no such command and reports openers differently
+  (§5.5), which is why the setting behind this is Chrome-only and hidden there — the core only honours
+  the flag and never asks which browser it is on (invariant §2.5).
+
+## M3b.5 — an `onUpdated` carrying the URL the tab already had is not a navigation
+
+- **Context:** the guard's index marks a tab as "navigated here" on `onUpdated(changeInfo.url)`, which
+  keep rule 2 (§8.4.3.2) and §8.6's exemption both read. Chrome announces a duplicated tab three
+  times: `onCreated` with the URL already set, then `onUpdated` `loading` and `complete` on that same
+  URL.
+- **Decision:** the index remembers the URL it last filed each tab under (`knownUrl`), and
+  `onUpdated` only sets the navigation flag when the URL actually changed.
+- **Why:** without it, the second event turned the copy into a tab that "navigated" to the page, which
+  cost it the §8.6 exemption and — when the copy was the active tab, which it is when you duplicate
+  the tab you are looking at — made keep rule 2 close **the tab it was copied from**. The duplicated
+  deep page survived and the original went, which is the worst possible reading of the gesture. A real
+  navigation always changes the URL, so nothing is lost by requiring it.
+
+## M3b.5 — §14's 300 ms is measured from `tabs.onCreated`, which is what "from event to close" says
+
+- **Context:** PLAN.md §14 budgets the guard at "from event to close: ≤ 50 ms with the worker running,
+  ≤ 300 ms when it has to be woken up", and §8's acceptance point says "the second opening closes in
+  under 300 ms".
+- **Decision:** the E2E measures the interval between `tabs.onCreated` for the duplicate and
+  `tabs.onRemoved` for it (`reaction` in `tests/e2e/guard.spec.ts`), against the unchanged 300 ms.
+- **Why:** timing from the `tabs.create` call instead adds work that is not the extension's and not in
+  the budget. Measured on this machine, inside Playwright's persistent context: 57–174 ms pass between
+  `tabs.create` and the browser's own `onCreated`, before the worker is handed anything. The guard's
+  own share, read from marks the worker wrote, is 92 ms to the first settings-and-whitelist read that
+  wakes it, then 5 ms to the index, 5 ms to `tabs.get` and 20 ms to the decision. A control run with
+  the source changes stashed measured 539/531/261/206 ms end to end, two of them over budget — so the
+  overshoot was the harness all along and raising the number would have hidden the one quantity §14
+  actually names. The budget stands as written.
+
+## M3b.5 — the mode, the settings and the pause are driven through storage; everything else by hand
+
+- **Context:** the duplicate E2E has to put the guard in "Chiudi automaticamente", change §8.3's
+  options, and pause it.
+- **Decision:** those three go through `local:settings` and `session:guardState`; every other step —
+  the tabs, the Ctrl+click, `tabs.duplicate`, the whitelist editor, the rows, the bar and the toast —
+  is the real gesture.
+- **Why:** §5.2 forbids the panel to message the background, so writing `local:settings` *is* what the
+  chip's menu and the options page do, and `guard-ui.spec.ts` is what proves the UI writes it. A pause
+  is only ever started by a keyboard command or the icon's context menu, neither of which Playwright
+  can fire; the deadline in `storage.session` is the whole of a pause (M3b.2's decision), and
+  `tests/ext/` covers the gestures that set it.
+
+## M3b.5 — the login flow is served locally and matched by path, with the provider on `localhost`
+
+- **Context:** §8.6 exempts auth pages, and M3b.5 asks for a multi-step login across hosts — site →
+  identity provider → site — proven on both browsers. Invariant 1 forbids reaching the network.
+- **Decision:** the suites serve the flow themselves and match it by path (`/sso/login`,
+  `/oauth2/authorize`, `/auth/callback`, all tokens of `AUTH_PATH_TOKENS`), with the site on
+  `127.0.0.1` and the provider on `localhost` — the same server, one more socket on `::1`, the same
+  port.
+- **Why:** `classify.ts` recognises an auth page by host *or* by path, and the hosts of `AUTH_HOSTS`
+  are real ones nothing local can answer for. `localhost` and `127.0.0.1` are two different hosts to
+  the browser and to `duplicateKey`, which is what makes the flow genuinely cross-origin without any
+  name resolution; the second socket is there because Gecko and Chrome may resolve `localhost` to
+  `::1`, and a machine with no IPv6 simply has nothing to bind and nothing to resolve.
+
+## M3b.5 — Chrome's "Duplicate tab" is tested on Chromium only; Firefox gets the smoke and the login
+
+- **Context:** M3b.5 asks for §8.6's "the duplicated tab is never closed" on the real browser command,
+  and for the login flow on Chromium and Firefox.
+- **Decision:** `tests/e2e/guard.spec.ts` drives `tabs.duplicate` on both gestures (a background tab
+  and the tab in front, a home page and a deep page with a long query string, ten seconds each);
+  `tests/e2e-firefox/guard.spec.ts` covers the guard closing a second tab on one URL and the login
+  flow in one tab and in two.
+- **Why:** `tabs.duplicate` is a Chromium API and the command behind it does not exist in Firefox, so
+  there is no gesture there to exempt — which is also why `allowIntentionalDuplicates` is hidden on
+  that browser. What can differ on Gecko is what the guard reads: `onCreated` carries no URL there, so
+  the decision rests on the `onUpdated` that follows, and that is what the smoke proves. Both suites
+  end on a control — a duplicate with no login in it, which is closed — so a test that passed because
+  the guard was off cannot pass quietly.
