@@ -2504,3 +2504,106 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   the decision rests on the `onUpdated` that follows, and that is what the smoke proves. Both suites
   end on a control — a duplicate with no login in it, which is closed — so a test that passed because
   the guard was off cannot pass quietly.
+
+## M4.1 — "Altro" is the proposal's `ungrouped` ids, not a ninth group
+
+- **Context:** PLAN.md §7.2.6 names an "Altro" for the tabs no group earned, and §7.1/§7.2 cap a
+  window at eight groups.
+- **Decision:** `GroupProposal` carries `groups` and `ungrouped: readonly number[]`; nothing named
+  "Altro" is ever proposed, and every tab appears in exactly one of the two.
+- **Why:** a group made of leftovers would be created in the browser like any other and would have to
+  be named in two locales; the panel can label the remainder itself, and the invariant that matters
+  ("every eligible tab accounted for exactly once") is then checkable in one assertion.
+
+## M4.1 — the clustering knobs are `ClusterOptions`, not new `Settings` fields
+
+- **Context:** M4.1 asks for a configurable minimum of tabs per site and a ~0.25 threshold, and
+  `Settings` is the stored, user-facing shape.
+- **Decision:** `ClusterOptions` (all fields optional, `DEFAULT_CLUSTER_OPTIONS` beside it) is passed
+  to `groupBySite`, `groupByTopic` and `proposeGroups`; `Settings` is untouched.
+- **Why:** PLAN.md §10 does not list any of these in `local:settings`, and TASKS.md §2.4 wants the
+  thresholds injected so `src/core/` stays pure. A later task that does expose one of them in the UI
+  can map a setting onto the option without changing the core's signature.
+
+## M4.1 — a site is its registrable domain, and one map answers for its name
+
+- **Context:** §7.1 wants "readable names from a map", and tabs include `localhost`, bare IPs and
+  `about:` pages that have no registrable domain at all.
+- **Decision:** `siteKey` is `tldts`' registrable domain, falling back to the display host and then to
+  `''`; `SITE_NAMES` is keyed by domain *or* by bare brand label, so `amazon.it` and `amazon.co.uk`
+  both resolve through the label `amazon`; an unknown key becomes its label capitalised.
+- **Why:** one map and one fallback keep the name of a site a pure function of the key, which is what
+  makes the group titles stable across windows and runs. Keying by label as well covers a brand's
+  country suffixes without a row per country.
+
+## M4.1 — TF-IDF per window, `idf = ln(1 + N/df)`, and a domain token at half weight
+
+- **Context:** §7.2.2 asks for TF-IDF with a domain token and does not fix the formula, the corpus or
+  the weight.
+- **Decision:** the corpus is the window being clustered; `idf = Math.log(1 + N / df)`; each tab gets
+  one synthetic `site:<domain>` token weighed `domainWeight` (0.5); vectors are L2-normalised so
+  cosine is a dot product.
+- **Why:** clustering runs per window (§7.4), so the corpus has to be the window or the same tabs
+  would cluster differently depending on what another window holds. `ln(1 + N/df)` is positive for a
+  token every tab shares, which the plain `ln(N/df)` is not: a word in all 300 tabs would otherwise
+  vanish and leave some tabs with no vector at all. At 0.5 the domain nudges same-site tabs together
+  without making "by topic" a second "by site" — two tabs with identical words on different domains
+  still reach ≈ 0.96 similarity.
+
+## M4.1 — the groups of a window are ordered by size, biggest first
+
+- **Context:** §7 does not say in which order the proposals are shown, and the eight-group limit has
+  to drop *something*.
+- **Decision:** candidates are sorted by tab count descending, ties by the position of their first
+  tab; the limit cuts the tail, which goes to `ungrouped`.
+- **Why:** §7.2.6 says the smallest clusters become "Altro", which settles the limit, and reusing the
+  same comparator for the display order means the list the user sees and the cut the limit makes
+  cannot disagree. The first-tab tie-break makes the order a function of the input alone.
+
+## M4.1 — a topical group is named by one token unless the second earns its place
+
+- **Context:** §7.2.5 wants a title of one or two words, and two clusters in a window can rank the
+  same word first.
+- **Decision:** the second token is appended ("Rust · Async") only when it weighs at least half the
+  first; a title already taken in that window is replaced, in order, by the single name, then by
+  "<token> · <dominant site>", then by the pairs further down the ranking.
+- **Why:** a cluster about one thing should be called by that one thing, and the collision pass is
+  what keeps two groups in the same window from arriving with one name — which the user would read as
+  a bug. The site is the last resort because it is the only word left that is certainly true of the
+  cluster.
+
+## M4.1 — the colour of a group is a hash of its key, collisions included
+
+- **Context:** §7.1 asks for a "stable colour from a hash" over Chrome's nine colours, and nine
+  colours cannot cover eight groups plus a site palette without repeating.
+- **Decision:** `colorFor` is FNV-1a over the key modulo `GROUP_COLORS.length`; no pass tries to avoid
+  two groups sharing a colour.
+- **Why:** stability is the property the plan asks for, and it is the one the user notices: the same
+  site keeps its colour between runs, between windows and after a group is renamed. Avoiding
+  collisions would make a group's colour depend on the other groups, so adding a tab could recolour
+  everything.
+
+## M4.1 — the benchmark measures the 300 tabs as six windows and as one
+
+- **Context:** PLAN.md §11 budgets "clustering 300 tabs (without AI)" at 50 ms, while §7.4 clusters
+  per window and the `tabs-300` fixture spreads those tabs over six.
+- **Decision:** `tests/perf/cluster.perf.test.ts` measures by topic over the fixture's windows, by
+  topic over the same 300 tabs collapsed into one window, and by site; pinned and grouped tabs are
+  included so all 300 are clustered.
+- **Why:** six windows of ~60 tabs never pay the quadratic linkage cost of §7.2.3 that the budget is
+  about, so the single-window case is the number that has to hold; the fixture's own shape is kept
+  because it is what the panel will usually ask for. Observed CPU medians: 18.6 ms, 27.4 ms and
+  1.2 ms, all inside 50 ms before the machine factor.
+
+## M4.1 — in-range index reads are written `as T`, not `?? fallback`
+
+- **Context:** `noUncheckedIndexedAccess` types every `array[i]` as possibly undefined, and the
+  house idiom so far has been a `??` or an `if (x === undefined) continue`. In the clustering loops
+  that produced 43 branches no input can take, which alone put `src/core/` under the 95% branch
+  threshold.
+- **Decision:** in `cluster.ts`, a read whose index is bounded by the loop around it (or by a modulo
+  of the array's own length) is written `as T` with a comment saying why; where a fallback is really
+  possible it is a statement, not a branch. Nothing is marked `v8 ignore` and no threshold moved.
+- **Why:** a branch no test can reach is not coverage that was lost, it is a branch that should not
+  exist; writing it away keeps the gate honest and keeps a comparison out of the loops that have to
+  finish inside 50 ms. `as` is used rather than `!` because `tseslint` bans the non-null assertion.
