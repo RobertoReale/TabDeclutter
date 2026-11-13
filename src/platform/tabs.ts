@@ -192,7 +192,7 @@ export interface ActionContext {
 }
 
 /** The outcome of a call that is allowed to fail because the thing is already gone. */
-type Attempt<T> = { readonly ok: true; readonly value: T } | { readonly ok: false };
+export type Attempt<T> = { readonly ok: true; readonly value: T } | { readonly ok: false };
 
 /**
  * Runs a browser call and reports failure instead of throwing (PLAN.md §8.6: "Tab closed
@@ -201,8 +201,12 @@ type Attempt<T> = { readonly ok: true; readonly value: T } | { readonly ok: fals
  * A discriminated result rather than `undefined` for failure, because several of these
  * calls resolve with `undefined` when they succeed: Firefox's `tabs.discard` is one, so
  * "did it work" cannot be read off the value.
+ *
+ * Exported because the same rule governs applying and undoing groups (PLAN.md §7.4, "a
+ * tab closed in the meantime"), and one definition of "already gone is not an error" is
+ * worth more than a second copy of these six lines in `groups.ts`.
  */
-async function attempt<T>(action: () => Promise<T>): Promise<Attempt<T>> {
+export async function attempt<T>(action: () => Promise<T>): Promise<Attempt<T>> {
   try {
     return { ok: true, value: await action() };
   } catch {

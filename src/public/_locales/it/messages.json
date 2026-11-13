@@ -251,6 +251,14 @@
     "message": "Nessun gruppo da proporre.",
     "description": "Shown in the Organize view when there is nothing to group."
   },
+  "organizeSkippedOne": {
+    "message": "$1 scheda non è stata raggruppata",
+    "description": "Shown after applying the groups, when exactly one tab was closed or moved in the meantime. $1 is the formatted number."
+  },
+  "organizeSkippedOther": {
+    "message": "$1 schede non sono state raggruppate",
+    "description": "Shown after applying the groups, for every other count of tabs left out. $1 is the formatted number."
+  },
   "archiveEmpty": {
     "message": "Nessuna scheda in archivio.",
     "description": "Shown in the Archive view when nothing has been closed through TabDeclutter."
