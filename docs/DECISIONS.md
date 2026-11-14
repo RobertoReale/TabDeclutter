@@ -2942,3 +2942,64 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   without the Prompt API never loads the module; and `tests/e2e/organize-ai.spec.ts` opens the
   view in a real Chromium that has no model and requires §7.2's groups, no badge, no AI row and
   no console error. The download progress UI and the model's own answers remain unobserved.
+
+## M6.1 — The language is a catalogue we load ourselves
+
+- **Context:** §4.6 offers "Lingua: automatica / IT / EN", and `browser.i18n` cannot serve it:
+  `getMessage` has no locale argument, the catalogue is resolved once from the browser's own UI
+  language, and `getAcceptLanguages` only reports what the user reads.
+- **Decision:** `platform/i18n.ts` keeps an optional override. "automatica" leaves `t` on
+  `browser.i18n`; a chosen language makes `loadCatalogue` fetch
+  `runtime.getURL('/_locales/<locale>/messages.json')` and `t` answer from it, with
+  `i18n.getMessage`'s own substitution rules (named placeholders and `$1`…`$9`) reimplemented in
+  `formatMessage`. `state/settings.ts` follows the setting in an effect and publishes the active
+  tag in a `language` signal; `App.tsx` reads it, so one change re-renders every view and with it
+  every date, count and duration. The document's `lang` and title are set from the same place.
+- **Why:** the alternative is a second copy of every string inside the bundle, which would make
+  the shipped `_locales/` and the panel's strings two things to keep in step. `runtime.getURL` is
+  the extension's own origin, so the fetch is a read of our own package and invariant 1 holds —
+  the E2E's `health` fixture, which fails on any request outside the extension's origin, is what
+  keeps that true.
+
+## M6.1 — The bookmarks permission is asked for inside the click, and given back
+
+- **Context:** §5.4 declares `bookmarks` as an optional permission and §6.4 pays a bookmarked page
+  +10. Both browsers grant `permissions.request` only from a user gesture, and the first `await`
+  spends it.
+- **Decision:** `setUseBookmarks` is not `async` and awaits nothing before calling
+  `requestBookmarksPermission`; the setting is stored only once the answer is yes, a refusal sets
+  `bookmarksDenied` and the page says so. Turning the row off writes `false` and calls
+  `permissions.remove`. `platform/bookmarks.ts` walks `getTree()` once into a set of `keepKey`s and
+  caches it, invalidated by the four bookmark events and by `permissions.onAdded/onRemoved`; a
+  missing permission, a hidden API or a failed walk all give an empty set. `state/tabs.ts` passes
+  the set to the score only while the setting is on, so the setting decides whether the signal
+  counts and the permission whether there is anything to count.
+- **Why:** a stored `useBookmarks: true` without the permission would promise a signal the score
+  could never get. Caching is §11: the panel re-reads on every tab event, and a person with
+  thousands of bookmarks must not pay for the walk each time. Giving the permission back is §12.1 —
+  hold no access that is not being used.
+
+## M6.1 — The values the fields offer, and one stored `ignoreHash`
+
+- **Context:** §4.6 names the settings and their defaults but not the choices a `<select>` should
+  offer, and it lists "ignora #fragment" both here and in §8.3's duplicate page.
+- **Decision:** `settings-fields.ts` fixes the lists — stale 1/3/7/14/30 days, grace
+  30 min/2 h/8 h/24 h, archive 7/30/90/365 days, language automatica/EN/IT — and a stored value the
+  list does not offer is kept in its place rather than silently moved. The labels are written by
+  `Intl` through `format.ts`, not by catalogue keys, so "7 giorni" needs no translation of its own.
+  `ignoreHash` is one stored value shown in both pages.
+- **Why:** lists are a reversible choice, and keeping an unlisted value visible means a setting
+  written by an earlier version (or by hand) is never changed by merely opening the page. One
+  stored value is the only reading of §4.6 and §8.3 that cannot show the user two switches that
+  disagree.
+
+## M6.1 — Not verified by hand
+
+- Not verified by hand: nobody has seen Chrome's or Firefox's own permission prompt appear on the
+  bookmarks toggle. `docs/MANUAL-CHECKS.md` is closed (AGENT-RULES.md), and a browser-chrome dialog
+  is outside what Playwright can drive. What is checked instead: `tests/ext/settings-state.test.ts`
+  requires `permissions.request` to be called synchronously, in the same turn as the click, with
+  exactly `{ permissions: ['bookmarks'] }`, and requires the setting to be stored only on a grant
+  and `permissions.remove` to be called when the row is turned off;
+  `tests/ext/bookmarks.test.ts` covers every answer the browser can give. The prompt itself, and
+  what it says, remain unobserved.

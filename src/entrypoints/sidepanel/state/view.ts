@@ -16,16 +16,29 @@ export const view = signal<ViewId>('declutter');
 /** Whether the settings are open on top of the current view (§8.3, the gear of §4.2). */
 export const settingsOpen = signal(false);
 
+/**
+ * Which settings page is open: the one of §4.6, or the "Protezione duplicati" sub-page of §8.3.
+ *
+ * A signal here and not state inside the view, because the chip's menu opens the sub-page
+ * directly while the gear opens the main page.
+ */
+export type SettingsPage = 'main' | 'duplicates';
+
+export const settingsPage = signal<SettingsPage>('main');
+
 /** Shows a view, which always means leaving the settings. */
 export function showView(id: ViewId): void {
   view.value = id;
   settingsOpen.value = false;
 }
 
-export function showSettings(): void {
+export function showSettings(page: SettingsPage = 'main'): void {
+  settingsPage.value = page;
   settingsOpen.value = true;
 }
 
+/** The gear of §4.2, which always opens the settings at their first page. */
 export function toggleSettings(): void {
+  settingsPage.value = 'main';
   settingsOpen.value = !settingsOpen.value;
 }

@@ -20,9 +20,10 @@
 import { useSignal } from '@preact/signals';
 import { useEffect } from 'preact/hooks';
 
-import { panelLanguage, t, type MessageKey } from '@/platform/i18n';
+import { t, type MessageKey } from '@/platform/i18n';
 import { GuardChip } from './components/GuardChip';
 import { countsText } from './format';
+import { language as panelLanguageSignal } from './state/settings';
 import { tabCount, windowCount } from './state/tabs';
 import type { ViewId } from './state/view';
 import { settingsOpen, showView, toggleSettings, view } from './state/view';
@@ -40,9 +41,10 @@ const VIEWS: readonly { readonly id: ViewId; readonly label: MessageKey }[] = [
 ];
 
 export function App() {
-  // The panel's language is fixed for the document's lifetime, so it is read
-  // once rather than on every render.
-  const language = panelLanguage();
+  // §4.6 lets the language be changed while the panel is open, so it is read from the signal
+  // `state/settings.ts` keeps: every view takes it as a prop, so one change re-renders the shell
+  // and with it everything that writes a date, a count or a duration.
+  const language = panelLanguageSignal.value;
 
   return (
     <div class="td-panel">
