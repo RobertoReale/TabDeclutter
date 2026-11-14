@@ -2826,3 +2826,58 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   tabs. The fixture is built to look like a real hoarder's browser (`scripts/generate-fixtures.ts`)
   and is the input PLAN.md §13 names, but nobody has yet pressed "Organizza per argomento" on a
   browser they actually use.
+
+## M5.1 — The model is asked for English names, and the user retypes them
+
+- **Context:** PLAN.md §7.3 leaves open what to do about Italian group names: Gemini Nano is far
+  better at English, and the Translator API would be another model to download and another thing
+  to fail.
+- **Decision:** v1 asks for English names (`SYSTEM_PROMPT` is in English and so is the prompt) and
+  relies on the inline editing M4.3 already put in the preview. No Translator API, no translation
+  pass, no second prompt. The names of §7.2 — the fallback — stay what they were.
+- **Why:** an English name the model got right is more useful than an Italian one it got wrong, and
+  nothing is applied until the user has looked at the preview, where a name is two clicks from
+  being whatever they want. A translation step would double the ways the feature can be slow or
+  unavailable to change a word the user can already change. It is reversible: a later task can add
+  one, and the schema does not change.
+
+## M5.1 — One budget for the whole run, and a partial answer is still an answer
+
+- **Context:** §7.3 asks for a 20 s timeout and for batching, without saying whether the 20 s is per
+  prompt or per run, nor what to do when the model answers some batches and not others.
+- **Decision:** the 20 s is the budget of the whole run: `resolve()` turns it into a deadline
+  (`now() + timeoutMs`) that every batch shares, and a batch that starts after it has passed is not
+  asked at all. When at least one batch came back, the result is `source: 'ai'` and the batches
+  that failed are grouped by §7.2 instead, with `fallbackReason` saying what went wrong; when none
+  did, the §7.2 proposal is returned exactly as `groupByTopic` built it.
+- **Why:** the user is waiting in front of a spinner, and what they are waiting for is the whole
+  proposal, not one prompt of it; a per-prompt timeout on a 300-tab window could keep them there
+  for minutes. Mixing the two sources is better than throwing good groups away, and §7.2 is a real
+  answer rather than a placeholder. Returning the untouched `groupByTopic` proposal when nothing
+  was answered is what makes the fallback testable: it is the same object the non-AI path builds.
+
+## M5.1 — An answer with no usable group counts as a failure
+
+- **Context:** validation can empty an answer out: every id invented, every group below
+  `minClusterTabs`, or everything in "Other". The batch would then have an answer and no groups.
+- **Decision:** that is `no-groups`, treated exactly like unparsable JSON — the batch falls back to
+  §7.2. A group dropped for any reason releases its tabs to "Altro" rather than keeping them
+  claimed, so the union of the groups and "Altro" is always the tabs that were asked about.
+- **Why:** "the model answered and I have nothing to show" is a failure from where the user stands,
+  and §7.2 has something to show. The release rule is the invariant the tests are built on: a tab
+  the AI touched can be grouped differently, never lost.
+
+## M5.1 — Batches are packed macro-clusters, and names merge within a window
+
+- **Context:** §7.3 wants pre-clustering above ~40 tabs and batches of at most ~40, which leaves
+  open how the clusters become batches and what happens when two batches of one window come back
+  with the same group name.
+- **Decision:** a window that fits in one batch is one prompt. Otherwise the §7.2 groups are the
+  macro-clusters — cut into batch-sized pieces when one is bigger than a batch, and each "Altro"
+  tab its own cluster — and they are packed greedily into batches up to `maxBatchTabs`. A batch
+  never spans two windows. Groups are then merged by their lower-case name within a window,
+  keeping the first spelling, and the window keeps at most `maxGroups` of them.
+- **Why:** packing keeps the number of prompts near the minimum, which is the whole cost of the
+  feature, while a batch of related tabs is also the batch the model names best. Merging is needed
+  because two prompts about the same window cannot see each other: without it a 90-tab window
+  comes back with "Rust" three times, and §7.4 could not apply that as one native group.
