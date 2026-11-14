@@ -19,9 +19,22 @@ import { expect, message, test } from './fixtures/extension';
  * The tabs are two local sites served by this test — `127.0.0.1` and `localhost` on the
  * same port, which the browser treats as two hosts — with three tabs each, because §7.1
  * groups a site only from three tabs up. Nothing reaches the network (invariant 1).
+ *
+ * The second test is the other half of M4's acceptance (PLAN.md §13): "apply and undo
+ * restore exactly the original order and groups". It is the one case the unit tests cannot
+ * even approximate, because what has to come back is the browser's own state — every
+ * tab's index and the group it was in, including a group the user made by hand before the
+ * preview existed.
  */
 
-const PATHS = ['/one', '/two', '/three'] as const;
+/** Everything the test server answers; a test takes the slice of them it needs. */
+const PATHS = ['/one', '/two', '/three', '/four', '/five'] as const;
+
+/** Three per host: the minimum §7.1 asks for before a site earns a group. */
+const SITE_PATHS = PATHS.slice(0, 3);
+
+/** The group the second test makes by hand, which §4.4 must leave exactly as it is. */
+const MINE = { title: 'Mine', color: 'purple' } as const;
 
 let server: Server;
 let port = 0;
@@ -58,35 +71,56 @@ test.afterAll(async () => {
   });
 });
 
+/** A tab as the browser reports it, in the two tests' terms. */
+interface RawTab {
+  id?: number;
+  url?: string;
+  index: number;
+  pinned?: boolean;
+  groupId?: number;
+}
+
 /** The slice of the extension API the panel page is asked for, inside the browser. */
 interface GroupsApi {
   tabs: {
     create(properties: { url: string; active: boolean }): Promise<unknown>;
+    query(query: Record<string, unknown>): Promise<RawTab[]>;
+    group(options: { tabIds: readonly number[] }): Promise<number>;
+    update(tabId: number, properties: { pinned: boolean }): Promise<unknown>;
   };
   tabGroups: {
-    query(query: Record<string, unknown>): Promise<{ title?: string; color?: string }[]>;
+    query(
+      query: Record<string, unknown>,
+    ): Promise<{ id: number; title?: string; color?: string }[]>;
+    update(groupId: number, properties: { title: string; color: string }): Promise<unknown>;
   };
 }
 
+/** The URLs of `hosts` × `paths`, host by host: what §7.1 sees as one site each. */
+function urlsOf(hosts: readonly string[], paths: readonly string[]): string[] {
+  return hosts.flatMap((host) => paths.map((path) => `http://${host}:${String(port)}${path}`));
+}
+
 /**
- * The six pages, opened from the panel's own tab so they land in the panel's window —
- * which is the "Finestra corrente" the view starts on.
+ * The pages, opened from the panel's own tab so they land in the panel's window — which is
+ * the "Finestra corrente" the view starts on.
  *
  * `chrome.tabs.create` rather than `context.newPage()`: a Playwright page is a tab of its
  * own in the same window either way, but this keeps the panel focused and the created
  * tabs in the background, so the window the preview reads is the one under test.
  */
-async function openSites(panel: Page): Promise<void> {
-  const urls = ['127.0.0.1', 'localhost'].flatMap((host) =>
-    PATHS.map((path) => `http://${host}:${String(port)}${path}`),
-  );
-
+async function openTabs(panel: Page, urls: readonly string[]): Promise<void> {
   await panel.evaluate(async (list) => {
     const api = (globalThis as unknown as { chrome: GroupsApi }).chrome;
     for (const url of list) {
       await api.tabs.create({ url, active: false });
     }
   }, urls);
+}
+
+/** The six pages of the first test: two sites of three tabs. */
+async function openSites(panel: Page): Promise<void> {
+  await openTabs(panel, urlsOf(['127.0.0.1', 'localhost'], SITE_PATHS));
 }
 
 /** The native groups, as the browser has them: what "Applica" is judged by. */
@@ -112,6 +146,53 @@ async function preview(panel: Page): Promise<{ title: string; color: string }[]>
 
 function byTitle(groups: readonly { title: string; color: string }[]) {
   return [...groups].sort((left, right) => left.title.localeCompare(right.title));
+}
+
+/** One tab of the window as undo has to give it back: where it sits and what it is in. */
+interface TabState {
+  url: string;
+  index: number;
+  pinned: boolean;
+  /** `"<title>/<color>"` of its group, or `null`. By name because ids do not survive. */
+  group: string | null;
+}
+
+/**
+ * The whole window in index order: the thing PLAN.md §13's "apply and undo restore exactly
+ * the original order and groups" is a statement about.
+ *
+ * The group is read as its title and colour rather than its id: `platform/groups.ts` may
+ * legitimately rebuild a group it could not find again (PLAN.md §5.5), so an id that
+ * changed is not a failure, while a title or a colour that changed is.
+ */
+async function windowState(panel: Page): Promise<TabState[]> {
+  return panel.evaluate(async () => {
+    const api = (globalThis as unknown as { chrome: GroupsApi }).chrome;
+    const groups = await api.tabGroups.query({});
+    const names = new Map(
+      groups.map((group) => [group.id, `${group.title ?? ''}/${group.color ?? ''}`]),
+    );
+    const tabs = await api.tabs.query({ currentWindow: true });
+    return tabs
+      .slice()
+      .sort((left, right) => left.index - right.index)
+      .map((tab) => ({
+        url: tab.url ?? '',
+        index: tab.index,
+        pinned: tab.pinned === true,
+        group: names.get(tab.groupId ?? -1) ?? null,
+      }));
+  });
+}
+
+/** The ids of those URLs, in the order they are named. */
+async function idsOf(panel: Page, urls: readonly string[]): Promise<number[]> {
+  return panel.evaluate(async (list) => {
+    const api = (globalThis as unknown as { chrome: GroupsApi }).chrome;
+    const tabs = await api.tabs.query({ currentWindow: true });
+    const byUrl = new Map(tabs.map((tab) => [tab.url ?? '', tab.id ?? -1]));
+    return list.map((url) => byUrl.get(url) ?? -1);
+  }, urls);
 }
 
 test.describe('in English', () => {
@@ -162,5 +243,76 @@ test.describe('in English', () => {
     // Undone means ungrouped: §4.4.5's "Annulla" puts the window back as it was.
     await expect.poll(async () => nativeGroups(panel)).toEqual([]);
     await expect(toast).toHaveCount(0);
+  });
+
+  test('apply and undo restore exactly the order and the groups', async ({ panel }) => {
+    // Interleaved on purpose: the two sites alternate in the strip, so grouping them has
+    // to move tabs and "Ordina le schede nella finestra per gruppo" has something to sort.
+    const here = urlsOf(['127.0.0.1'], PATHS);
+    const there = urlsOf(['localhost'], PATHS.slice(0, 4));
+    await openTabs(panel, [
+      here[0] ?? '',
+      there[0] ?? '',
+      here[1] ?? '',
+      there[1] ?? '',
+      here[2] ?? '',
+      there[2] ?? '',
+      here[3] ?? '',
+      there[3] ?? '',
+      here[4] ?? '',
+    ]);
+
+    // One pinned tab and one group the user made by hand: the two things §4.4 promises to
+    // leave alone, and the two the restore is easiest to get wrong on. Both come out of
+    // the proposal, which leaves three tabs per site — exactly §7.1's minimum.
+    //
+    // Polled, because a tab the browser has only just created may not be reporting its URL
+    // yet, and these three are identified by theirs.
+    const wanted = [there[3] ?? '', here[3] ?? '', here[4] ?? ''];
+    await expect.poll(async () => (await idsOf(panel, wanted)).includes(-1)).toBe(false);
+    const [pinned, ...mine] = await idsOf(panel, wanted);
+    await panel.evaluate(
+      async (own) => {
+        const api = (globalThis as unknown as { chrome: GroupsApi }).chrome;
+        await api.tabs.update(own.pin, { pinned: true });
+        const groupId = await api.tabs.group({ tabIds: own.group });
+        await api.tabGroups.update(groupId, { title: own.title, color: own.color });
+      },
+      { pin: pinned ?? -1, group: mine, title: MINE.title, color: MINE.color },
+    );
+
+    await panel.getByRole('button', { name: message('en', 'navOrganize') }).click();
+    await panel
+      .getByRole('checkbox', { name: message('en', 'organizeOptionSort') })
+      .setChecked(true);
+
+    await expect(panel.locator('.td-group')).toHaveCount(2);
+    await expect(panel.locator('.td-groups .td-group-tab')).toHaveCount(6);
+
+    // The window as it is now, with the user's own group and the pinned tab at its head:
+    // this is the state the whole test is about.
+    const before = await windowState(panel);
+    expect(before.filter((tab) => tab.group === `${MINE.title}/${MINE.color}`)).toHaveLength(2);
+    expect(before[0]?.pinned).toBe(true);
+
+    await panel.getByRole('button', { name: message('en', 'organizeApply') }).click();
+
+    // The toast is the signal that the apply — grouping and sorting both — is over, so
+    // what is compared below is the finished window and not one mid-move.
+    const toast = panel.locator('.td-toast');
+    await expect(toast).toContainText(message('en', 'organizeAppliedOther').replace('$1', '2'));
+
+    // Three groups now: the user's, untouched, and the two that were applied (§4.4).
+    expect(await nativeGroups(panel)).toHaveLength(3);
+
+    // The sort really did move things, so what undo has to put back is a different window
+    // and not the same one. Without this the restore could pass by having done nothing.
+    expect(await windowState(panel)).not.toEqual(before);
+
+    await toast.getByRole('button', { name: message('en', 'actionUndo') }).click();
+
+    // §13's acceptance for M4, in one assertion: every tab back at its index, in the group
+    // it was in — including the hand-made one — and the pinned tab pinned.
+    await expect.poll(async () => windowState(panel)).toEqual(before);
   });
 });

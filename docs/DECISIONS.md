@@ -2783,3 +2783,46 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   clustering and the apply and re-exports the question, so the view still reads one module.
 - **Why:** it is the only way the button and the view can share state without the button paying for
   the view. The build shows it works: `OrganizeView` is its own chunk.
+
+## M4.4 — the cosine threshold stays at 0.25
+
+- **Context:** §7.2.3 says "~0.25" and M4.4 allows tuning it if the review of `tabs-300` comes out
+  "clearly poor". It did not, but the value had to be chosen on evidence rather than left alone by
+  default.
+- **Decision:** 0.25, unchanged. The review and the measurements are in `docs/CLUSTER-REVIEW.md`.
+- **Why:** 0.20, 0.30 and 0.35 were run on the same 300 tabs. 0.20 over-merges (five tabs called
+  "Tab": a Twitch stream with two New Tab pages; a monitor with a desk lamp). 0.30 and 0.35 lose
+  exactly what topic mode exists for — the cross-site clusters, "Lisbona · Tram" among them, go
+  back to "Altro" — and add groups formed on Jira ticket numbers. 0.25 is the only one of the four
+  that keeps the cross-site clusters without making the over-merges.
+
+## M4.4 — the bad clusters are a naming problem, and the tokenizer is left alone
+
+- **Context:** of the five clusters judged wrong in the review, three group the right tabs under a
+  name taken from a path id or a file extension ("Node · 1033", "Belem · G189158", "Jpg · 1064").
+- **Decision:** `tokenize` is not changed. The observation is recorded in `docs/CLUSTER-REVIEW.md`
+  instead, with the fix that was considered: drop tokens that contain no letter.
+- **Why:** M4.4's scope is the review and the E2E tests, and dropping numeric tokens changes what
+  every proposal in the product looks like — a change that wants its own task and its own unit
+  tests. The harm is also the mildest kind: §4.4.3 lets the user retype the name inline before
+  anything is applied, which is what the editable preview is for.
+
+## M4.4 — M4's acceptance is covered by tests, not by a manual check
+
+- **Context:** M4.4's "Done when" asks for a MANUAL-CHECKS entry ("leggere CLUSTER-REVIEW.md e
+  provare Organizza per argomento sulle proprie schede"), and `docs/MANUAL-CHECKS.md` has been
+  closed to new entries since the owner asked for no more manual checks (AGENT-RULES.md).
+- **Decision:** no entry is added. §13's "apply and undo restore exactly the original order and
+  groups" is asserted end to end instead: `tests/e2e/organize.spec.ts` snapshots every tab of the
+  window — URL, index, pinned, and its group by title and colour — around an apply with
+  "Ordina le schede nella finestra per gruppo" on, a pinned tab and a group made by hand, and
+  requires the snapshot back after "Annulla". `tests/e2e-firefox/organize.spec.ts` is §14's Gecko
+  smoke: organize by site, one native group, Annulla, no group left.
+- **Why:** the two halves of the acceptance are different in kind. The order and the groups coming
+  back is a fact about the browser, and a test states it better than a person can. Whether the
+  clusters make sense is a judgement, and that is what `docs/CLUSTER-REVIEW.md` is — written down,
+  with the evidence, so it can be disagreed with.
+- Not verified by hand: the clusters were judged on the `tabs-300` fixture, not on the owner's own
+  tabs. The fixture is built to look like a real hoarder's browser (`scripts/generate-fixtures.ts`)
+  and is the input PLAN.md §13 names, but nobody has yet pressed "Organizza per argomento" on a
+  browser they actually use.
