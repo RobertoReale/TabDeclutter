@@ -623,6 +623,106 @@
     "message": "View",
     "description": "Link beside the counter under the chip: opens the archive filtered to the duplicates closed automatically."
   },
+  "settingsGroupSuggestions": {
+    "message": "Suggestions",
+    "description": "Heading of the first group of settings: what makes a tab a candidate for closing."
+  },
+  "settingsFieldStale": {
+    "message": "Consider a tab old after",
+    "description": "Settings field that chooses how long a tab must go unused before it counts as old."
+  },
+  "settingsFieldGrace": {
+    "message": "Never suggest a tab opened less than",
+    "description": "Settings field that chooses the grace period: a tab opened more recently than this is never suggested."
+  },
+  "settingsIncludeGrouped": {
+    "message": "Include tabs that are in a group",
+    "description": "Settings checkbox: whether tabs already in a tab group can be suggested."
+  },
+  "settingsIncludeGroupedHint": {
+    "message": "They are suggested less readily, because a group is a decision.",
+    "description": "Explanation under the 'Include tabs that are in a group' checkbox."
+  },
+  "settingsIgnoreHashHint": {
+    "message": "Same setting as in the duplicate protection.",
+    "description": "Explanation under the 'Ignore #hash' checkbox, which is shown on both settings pages."
+  },
+  "settingsBookmarks": {
+    "message": "Use the bookmarks",
+    "description": "Settings checkbox: whether a bookmarked page is more readily suggested, since closing it loses nothing."
+  },
+  "settingsBookmarksHint": {
+    "message": "A bookmarked page is easier to suggest: it can be found again. The browser will ask for permission to read the bookmarks.",
+    "description": "Explanation under the 'Use the bookmarks' checkbox."
+  },
+  "settingsBookmarksDenied": {
+    "message": "Without permission to read the bookmarks they cannot be used. You can turn this on again at any time.",
+    "description": "Message shown when the user refuses the browser's permission request for the bookmarks."
+  },
+  "settingsGroupProtected": {
+    "message": "Protected sites",
+    "description": "Heading of the group of settings that lists the sites which are never suggested."
+  },
+  "settingsProtectedHint": {
+    "message": "Tabs on these sites are never suggested. One domain per line; a leading *. covers the subdomains.",
+    "description": "Explanation under the 'Protected sites' heading."
+  },
+  "settingsProtectedLabel": {
+    "message": "Domains",
+    "description": "Label of the text box in which the protected sites are typed, one per line."
+  },
+  "settingsGroupGeneral": {
+    "message": "General",
+    "description": "Heading of the group of settings that are neither about the suggestions nor about a site: badge, AI, archive, language."
+  },
+  "settingsShowBadge": {
+    "message": "Show the number on the icon",
+    "description": "Settings checkbox: whether the toolbar icon carries the count of tabs worth reviewing."
+  },
+  "settingsUseAi": {
+    "message": "Use the on-device AI when available",
+    "description": "Settings checkbox: whether the browser's own on-device model may be used to name the groups."
+  },
+  "settingsAiAvailable": {
+    "message": "On-device model: available.",
+    "description": "State line under the on-device AI setting, when the browser has the model ready."
+  },
+  "settingsAiDownloadable": {
+    "message": "On-device model: to download. It is downloaded the first time you use it.",
+    "description": "State line under the on-device AI setting, when the browser can download the model."
+  },
+  "settingsAiUnsupported": {
+    "message": "On-device model: not supported by this browser.",
+    "description": "State line under the on-device AI setting, when the browser has no on-device model."
+  },
+  "settingsFieldRetention": {
+    "message": "Keep the archive for",
+    "description": "Settings field that chooses how long closed tabs stay in the archive."
+  },
+  "settingsFieldLanguage": {
+    "message": "Language",
+    "description": "Settings field that chooses the language of the extension."
+  },
+  "settingsLanguageAuto": {
+    "message": "Automatic",
+    "description": "Language option: follow the browser's language."
+  },
+  "settingsLanguageEn": {
+    "message": "English",
+    "description": "Language option: English. Never translated."
+  },
+  "settingsLanguageIt": {
+    "message": "Italiano",
+    "description": "Language option: Italian. Written in Italian in every language, as language lists do."
+  },
+  "settingsOpenDuplicates": {
+    "message": "Open the duplicate settings",
+    "description": "Button at the end of the settings that opens the duplicate-protection sub-page."
+  },
+  "settingsBack": {
+    "message": "← Settings",
+    "description": "Button that goes back from the duplicate-protection sub-page to the main settings page."
+  },
   "settingsDuplicates": {
     "message": "Duplicate protection",
     "description": "Heading of the duplicate-protection settings page."

@@ -68,6 +68,7 @@ function data(open: readonly TabInfo[]): PanelData {
     keeps: {},
     protectedSites: [],
     whitelist: [],
+    bookmarks: new Set<string>(),
     focusedWindowId: 1,
     ownOrigin: 'chrome-extension://test',
     at: NOW,

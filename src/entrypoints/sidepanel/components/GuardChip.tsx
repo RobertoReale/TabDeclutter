@@ -159,7 +159,8 @@ export function GuardChip({ language }: { language: string }) {
             class="td-guard-menu-item"
             role="menuitem"
             onClick={() => {
-              showSettings();
+              // Straight at the sub-page of §8.3: the menu item names it.
+              showSettings('duplicates');
               close();
             }}
           >

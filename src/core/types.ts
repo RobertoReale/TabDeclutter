@@ -173,6 +173,13 @@ export interface Settings {
   showBadge: boolean;
   /** Use the on-device model when the browser has one. */
   useOnDeviceAi: boolean;
+  /**
+   * Use the bookmarks as a signal (PLAN.md §6.4: "Already bookmarked +10").
+   *
+   * Off until the user turns it on, because reading them needs the optional permission of
+   * §5.4: a setting that is on while the permission is not would be a promise we cannot keep.
+   */
+  useBookmarks: boolean;
   archiveRetentionDays: number;
   language: LanguageSetting;
   guard: GuardSettings;
@@ -185,6 +192,7 @@ export const DEFAULT_SETTINGS: Settings = {
   includeGroupedTabs: true,
   showBadge: true,
   useOnDeviceAi: true,
+  useBookmarks: false,
   archiveRetentionDays: 30,
   language: 'auto',
   guard: DEFAULT_GUARD_SETTINGS,

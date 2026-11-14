@@ -28,6 +28,7 @@ import { compile } from '@/core/patterns';
 import type { ScoringResult } from '@/core/scoring';
 import { scoreTabs } from '@/core/scoring';
 import type { ActivityStore, Keeps, Settings, TabInfo } from '@/core/types';
+import { bookmarkedKeys } from '@/platform/bookmarks';
 import {
   activityItem,
   duplicateWhitelistItem,
@@ -72,6 +73,13 @@ export interface PanelData {
   readonly protectedSites: readonly string[];
   /** The duplicate whitelist, as the user wrote it (PLAN.md §8.3). */
   readonly whitelist: readonly string[];
+  /**
+   * The bookmarked URLs by `keepKey`, which is the "+10" of §6.4.
+   *
+   * Empty while the optional permission of §5.4 is not granted, and read with the rest so the
+   * score stays one function of one snapshot (`platform/bookmarks.ts` caches the tree).
+   */
+  readonly bookmarks: ReadonlySet<string>;
   /** The window the panel is in, which is the one the user is looking at. */
   readonly focusedWindowId?: number;
   /** `browser.runtime.getURL('')`, so the extension's own pages are protected. */
@@ -110,6 +118,9 @@ export const scoring = computed<ScoringResult>(() => {
     isWhitelisted: compile(data.whitelist).match,
     protectedSites: data.protectedSites,
     keeps: data.keeps,
+    // §4.6's "use the bookmarks": the setting decides whether the signal counts, the permission
+    // whether there is anything to count.
+    bookmarkedUrls: data.settings.useBookmarks ? data.bookmarks : undefined,
     ownOrigin: data.ownOrigin,
     focusedWindowId: data.focusedWindowId,
   });
@@ -213,16 +224,25 @@ export function startPanelState(options: PanelStateOptions = {}): PanelStateHand
 
 /** One pass over everything a score needs. */
 async function read(at: number): Promise<PanelData> {
-  const [openTabs, activity, settings, keeps, protectedSites, whitelist, focusedWindowId] =
-    await Promise.all([
-      queryTabs(),
-      activityItem.getValue(),
-      readSettings(),
-      readKeeps(at),
-      protectedDomainsItem.getValue(),
-      duplicateWhitelistItem.getValue(),
-      currentWindowId(),
-    ]);
+  const [
+    openTabs,
+    activity,
+    settings,
+    keeps,
+    protectedSites,
+    whitelist,
+    bookmarks,
+    focusedWindowId,
+  ] = await Promise.all([
+    queryTabs(),
+    activityItem.getValue(),
+    readSettings(),
+    readKeeps(at),
+    protectedDomainsItem.getValue(),
+    duplicateWhitelistItem.getValue(),
+    bookmarkedKeys(),
+    currentWindowId(),
+  ]);
 
   return {
     tabs: openTabs,
@@ -231,6 +251,7 @@ async function read(at: number): Promise<PanelData> {
     keeps,
     protectedSites,
     whitelist,
+    bookmarks,
     focusedWindowId,
     ownOrigin: browser.runtime.getURL(''),
     at,

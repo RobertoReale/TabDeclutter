@@ -144,6 +144,7 @@ function data(open: readonly TabInfo[] = tabs()): PanelData {
     keeps: {},
     protectedSites: [],
     whitelist: [],
+    bookmarks: new Set<string>(),
     focusedWindowId: 1,
     ownOrigin: 'chrome-extension://test',
     at: NOW,
