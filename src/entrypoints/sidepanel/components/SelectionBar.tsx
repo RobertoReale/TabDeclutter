@@ -1,8 +1,14 @@
 /**
  * The sticky selection bar (PLAN.md §4.3) and the questions of §9.
  *
- * It appears only when something is picked, and it is one strip with three buttons:
- * "Chiudi N", "Mantieni", "Sospendi". ("Raggruppa" is the grouping task, TASKS.md M4.3.)
+ * It appears only when something is picked, and it is one strip with four buttons:
+ * "Chiudi N", "Mantieni", "Sospendi", "Raggruppa".
+ *
+ * "Raggruppa" is last because it is the one that does nothing to the tabs: it hands the
+ * selection to the Organize view (§4.4.1's third scope), where it becomes a preview the
+ * user still has to apply. It comes from `state/organize-request.ts` and not from
+ * `state/organize.ts`, so this strip — which is in the panel's first chunk — does not pull
+ * the clustering in with it (§11).
  *
  * The close button is where two of §9's three safeguards show: its wording already says
  * when a window goes with the tabs ("Chiudi 3 schede e la finestra"), and when the close
@@ -26,6 +32,7 @@ import {
   selectionSafeguards,
   type PendingClose,
 } from '../state/commands';
+import { organizeSelection } from '../state/organize-request';
 import { Confirm } from './Confirm';
 
 export function SelectionBar({ language }: { language: string }) {
@@ -75,6 +82,15 @@ export function SelectionBar({ language }: { language: string }) {
         }}
       >
         {t('actionDiscard')}
+      </button>
+      <button
+        type="button"
+        class="td-action"
+        onClick={() => {
+          organizeSelection(tabs.map((tab) => tab.id));
+        }}
+      >
+        {t('barOrganize')}
       </button>
     </div>
   );

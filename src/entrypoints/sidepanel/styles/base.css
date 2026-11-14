@@ -872,3 +872,161 @@ button {
   font-weight: 500;
   color: var(--td-text);
 }
+
+/* ── The Organize view of §4.4 ────────────────────────────────────────── */
+
+.td-organize {
+  padding-bottom: var(--td-space-2);
+}
+
+.td-groups {
+  margin: var(--td-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * One proposed group: a card, so the controls that belong to it are visibly
+ * its own and not the view's. A deselected group stays in place and greys out
+ * rather than disappearing — it is still an answer the user can take back.
+ *
+ * "Altro" looks like a card too, but it is not one of them: it carries its own
+ * class alone, so `.td-group` always means a group that will be created.
+ */
+.td-group,
+.td-group-other {
+  margin-bottom: var(--td-space-2);
+  padding: var(--td-space-2);
+  background: var(--td-raised);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+}
+
+.td-group:not([aria-current='true']) {
+  opacity: 0.6;
+}
+
+.td-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+}
+
+.td-group-check {
+  flex: none;
+  accent-color: var(--td-accent);
+}
+
+/* The colour the group will have in the tab strip, and nothing else (§7.3). */
+.td-group-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--td-radius-pill);
+  background: var(--td-group-grey);
+}
+
+.td-group-swatch[data-color='grey'] {
+  background: var(--td-group-grey);
+}
+
+.td-group-swatch[data-color='blue'] {
+  background: var(--td-group-blue);
+}
+
+.td-group-swatch[data-color='red'] {
+  background: var(--td-group-red);
+}
+
+.td-group-swatch[data-color='yellow'] {
+  background: var(--td-group-yellow);
+}
+
+.td-group-swatch[data-color='green'] {
+  background: var(--td-group-green);
+}
+
+.td-group-swatch[data-color='pink'] {
+  background: var(--td-group-pink);
+}
+
+.td-group-swatch[data-color='purple'] {
+  background: var(--td-group-purple);
+}
+
+.td-group-swatch[data-color='cyan'] {
+  background: var(--td-group-cyan);
+}
+
+.td-group-swatch[data-color='orange'] {
+  background: var(--td-group-orange);
+}
+
+/* The name, editable in place: a text box that reads as the group's heading. */
+.td-group-name {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--td-target);
+  padding: var(--td-space-1) var(--td-space-2);
+  font: inherit;
+  font-weight: 500;
+  color: inherit;
+  background: var(--td-surface);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius-sm);
+}
+
+.td-group-color {
+  flex: none;
+  max-width: 10ch;
+}
+
+/* Which window a group belongs to, and "Altro"'s one line of explanation. */
+.td-group-where {
+  margin-top: var(--td-space-1);
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
+}
+
+.td-group-tabs {
+  margin: var(--td-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.td-group-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+  min-height: var(--td-target);
+}
+
+/* The title truncates: a row is one line, and the whole title is in the tab. */
+.td-group-tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--td-text-meta);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.td-group-move,
+.td-group-merge {
+  flex: none;
+  max-width: 14ch;
+}
+
+.td-group-merge {
+  margin-top: var(--td-space-2);
+}
+
+.td-group-other-title {
+  font-size: var(--td-text-base);
+  font-weight: 500;
+}
+
+/* "Applica" sits in the footer's strip, where every view's actions are. */
+.td-organize-actions {
+  justify-content: flex-end;
+}

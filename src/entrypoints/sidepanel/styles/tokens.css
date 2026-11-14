@@ -67,6 +67,22 @@
   --td-avatar-saturation: 45%;
   --td-avatar-lightness: 30%;
 
+  /*
+   * The nine colours a native tab group can take (§7.3), as the browser draws
+   * them, so the swatch in the preview is the colour the group will actually be.
+   * They are not part of §4.7's palette and never colour text or a surface: the
+   * only thing that wears them is `.td-group-swatch`.
+   */
+  --td-group-grey: #5f6368;
+  --td-group-blue: #1a73e8;
+  --td-group-red: #d93025;
+  --td-group-yellow: #f9ab00;
+  --td-group-green: #1e8e3e;
+  --td-group-pink: #d01884;
+  --td-group-purple: #9334e6;
+  --td-group-cyan: #007b83;
+  --td-group-orange: #fa903e;
+
   /* §4.7: 150 ms ease-out. The curve is Material's "standard decelerate",
      which is what Chrome's own surfaces use. */
   --td-duration: 150ms;
@@ -95,6 +111,17 @@
     /* On a dark surface the avatar is the light one, and the letter is dark. */
     --td-avatar-saturation: 40%;
     --td-avatar-lightness: 68%;
+
+    /* The group colours as the browser draws them on a dark surface. */
+    --td-group-grey: #9aa0a6;
+    --td-group-blue: #8ab4f8;
+    --td-group-red: #f28b82;
+    --td-group-yellow: #fdd663;
+    --td-group-green: #81c995;
+    --td-group-pink: #ff8bcb;
+    --td-group-purple: #c58af9;
+    --td-group-cyan: #78d9ec;
+    --td-group-orange: #fcad70;
   }
 }
 
