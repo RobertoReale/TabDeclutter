@@ -2881,3 +2881,64 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   feature, while a batch of related tabs is also the batch the model names best. Merging is needed
   because two prompts about the same window cannot see each other: without it a 90-tab window
   comes back with "Rust" three times, and §7.4 could not apply that as one native group.
+
+## M5.2 — The 20 s of §7.3 is a prompt's deadline, never the download's
+
+- **Context:** `AiSession` has one timeout, and the same method both creates the session and runs
+  the prompt. A session created for the first time may have to download the model, which is
+  several gigabytes.
+- **Decision:** `prompt()` and `measureInputUsage()` go through the per-call deadline
+  (`DEFAULT_TIMEOUT_MS`, 20 s, aborting with a `TimeoutError`); `open()` — which is what
+  `downloadModel()` calls — does not. The download is bounded only by the signal the caller
+  passes, and the "Scaricamento del modello…" row is what the user watches instead.
+- **Why:** the 20 s of §7.3 is about a user waiting in front of a spinner for a proposal. Applying
+  it to the download would make turning the AI on fail on every machine where it takes longer than
+  twenty seconds, which is all of them, and the failure would look like a broken feature rather
+  than a long download. `tests/unit/llm.test.ts` holds a 120 s download open and asserts the
+  creation's signal is still not aborted.
+
+## M5.2 — Two deadlines, because they are about different things
+
+- **Context:** M5.1 already gives the whole run a 20 s budget inside `groupByAi`. Adding one to
+  `AiSession` means a prompt is under two of them.
+- **Decision:** both stay. `groupByAi` owns the run — what the user is waiting for — and
+  `AiSession` adds a per-call backstop around `create()` and `prompt()`.
+- **Why:** the run budget is spent on batches and cannot notice a single call that never settles;
+  a `create()` that hangs would leave the panel's spinner up with nothing counting down. The
+  backstop is never the one that fires in normal use, because the run budget is the same length
+  and starts earlier.
+
+## M5.2 — The model's answer is pinned to the question it answered
+
+- **Context:** the proposal of §4.4 is a `computed` that follows the browser. The model's is not:
+  it costs seconds and a prompt, and it arrives after the question was asked.
+- **Decision:** `state/organize.ts` keeps one `answer` — the scope, the mode, the options and the
+  carried selection, serialised, plus the draft — and the preview uses it only while that question
+  is still the one on screen. A run that fell back is recorded too, with `draft: null`. The order
+  the preview resolves is the user's edits, then the model's answer, then §7.2's proposal.
+- **Why:** an answer to a question nobody is asking any more is worse than no answer: changing the
+  scope would otherwise leave the previous window's groups in the preview. Recording a fallback is
+  what stops the same twenty seconds being spent again every time the view is re-entered, and the
+  resolution order is the one §4.4.3 implies — an edited preview belongs to the user.
+
+## M5.2 — The AI row is in the Organize view, and the settings row waits for M6.1
+
+- **Context:** §4.6 lists "AI on-device" among the settings, and §5.5 lists it in the capability
+  table. M5.2's scope is `llm.ts`, the Organize view, i18n and tests.
+- **Decision:** `useOnDeviceAi` is read and written as a real setting (`state/ai.ts`), and the only
+  control for it in this task is the row in Organize, shown where there is a model to use. The
+  settings-page row of §4.6 is M6.1's, which builds that page.
+- **Why:** the control belongs where the feature is used, and that is also where the user is when
+  they find out there is a model to download — §7.3 asks for the download to happen on a click.
+  Putting a second control in a page M6.1 has not built yet would mean building half of it here.
+
+## M5.2 — Not verified by hand
+
+- Not verified by hand: nobody has seen the real Gemini Nano answer in this extension. The machine
+  the build runs on has no model, and `docs/MANUAL-CHECKS.md` is closed (AGENT-RULES.md). What is
+  checked instead: `tests/unit/llm.test.ts` drives a `LanguageModel` of its own through every
+  availability state, the download with its progress, the 20 s timeout, an outer abort and a
+  pre-aborted signal; `tests/ext/ai-state.test.ts` checks the wiring, including that a browser
+  without the Prompt API never loads the module; and `tests/e2e/organize-ai.spec.ts` opens the
+  view in a real Chromium that has no model and requires §7.2's groups, no badge, no AI row and
+  no console error. The download progress UI and the model's own answers remain unobserved.

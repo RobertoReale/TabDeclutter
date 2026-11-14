@@ -1067,7 +1067,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M4.3 Organize view
 - [x] M4.4 Cluster review and Organize E2E
 - [x] M5.1 AI grouping with an injected LLM
-- [ ] M5.2 Prompt API adapter and integration
+- [x] M5.2 Prompt API adapter and integration
 - [ ] M6.1 Complete settings
 - [ ] M6.2 First-run onboarding
 - [ ] M6.3 Visual polish and final icon

@@ -363,6 +363,34 @@
     "message": "Chiudi",
     "description": "Accessible name of the button that closes the Organize view's toast without undoing."
   },
+  "organizeAiBadge": {
+    "message": "AI on-device",
+    "description": "Badge shown on the Organize preview when the on-device model proposed the groups."
+  },
+  "organizeAiUse": {
+    "message": "Usa l'AI on-device",
+    "description": "Checkbox of the Organize view that lets the on-device model group by topic."
+  },
+  "organizeAiEnable": {
+    "message": "Attiva l'AI on-device",
+    "description": "Button that starts the browser's one-off download of the on-device model."
+  },
+  "organizeAiEnableHint": {
+    "message": "Il browser scarica il modello una volta sola: sono diversi gigabyte.",
+    "description": "Explains what turning on the on-device AI costs, next to the button that starts it."
+  },
+  "organizeAiDownloading": {
+    "message": "Scaricamento del modello… $1",
+    "description": "Progress of the on-device model's download. $1 is the formatted percentage."
+  },
+  "organizeAiWorking": {
+    "message": "L'AI sta raggruppando le schede…",
+    "description": "Shown while the on-device model is being asked for the groups."
+  },
+  "organizeAiCancel": {
+    "message": "Annulla",
+    "description": "Button that stops the on-device model and keeps the groups found without it."
+  },
   "barOrganize": {
     "message": "Raggruppa",
     "description": "Button in the selection bar that takes the selected tabs to the Organize view."

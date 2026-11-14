@@ -879,6 +879,37 @@ button {
   padding-bottom: var(--td-space-2);
 }
 
+/*
+ * The on-device model of §7.3: one block under the mode, shown only where there is a
+ * model. It sits apart from the options because it is not one of them — it says who
+ * answers "per argomento", not how the answer is applied.
+ */
+.td-ai {
+  margin-top: var(--td-space-2);
+  padding: var(--td-space-2);
+  background: var(--td-raised);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+}
+
+/* The badge of §4.4.2, beside the heading it qualifies. */
+.td-ai-badge {
+  margin-left: var(--td-space-2);
+  font-size: var(--td-text-meta);
+  font-weight: 400;
+  color: var(--td-text-muted);
+}
+
+/* The wait, with the way out of it right next to it. */
+.td-ai-working {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+  margin: var(--td-space-2) 0 0;
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
+}
+
 .td-groups {
   margin: var(--td-space-2) 0 0;
   padding: 0;

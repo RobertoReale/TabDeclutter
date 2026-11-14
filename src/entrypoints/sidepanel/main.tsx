@@ -2,6 +2,7 @@ import { render } from 'preact';
 
 import { panelLanguage, t } from '../../platform/i18n';
 import { App } from './App';
+import { closeAi } from './state/ai';
 import { startGuardState } from './state/guard';
 import { startPanelState } from './state/tabs';
 // Tokens first: `base.css` reads them and declares no value of its own.
@@ -19,6 +20,11 @@ startPanelState();
 // The guard's state is in `storage.session`, which the panel's state deliberately does not
 // watch, and the chip of §4.2 is in the header of every view: it follows it from here.
 startGuardState();
+
+// PLAN.md §7.3: the model's session is destroyed when the panel closes. `pagehide` and not
+// `unload`, which a bfcached document never gets; `closeAi` does nothing when there was no
+// session, which is the usual case.
+addEventListener('pagehide', closeAi);
 
 const root = document.getElementById('app');
 if (root) {
