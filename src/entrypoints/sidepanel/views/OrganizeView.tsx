@@ -17,17 +17,33 @@
  * explains is better than one that is missing.
  */
 
+import { useEffect } from 'preact/hooks';
+
 import { caps } from '@/platform/capabilities';
 import { t, type MessageKey } from '@/platform/i18n';
 import type { ClusterMode } from '@/core/cluster';
 import { EmptyState } from '../components/EmptyState';
 import { GroupPreview } from '../components/GroupPreview';
-import { appliedGroupsText, formatCount, pairText } from '../format';
+import { appliedGroupsText, formatCount, formatPercent, pairText } from '../format';
 import type { OrganizeOptions, OrganizeScope } from '../organize';
 import {
+  aiActive,
+  aiOffered,
+  availability,
+  checkAi,
+  downloadProgress,
+  enableAi,
+  setUseAi,
+  useAi,
+} from '../state/ai';
+import {
+  aiBadge,
+  aiQuestion,
+  aiWorking,
   appliedMessage,
   applyDraft,
   brought,
+  cancelAiGrouping,
   dismissApplied,
   draft,
   mode,
@@ -37,6 +53,7 @@ import {
   setMode,
   setOptions,
   setScope,
+  startAiGrouping,
   undoApply,
   working,
 } from '../state/organize';
@@ -48,7 +65,11 @@ const SCOPES: readonly { readonly value: OrganizeScope; readonly label: MessageK
   { value: 'all', label: 'organizeScopeAll' },
 ];
 
-/** §4.4.2's two ways of grouping. The AI one is M5 and is not offered yet. */
+/**
+ * §4.4.2's two ways of grouping. "Per argomento" is one mode and not two: whether the
+ * on-device model answers it is `AiPanel`'s business below, and on a browser without one
+ * the heuristic of §7.2 answers the very same question (PLAN.md §5.5).
+ */
 const MODES: readonly { readonly value: ClusterMode; readonly label: MessageKey }[] = [
   { value: 'site', label: 'organizeModeSite' },
   { value: 'topic', label: 'organizeModeTopic' },
@@ -142,6 +163,8 @@ export function OrganizeView({ language }: { language: string }) {
         </select>
       </label>
 
+      {mode.value === 'topic' && <AiPanel language={language} />}
+
       <h3 class="td-settings-group">{t('organizeOptions')}</h3>
       {OPTIONS.map((option) => (
         <label key={option.id} class="td-check">
@@ -160,7 +183,11 @@ export function OrganizeView({ language }: { language: string }) {
         <EmptyState text={t('organizeEmpty')} />
       ) : (
         <>
-          <h3 class="td-settings-group">{t('organizePreview')}</h3>
+          <h3 class="td-settings-group">
+            {t('organizePreview')}
+            {/* §4.4.2: the badge says who proposed what is on screen, and nothing more. */}
+            {aiBadge.value && <span class="td-chip td-ai-badge">{t('organizeAiBadge')}</span>}
+          </h3>
           <GroupPreview draft={current} titles={titles} language={language} />
         </>
       )}
@@ -184,6 +211,96 @@ export function OrganizeView({ language }: { language: string }) {
       </div>
     </section>
   );
+}
+
+/**
+ * The on-device model in the Organize view (PLAN.md §7.3, §4.4.2), when grouping by topic.
+ *
+ * It is one component and not three pieces spread through the view because it is one
+ * thing: what the browser can do, what the user chose, and what the model is doing right
+ * now. Where there is no model — Firefox, or a Chrome that will not give one — it renders
+ * nothing: §7.2 answers "per argomento" perfectly well, and an option that cannot be taken
+ * is worse than no option (PLAN.md §5.5).
+ *
+ * The two effects are here and not in `OrganizeView` because the view returns early on a
+ * browser without tab groups, and a hook after that return is a hook that sometimes runs.
+ * Mounted only in topic mode, they also keep the model's module unfetched until the user
+ * asks for the one feature that can use it (§11).
+ */
+function AiPanel({ language }: { language: string }) {
+  useEffect(() => {
+    void checkAi().catch(report);
+  }, []);
+
+  // Asked again whenever the question changes, and never while the model is not active:
+  // `startAiGrouping` decides for itself, so the effect only has to tell it that
+  // something moved.
+  const active = aiActive.value;
+  const question = aiQuestion.value;
+  useEffect(() => {
+    void startAiGrouping().catch(report);
+  }, [active, question]);
+
+  const state = availability.value;
+  if (!aiOffered.value) return null;
+
+  return (
+    <div class="td-ai">
+      {state === 'downloadable' && (
+        <>
+          {/*
+           * The one place the download can start (§7.3): it is several gigabytes and the
+           * browser only allows it with a click behind it, so it is asked for and never
+           * assumed.
+           */}
+          <button
+            type="button"
+            class="td-action"
+            onClick={() => {
+              void enableAi().catch(report);
+            }}
+          >
+            {t('organizeAiEnable')}
+          </button>
+          <p class="td-field-hint">{t('organizeAiEnableHint')}</p>
+        </>
+      )}
+
+      {state === 'downloading' && (
+        <p class="td-field-hint" role="status" aria-live="polite">
+          {t('organizeAiDownloading', formatPercent(downloadProgress.value ?? 0, language))}
+        </p>
+      )}
+
+      {state === 'available' && (
+        <label class="td-check">
+          <input
+            type="checkbox"
+            checked={useAi.value}
+            onChange={(event) => {
+              void setUseAi(event.currentTarget.checked).catch(report);
+            }}
+          />
+          <span>{t('organizeAiUse')}</span>
+        </label>
+      )}
+
+      {aiWorking.value && (
+        <p class="td-ai-working" role="status" aria-live="polite">
+          <span>{t('organizeAiWorking')}</span>
+          {/* §7.3: the wait is always interruptible, and §7.2's groups are already there. */}
+          <button type="button" class="td-action" onClick={cancelAiGrouping}>
+            {t('organizeAiCancel')}
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Nothing the user has to read: the heuristic has answered either way. */
+function report(error: unknown): void {
+  console.error('TabDeclutter: on-device AI', error);
 }
 
 /**

@@ -67,9 +67,23 @@ const durations = reuse(
     new Intl.NumberFormat(language, { style: 'unit', unit, unitDisplay: 'long' }),
 );
 
+const percents = reuse(
+  (language: string) => language,
+  (language: string) =>
+    new Intl.NumberFormat(language, { style: 'percent', maximumFractionDigits: 0 }),
+);
+
 /** A number as the panel's language writes it: `1.234` in Italian, `1,234` in English. */
 export function formatCount(value: number, language: string): string {
   return numbers(language).format(value);
+}
+
+/**
+ * A fraction between 0 and 1 as a percentage, which is how `downloadprogress` reports the
+ * model's download (PLAN.md §7.3). Whole percent: a tenth of one is not news.
+ */
+export function formatPercent(value: number, language: string): string {
+  return percents(language).format(value);
 }
 
 /**

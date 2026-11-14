@@ -19,12 +19,20 @@
  * so letting the toast expire would make the apply the one thing in the panel that cannot
  * be undone (PLAN.md §3). It stays until it is dismissed, undone, or replaced by the next
  * apply — see docs/DECISIONS.md, M4.3.
+ *
+ * Grouping by topic may also be answered by the on-device model (§7.3). That answer is not
+ * a computed: it costs seconds and a prompt, so it is asked for once per question and kept
+ * (`answer`) until the question changes. Everything about the model is behind `state/ai.ts`
+ * and an `import()`, so a panel that never asks never loads it (§11).
  */
 
 import { computed, signal } from '@preact/signals';
 
+import type { Llm, groupByAi as GroupByAi } from '@/core/ai-grouping';
 import { proposeGroups, type GroupColor } from '@/core/cluster';
+import type { TabInfo } from '@/core/types';
 import { applyGroups, applyMessage, undoGroups, type ApplyResult } from '@/platform/groups';
+import { aiActive, aiModel } from './ai';
 import {
   applyOptionsOf,
   clusterOptionsOf,
@@ -55,15 +63,112 @@ export {
   setScope,
 } from './organize-request';
 
-/** The proposal for what is in scope right now, before any edit. */
-const proposed = computed<Draft>(() => {
+/** The tabs the question is about (§4.4.1): the scope, over the current snapshot. */
+const scoped = computed<readonly TabInfo[]>(() => {
   const data = panelData.value;
-  const scoped = tabsInScope(data?.tabs ?? [], scope.value, brought.value, data?.focusedWindowId);
-  return draftOf(proposeGroups(scoped, mode.value, clusterOptionsOf(options.value)));
+  return tabsInScope(data?.tabs ?? [], scope.value, brought.value, data?.focusedWindowId);
 });
 
-/** What the preview draws: the proposal, or the proposal as the user has left it. */
-export const draft = computed<Draft>(() => edited.value ?? proposed.value);
+/** The proposal for what is in scope right now, before any edit. */
+const proposed = computed<Draft>(() =>
+  draftOf(proposeGroups(scoped.value, mode.value, clusterOptionsOf(options.value))),
+);
+
+/**
+ * The question the model would be asked, as one value to compare: an answer is only an
+ * answer to the scope, the mode and the options it was given.
+ */
+export const aiQuestion = computed(() =>
+  JSON.stringify([scope.value, mode.value, options.value, brought.value]),
+);
+
+/** The model's answer to `aiQuestion`, with `null` in it when §7.2 answered instead. */
+const answer = signal<{ readonly question: string; readonly draft: Draft | null } | null>(null);
+
+/** The model's proposal while it still answers the question being asked. */
+const aiDraft = computed<Draft | null>(() => {
+  const given = answer.value;
+  return given !== null && given.question === aiQuestion.value ? given.draft : null;
+});
+
+/**
+ * What the preview draws: the user's edits, else the model's answer, else §7.2's.
+ *
+ * In that order because each one supersedes the one behind it — an edited preview is the
+ * user's (§4.4.3), and a model that answered has answered this very question.
+ */
+export const draft = computed<Draft>(() => edited.value ?? aiDraft.value ?? proposed.value);
+
+/** The "AI on-device" badge of §4.4.2: what is on screen came from the model. */
+export const aiBadge = computed(() => aiDraft.value !== null && edited.value === null);
+
+/** Whether the model is being asked right now, which is what the spinner shows (§7.3). */
+export const aiWorking = signal(false);
+
+/** The run in flight, which "Annulla" aborts. */
+let running: AbortController | null = null;
+
+export interface AiRunDeps {
+  /** The session to ask. The panel's own by default (`state/ai.ts`). */
+  readonly model?: Llm;
+  /** `core/ai-grouping.ts`'s `groupByAi`, loaded with `import()` by default (§11). */
+  readonly groupBy?: typeof GroupByAi;
+}
+
+/**
+ * Asks the model to group by topic (PLAN.md §7.3). Called when Organize is opened and
+ * whenever the question changes; it decides for itself whether there is anything to do.
+ *
+ * It never throws and never leaves the preview empty: `groupByAi` falls back to §7.2 on
+ * its own, and anything it could still throw lands on `answer.draft = null`, which is the
+ * heuristic again. The answer is kept so that coming back to the view does not spend a
+ * second prompt on the same question.
+ */
+export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
+  if (!aiActive.value || mode.value !== 'topic') return;
+  if (aiWorking.value) return;
+  const asked = aiQuestion.value;
+  if (answer.value?.question === asked) return;
+
+  const tabs = scoped.value;
+  const chosen = clusterOptionsOf(options.value);
+  const controller = new AbortController();
+  running = controller;
+  aiWorking.value = true;
+  let drafted: Draft | null = null;
+  try {
+    const groupBy = deps.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
+    const model = deps.model ?? (await aiModel());
+    const result = await groupBy(tabs, model, { ...chosen, signal: controller.signal });
+    // A newer run, or a changed question, owns the answer now: this one is stale.
+    if (running !== controller) return;
+    if (result.source === 'ai') drafted = draftOf(result.proposal);
+  } catch (error: unknown) {
+    // A model that cannot even be reached is not an error the user has to read about:
+    // §7.2 has already answered, and the preview is showing it.
+    console.error('TabDeclutter: group by topic with the model', error);
+  } finally {
+    if (running === controller) {
+      running = null;
+      aiWorking.value = false;
+      // Recorded either way: a question that fell back is answered, and asking the model
+      // the same thing again would only take the same twenty seconds.
+      answer.value = { question: asked, draft: drafted };
+    }
+  }
+}
+
+/** "Annulla" in the spinner (§7.3): the run stops and §7.2's proposal stays on screen. */
+export function cancelAiGrouping(): void {
+  running?.abort();
+}
+
+/** Drops the model's answer, so the next question is asked again. Used by the tests. */
+export function resetAiGrouping(): void {
+  running = null;
+  aiWorking.value = false;
+  answer.value = null;
+}
 
 /** How many tabs [Applica] would group (§4.4.5), which is when it is worth pressing. */
 export const plannedTabs = computed(() => plannedCount(draft.value));
