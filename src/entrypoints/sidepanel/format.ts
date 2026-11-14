@@ -139,6 +139,24 @@ export function closedText(count: number, t: Translate, language: string): strin
   return counted(count, 'toastClosedOne', 'toastClosedOther', t, language);
 }
 
+/** The Organize toast's "3 gruppi creati" (PLAN.md §4.4.5). */
+export function appliedGroupsText(count: number, t: Translate, language: string): string {
+  return counted(count, 'organizeAppliedOne', 'organizeAppliedOther', t, language);
+}
+
+/**
+ * A plural pair a module outside the panel chose, with its count formatted here: that is
+ * how `platform/groups.ts`'s `applyMessage` reports what stayed out of the groups (§7.4)
+ * without knowing the panel's language.
+ */
+export function pairText(
+  pair: { readonly one: MessageKey; readonly other: MessageKey; readonly count: number },
+  t: Translate,
+  language: string,
+): string {
+  return counted(pair.count, pair.one, pair.other, t, language);
+}
+
 /** The health bar's "23 da rivedere" (PLAN.md §4.2). */
 export function reviewText(count: number, t: Translate, language: string): string {
   return t('healthReview', formatCount(count, language));

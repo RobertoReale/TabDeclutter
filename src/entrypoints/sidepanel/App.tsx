@@ -2,15 +2,23 @@
  * The panel's shell: the header of PLAN.md §4.2 and the view it is showing.
  *
  * Declutter is live — its rows, its sections and its reasons are `views/
- * DeclutterView.tsx` — and so is the archive (`views/ArchiveView.tsx`), while
- * Organize is still M4.3 and so is only its empty state. The header reads the
- * signals of `state/tabs.ts`, so what it says is what the browser currently has
- * open.
+ * DeclutterView.tsx` — and so are the archive (`views/ArchiveView.tsx`) and
+ * Organize. The header reads the signals of `state/tabs.ts`, so what it says is
+ * what the browser currently has open.
+ *
+ * Organize is the one view reached through `import()` (PLAN.md §11): it brings in
+ * the clustering of `core/cluster.ts` and its own components, and the panel opens
+ * on Declutter, so nobody who never presses "Organizza" downloads or parses them.
+ * The module is kept in a module-level variable once loaded, so coming back to the
+ * view is immediate and the chunk is fetched at most once per document.
  *
  * Every visible string goes through `t` (invariant 11) and nothing is ever
  * interpolated as HTML: a title or a URL is untrusted text (invariant 7), and
  * JSX children are text by construction.
  */
+
+import { useSignal } from '@preact/signals';
+import { useEffect } from 'preact/hooks';
 
 import { panelLanguage, t, type MessageKey } from '@/platform/i18n';
 import { GuardChip } from './components/GuardChip';
@@ -20,6 +28,8 @@ import type { ViewId } from './state/view';
 import { settingsOpen, showView, toggleSettings, view } from './state/view';
 import { ArchiveView } from './views/ArchiveView';
 import { DeclutterView } from './views/DeclutterView';
+// Type-only, so it is erased and the chunk is still fetched by the `import()` below.
+import type * as OrganizeModule from './views/OrganizeView';
 import { SettingsView } from './views/SettingsView';
 
 /** The views the navigation of §4.2 switches between, in its order. */
@@ -92,8 +102,41 @@ function View({ id, language }: { id: ViewId; language: string }) {
     case 'declutter':
       return <DeclutterView language={language} />;
     case 'organize':
-      return <p class="td-empty">{t('organizeEmpty')}</p>;
+      return <OrganizeSlot language={language} />;
     case 'archive':
       return <ArchiveView language={language} />;
   }
+}
+
+/** The Organize chunk, once it has been fetched. Outside the component, so it survives. */
+let organizeModule: typeof OrganizeModule | null = null;
+
+/**
+ * Loads `views/OrganizeView.tsx` the first time Organize is opened, and renders nothing
+ * while it is in flight: the chunk is local, a few tens of kilobytes and already in the
+ * extension's own package, so a spinner would flash rather than inform.
+ */
+function OrganizeSlot({ language }: { language: string }) {
+  const loaded = useSignal(organizeModule);
+
+  useEffect(() => {
+    if (organizeModule !== null) return undefined;
+    // Guards against a setState after the view has been left again mid-fetch.
+    let alive = true;
+    void import('./views/OrganizeView')
+      .then((module) => {
+        organizeModule = module;
+        if (alive) loaded.value = module;
+      })
+      .catch((error: unknown) => {
+        console.error('TabDeclutter: load Organize', error);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [loaded]);
+
+  const module = loaded.value;
+  if (module === null) return null;
+  return <module.OrganizeView language={language} />;
 }

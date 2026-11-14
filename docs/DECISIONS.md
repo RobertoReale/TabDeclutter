@@ -2699,3 +2699,87 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   tab without leaving its group), and both only appear after the user has edited the very thing being
   restored. The order and the groups are restored exactly in the case §4.4.5 is about, which is the
   user undoing what they just applied.
+
+## M4.3 — the preview is a `computed` until the first edit, and pinned after it
+
+- **Context:** §4.4.3 wants an editable preview, and the proposal it starts from is a function of
+  the open tabs, which keep changing while the panel is open.
+- **Decision:** `draft` is `edited.value ?? proposed.value`: it follows the browser while nothing has
+  been edited, and the first edit writes the whole draft into `edited`, which from then on is what
+  the view shows. A new scope, a new mode or a new option clears `edited`.
+- **Why:** before the first edit there is nothing to lose, and a preview that quietly ignores a tab
+  the user just opened would be lying about what "Applica" will do. After the first edit the rows
+  are the user's answer, and a tab opening in another window must not renumber or rename them. A
+  scope, a mode or an option is a different question, so the answer to the previous one goes.
+
+## M4.3 — "Applica" pins the draft before it applies it
+
+- **Context:** the toast of §4.4.5 names how many groups were created, and "Applica" can be pressed
+  while the draft is still the unpinned `computed`.
+- **Decision:** `applyDraft` writes the current draft into `edited` first, then applies it.
+- **Why:** otherwise the preview could change under the toast, and "Annulla" would be offered next
+  to a list that is no longer the one that was applied.
+
+## M4.3 — "Altro" is a destination and never a source
+
+- **Context:** §4.4.3 asks for "Sposta in…" without saying whether a tab outside every group can be
+  moved into one.
+- **Decision:** `moveTargets` answers `[]` for a tab in "Altro", so that row has no menu; every
+  group's rows offer the other groups of the same window and "Altro".
+- **Why:** "Altro" is what the clustering left over, not a group — it has no title and no colour,
+  and it is not created. Letting a tab in and out of it both ways would make it look like one. A
+  move across windows is refused for the same reason the proposal never spans windows: a native
+  group lives in one window.
+
+## M4.3 — a blank name falls back to the proposed one, and an emptied group disappears
+
+- **Context:** the name is an ordinary text input, so it can be emptied, and "Sposta in…" can take
+  the last tab out of a group.
+- **Decision:** the input keeps exactly what was typed, including blank; what is applied is the
+  trimmed name or, when that is empty, the name §7.1 proposed. A group left with no tabs is dropped
+  from the draft.
+- **Why:** a group has to have a title, and the browser would show an untitled one, so the fallback
+  is the only answer that does not need an error. Keeping the raw text in the input is what lets the
+  user clear the field and type, which a fallback written back into it would prevent. An empty group
+  cannot be created, so showing it would promise something that will not happen.
+
+## M4.3 — merging keeps the target's key, title and colour
+
+- **Context:** §4.4.3's merge joins two groups and has to decide what the result is called.
+- **Decision:** the group that was merged *into* keeps everything of its own and gains the other's
+  tabs at the end; the other disappears.
+- **Why:** the user picked the target from the menu, so that is the group they are keeping, and its
+  name is the one they chose it by. Appending keeps the order each group was in.
+
+## M4.3 — the Organize toast waits to be dismissed
+
+- **Context:** the close toast of §4.3 clears itself after eight seconds (`state/undo.ts`), and
+  §4.4.5's toast is written the same way.
+- **Decision:** this one stays until "Annulla", "Chiudi" or the next apply replaces it.
+- **Why:** a close is undoable from the archive after the toast is gone, so letting it expire loses
+  nothing. A grouping is not: once the toast goes, "Annulla" is the only thing that would have put
+  the window back in one gesture, and the user has just been handed a window that looks different.
+- Not verified by hand: nothing of this view is on a manual checklist. The preview edits are in
+  `tests/unit/organize.test.ts`, the "Raggruppa" handoff and the pinning in
+  `tests/ext/organize-state.test.ts`, and the toast with its "Annulla" in
+  `tests/e2e/organize.spec.ts`.
+
+## M4.3 — Organize stays in the nav on a browser without tab groups
+
+- **Context:** §5.5 says Firefox may not have `tabGroups`, and the nav of §4.2 is the same
+  everywhere.
+- **Decision:** the entry is always there and the view says, with `organizeNoGroups`, that this
+  browser cannot group tabs.
+- **Why:** a nav that changes shape per browser makes the missing feature a puzzle. A sentence in
+  the place the feature would be is the explanation, and it needs no capability check in the shell.
+
+## M4.3 — the Organize state is split in two modules, for §11's chunking
+
+- **Context:** §4.3's "Raggruppa" is in the selection bar, which is in the panel's first chunk, and
+  §11 wants the Organize view loaded with `import()` — but calling into `state/organize.ts` would
+  pull `core/cluster.ts` and `platform/groups.ts` into that first chunk with it.
+- **Decision:** the question (scope, mode, options, the brought selection, the edited draft) lives
+  in `state/organize-request.ts`, which imports nothing heavy; `state/organize.ts` holds the
+  clustering and the apply and re-exports the question, so the view still reads one module.
+- **Why:** it is the only way the button and the view can share state without the button paying for
+  the view. The build shows it works: `OrganizeView` is its own chunk.

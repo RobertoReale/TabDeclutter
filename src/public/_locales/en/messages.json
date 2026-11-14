@@ -259,6 +259,150 @@
     "message": "$1 tabs could not be grouped",
     "description": "Shown after applying the groups, for every other count of tabs left out. $1 is the formatted number."
   },
+  "organizeNoGroups": {
+    "message": "This browser cannot create tab groups.",
+    "description": "Shown in the Organize view when the browser has no native tab groups."
+  },
+  "organizeScope": {
+    "message": "Which tabs",
+    "description": "Accessible name of the Organize view's scope chooser."
+  },
+  "organizeScopeWindow": {
+    "message": "Current window",
+    "description": "Scope of the Organize view: only the tabs of the window the panel is in."
+  },
+  "organizeScopeAll": {
+    "message": "All windows",
+    "description": "Scope of the Organize view: the tabs of every window."
+  },
+  "organizeScopeSelection": {
+    "message": "Selection ($1)",
+    "description": "Scope of the Organize view: the tabs brought over from the selection bar. $1 is the formatted number."
+  },
+  "organizeMode": {
+    "message": "Group by",
+    "description": "Accessible name of the Organize view's grouping mode chooser."
+  },
+  "organizeModeSite": {
+    "message": "By site",
+    "description": "Grouping mode: one group per site."
+  },
+  "organizeModeTopic": {
+    "message": "By topic",
+    "description": "Grouping mode: groups of tabs that are about the same thing."
+  },
+  "organizeOptions": {
+    "message": "Options",
+    "description": "Accessible name of the Organize view's options."
+  },
+  "organizeOptionSort": {
+    "message": "Sort the tabs in the window by group",
+    "description": "Option of the Organize view: lay the tab strip out group by group."
+  },
+  "organizeOptionCollapse": {
+    "message": "Collapse the groups",
+    "description": "Option of the Organize view: create the groups collapsed."
+  },
+  "organizeOptionLeavePinned": {
+    "message": "Leave pinned tabs out",
+    "description": "Option of the Organize view, on by default: pinned tabs are not grouped."
+  },
+  "organizeOptionIncludeGrouped": {
+    "message": "Include tabs already in a group",
+    "description": "Option of the Organize view, off by default: tabs the user has already grouped are left alone."
+  },
+  "organizePreview": {
+    "message": "Proposed groups",
+    "description": "Accessible name of the list of groups the Organize view proposes."
+  },
+  "organizeGroupInclude": {
+    "message": "Include this group",
+    "description": "Accessible name of the checkbox that keeps a proposed group in or out."
+  },
+  "organizeGroupName": {
+    "message": "Group name",
+    "description": "Accessible name of the box that renames a proposed group."
+  },
+  "organizeGroupColor": {
+    "message": "Group colour",
+    "description": "Accessible name of the chooser for a proposed group's colour."
+  },
+  "organizeMoveTo": {
+    "message": "Move to…",
+    "description": "Menu on a tab in the preview that moves it to another proposed group."
+  },
+  "organizeMerge": {
+    "message": "Merge into…",
+    "description": "Menu on a proposed group that merges it into another one."
+  },
+  "organizeOther": {
+    "message": "Other",
+    "description": "The tabs that stay out of every group, and the way to take a tab out of one."
+  },
+  "organizeOtherHint": {
+    "message": "These tabs stay out of every group.",
+    "description": "Explains the \"Other\" list of the Organize view."
+  },
+  "organizeWindow": {
+    "message": "Window $1",
+    "description": "Which window a proposed group belongs to, shown only when more than one is in scope. $1 is the number."
+  },
+  "organizeApply": {
+    "message": "Apply",
+    "description": "Button of the Organize view that creates the proposed groups in the browser."
+  },
+  "organizeAppliedOne": {
+    "message": "$1 group created",
+    "description": "Toast after applying, when exactly one group was created. $1 is the formatted number."
+  },
+  "organizeAppliedOther": {
+    "message": "$1 groups created",
+    "description": "Toast after applying, for every other number of groups. $1 is the formatted number."
+  },
+  "organizeDismiss": {
+    "message": "Dismiss",
+    "description": "Accessible name of the button that closes the Organize view's toast without undoing."
+  },
+  "barOrganize": {
+    "message": "Group",
+    "description": "Button in the selection bar that takes the selected tabs to the Organize view."
+  },
+  "colorGrey": {
+    "message": "Grey",
+    "description": "Name of a tab group colour."
+  },
+  "colorBlue": {
+    "message": "Blue",
+    "description": "Name of a tab group colour."
+  },
+  "colorRed": {
+    "message": "Red",
+    "description": "Name of a tab group colour."
+  },
+  "colorYellow": {
+    "message": "Yellow",
+    "description": "Name of a tab group colour."
+  },
+  "colorGreen": {
+    "message": "Green",
+    "description": "Name of a tab group colour."
+  },
+  "colorPink": {
+    "message": "Pink",
+    "description": "Name of a tab group colour."
+  },
+  "colorPurple": {
+    "message": "Purple",
+    "description": "Name of a tab group colour."
+  },
+  "colorCyan": {
+    "message": "Cyan",
+    "description": "Name of a tab group colour."
+  },
+  "colorOrange": {
+    "message": "Orange",
+    "description": "Name of a tab group colour."
+  },
   "archiveEmpty": {
     "message": "No archived tabs.",
     "description": "Shown in the Archive view when nothing has been closed through TabDeclutter."

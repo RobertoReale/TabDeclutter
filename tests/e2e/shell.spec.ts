@@ -84,8 +84,12 @@ test.describe('in English', () => {
     // Freshly opened tabs are all within the grace period, so nothing is due.
     await expect(main).toHaveText(message('en', 'declutterEmpty'));
 
+    // Organize keeps its question — the scope, the mode and the options of §4.4 — and says
+    // it has nothing to propose in place of the preview. What the view does with a window
+    // worth grouping is `organize.spec.ts`'s business.
     await panel.getByRole('button', { name: message('en', 'navOrganize') }).click();
-    await expect(main).toHaveText(message('en', 'organizeEmpty'));
+    await expect(main.locator('.td-empty')).toHaveText(message('en', 'organizeEmpty'));
+    await expect(main.locator('.td-group')).toHaveCount(0);
 
     await panel.getByRole('button', { name: message('en', 'navArchive') }).click();
     await expect(main).toHaveText(message('en', 'archiveEmpty'));

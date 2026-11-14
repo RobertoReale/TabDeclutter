@@ -259,6 +259,150 @@
     "message": "$1 schede non sono state raggruppate",
     "description": "Shown after applying the groups, for every other count of tabs left out. $1 is the formatted number."
   },
+  "organizeNoGroups": {
+    "message": "Questo browser non può creare gruppi di schede.",
+    "description": "Shown in the Organize view when the browser has no native tab groups."
+  },
+  "organizeScope": {
+    "message": "Quali schede",
+    "description": "Accessible name of the Organize view's scope chooser."
+  },
+  "organizeScopeWindow": {
+    "message": "Finestra corrente",
+    "description": "Scope of the Organize view: only the tabs of the window the panel is in."
+  },
+  "organizeScopeAll": {
+    "message": "Tutte le finestre",
+    "description": "Scope of the Organize view: the tabs of every window."
+  },
+  "organizeScopeSelection": {
+    "message": "Selezione ($1)",
+    "description": "Scope of the Organize view: the tabs brought over from the selection bar. $1 is the formatted number."
+  },
+  "organizeMode": {
+    "message": "Raggruppa",
+    "description": "Accessible name of the Organize view's grouping mode chooser."
+  },
+  "organizeModeSite": {
+    "message": "Per sito",
+    "description": "Grouping mode: one group per site."
+  },
+  "organizeModeTopic": {
+    "message": "Per argomento",
+    "description": "Grouping mode: groups of tabs that are about the same thing."
+  },
+  "organizeOptions": {
+    "message": "Opzioni",
+    "description": "Accessible name of the Organize view's options."
+  },
+  "organizeOptionSort": {
+    "message": "Ordina le schede nella finestra per gruppo",
+    "description": "Option of the Organize view: lay the tab strip out group by group."
+  },
+  "organizeOptionCollapse": {
+    "message": "Comprimi i gruppi",
+    "description": "Option of the Organize view: create the groups collapsed."
+  },
+  "organizeOptionLeavePinned": {
+    "message": "Lascia fuori le schede fissate",
+    "description": "Option of the Organize view, on by default: pinned tabs are not grouped."
+  },
+  "organizeOptionIncludeGrouped": {
+    "message": "Includi le schede già in un gruppo",
+    "description": "Option of the Organize view, off by default: tabs the user has already grouped are left alone."
+  },
+  "organizePreview": {
+    "message": "Gruppi proposti",
+    "description": "Accessible name of the list of groups the Organize view proposes."
+  },
+  "organizeGroupInclude": {
+    "message": "Includi questo gruppo",
+    "description": "Accessible name of the checkbox that keeps a proposed group in or out."
+  },
+  "organizeGroupName": {
+    "message": "Nome del gruppo",
+    "description": "Accessible name of the box that renames a proposed group."
+  },
+  "organizeGroupColor": {
+    "message": "Colore del gruppo",
+    "description": "Accessible name of the chooser for a proposed group's colour."
+  },
+  "organizeMoveTo": {
+    "message": "Sposta in…",
+    "description": "Menu on a tab in the preview that moves it to another proposed group."
+  },
+  "organizeMerge": {
+    "message": "Unisci a…",
+    "description": "Menu on a proposed group that merges it into another one."
+  },
+  "organizeOther": {
+    "message": "Altro",
+    "description": "The tabs that stay out of every group, and the way to take a tab out of one."
+  },
+  "organizeOtherHint": {
+    "message": "Queste schede restano fuori dai gruppi.",
+    "description": "Explains the \"Other\" list of the Organize view."
+  },
+  "organizeWindow": {
+    "message": "Finestra $1",
+    "description": "Which window a proposed group belongs to, shown only when more than one is in scope. $1 is the number."
+  },
+  "organizeApply": {
+    "message": "Applica",
+    "description": "Button of the Organize view that creates the proposed groups in the browser."
+  },
+  "organizeAppliedOne": {
+    "message": "$1 gruppo creato",
+    "description": "Toast after applying, when exactly one group was created. $1 is the formatted number."
+  },
+  "organizeAppliedOther": {
+    "message": "$1 gruppi creati",
+    "description": "Toast after applying, for every other number of groups. $1 is the formatted number."
+  },
+  "organizeDismiss": {
+    "message": "Chiudi",
+    "description": "Accessible name of the button that closes the Organize view's toast without undoing."
+  },
+  "barOrganize": {
+    "message": "Raggruppa",
+    "description": "Button in the selection bar that takes the selected tabs to the Organize view."
+  },
+  "colorGrey": {
+    "message": "Grigio",
+    "description": "Name of a tab group colour."
+  },
+  "colorBlue": {
+    "message": "Blu",
+    "description": "Name of a tab group colour."
+  },
+  "colorRed": {
+    "message": "Rosso",
+    "description": "Name of a tab group colour."
+  },
+  "colorYellow": {
+    "message": "Giallo",
+    "description": "Name of a tab group colour."
+  },
+  "colorGreen": {
+    "message": "Verde",
+    "description": "Name of a tab group colour."
+  },
+  "colorPink": {
+    "message": "Rosa",
+    "description": "Name of a tab group colour."
+  },
+  "colorPurple": {
+    "message": "Viola",
+    "description": "Name of a tab group colour."
+  },
+  "colorCyan": {
+    "message": "Ciano",
+    "description": "Name of a tab group colour."
+  },
+  "colorOrange": {
+    "message": "Arancione",
+    "description": "Name of a tab group colour."
+  },
   "archiveEmpty": {
     "message": "Nessuna scheda in archivio.",
     "description": "Shown in the Archive view when nothing has been closed through TabDeclutter."
