@@ -1065,7 +1065,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M4.1 Grouping by site and by topic
 - [x] M4.2 Applying and undoing groups
 - [x] M4.3 Organize view
-- [ ] M4.4 Cluster review and Organize E2E
+- [x] M4.4 Cluster review and Organize E2E
 - [ ] M5.1 AI grouping with an injected LLM
 - [ ] M5.2 Prompt API adapter and integration
 - [ ] M6.1 Complete settings
