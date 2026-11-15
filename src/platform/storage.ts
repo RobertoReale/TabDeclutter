@@ -88,6 +88,15 @@ export const settingsItem = defineVersioned<Settings>('local:settings', DEFAULT_
 export const duplicateWhitelistItem = defineVersioned<string[]>('local:duplicateWhitelist', []);
 
 /**
+ * Whether the first-run screen of PLAN.md §17 has been answered.
+ *
+ * An item of its own and not a setting: it is not something §4.6 offers to change, and keeping it
+ * out of `Settings` leaves "the stored settings are the user's choices" true (docs/DECISIONS.md
+ * M6.2). `false` for a profile that has never seen it, which is what a fresh install reads.
+ */
+export const onboardedItem = defineVersioned<boolean>('local:onboarded', false);
+
+/**
  * Which tab the foreground clock is running for, `null` when no window has focus.
  *
  * `storage.session`, because a period belongs to this run of the browser: it must outlive

@@ -9,7 +9,7 @@
  * WXT's alias, and this module is tested there.
  */
 
-import type { LanguageSetting } from '../../core/types';
+import type { GuardMode, LanguageSetting } from '../../core/types';
 import type { AiAvailability } from '../../platform/llm';
 import type { MessageKey } from '../../platform/i18n';
 import { durationText } from './format';
@@ -38,6 +38,27 @@ export const GRACE_MS: readonly number[] = [30 * MINUTE, 2 * HOUR, 8 * HOUR, 24 
 
 /** §4.6 fixes the retention's default at 30 days; a week, a quarter and a year frame it. */
 export const RETENTION_DAYS: readonly number[] = [7, 30, 90, 365];
+
+/**
+ * §17.2: the first run asks for the threshold among three values, not the five of §4.6. It is a
+ * "quick choice", and `STALE_DAYS`'s own default is among them, so nobody has to decide between
+ * 1 and 30 days before having seen a single suggestion.
+ */
+export const ONBOARDING_STALE_DAYS: readonly number[] = [3, 7, 14];
+
+/**
+ * §17.3: "Quando apri una scheda già aperta", in the order and the words the spec gives them —
+ * which is not `MODE_CHOICES`'s order, because the first run leads with the answer it preselects
+ * and the settings page lists the three modes from the quietest up.
+ */
+export const ONBOARDING_MODE_CHOICES: readonly Choice<GuardMode>[] = [
+  { value: 'auto', label: 'onboardingGuardAuto' },
+  { value: 'warn', label: 'onboardingGuardWarn' },
+  { value: 'off', label: 'onboardingGuardOff' },
+];
+
+/** "Chiudila e torna a quella esistente (preselezionato)", §17.3 and §8.1. */
+export const ONBOARDING_DEFAULT_MODE: GuardMode = 'auto';
 
 /** §4.6's "Lingua: automatica, IT, EN". */
 export const LANGUAGE_CHOICES: readonly Choice<LanguageSetting>[] = [

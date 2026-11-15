@@ -154,6 +154,24 @@ async function navigate(page: Page, url: string): Promise<void> {
   await frame.browsingContext.navigate(url, 'complete');
 }
 
+/**
+ * Marks the profile as past the first run of PLAN.md §17 and shows the panel again.
+ *
+ * A fresh profile is a fresh install, so the panel's first document is the onboarding screen
+ * and none of the views these specs read exists yet. The flag can only be written from an
+ * extension document — this harness has no way to reach the background, see above — so it is
+ * written from the panel itself and the same page is navigated again: whether the screen is
+ * owed is read once at boot (`state/onboarding.ts`), so the second load is the panel a profile
+ * past its first run shows. The same page rather than a second tab, because the header counts
+ * the tabs that are open (TASKS.md M6.2).
+ */
+async function pastFirstRun(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await browser.storage.local.set({ onboarded: true });
+  });
+  await navigate(page, PANEL_URL);
+}
+
 /** What the panel rendered, read from the live document. */
 export interface PanelState {
   url: string;
@@ -290,6 +308,7 @@ export async function openPanel(options: PanelOptions = {}): Promise<PanelSessio
 
   const page = await firefox.newPage();
   await navigate(page, PANEL_URL);
+  await pastFirstRun(page);
 
   return {
     page,

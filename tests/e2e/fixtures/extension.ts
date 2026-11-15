@@ -33,6 +33,12 @@ export interface ExtensionOptions {
    * with `test.use({ uiLanguage: 'it' })`.
    */
   uiLanguage: Locale;
+  /**
+   * Whether the profile has already answered the first run of PLAN.md §17. True by default:
+   * `onboarding.spec.ts` turns it off with `test.use({ onboarded: false })` and is then looking
+   * at a real fresh install.
+   */
+  onboarded: boolean;
 }
 
 /**
@@ -62,6 +68,33 @@ export interface LaunchOptions {
   readonly headless: boolean;
   /** `prefers-color-scheme`, or `null` for the browser's own default. */
   readonly colorScheme?: 'light' | 'dark' | 'no-preference' | null;
+  /**
+   * Whether the profile is past the first run of PLAN.md §17. True by default, because a fresh
+   * profile is a fresh install and the onboarding screen would be the only thing in the panel:
+   * `onboarding.spec.ts` is the one that wants it, with `test.use({ onboarded: false })`.
+   */
+  readonly onboarded?: boolean;
+}
+
+/** The part of the extension API the flag is written with, in the service worker. */
+interface StorageApi {
+  readonly chrome: {
+    readonly storage: { readonly local: { set(items: Record<string, unknown>): Promise<void> } };
+  };
+}
+
+/**
+ * Marks the profile as past the first run.
+ *
+ * Through the service worker and before any panel document exists, so no panel ever reads the
+ * flag as `false` and then sees it change underneath it.
+ */
+async function markOnboarded(context: BrowserContext): Promise<void> {
+  const [existing] = context.serviceWorkers();
+  const worker = existing ?? (await context.waitForEvent('serviceworker'));
+  await worker.evaluate(() =>
+    (globalThis as unknown as StorageApi).chrome.storage.local.set({ onboarded: true }),
+  );
 }
 
 /**
@@ -77,7 +110,7 @@ export async function launchExtension(
   options: LaunchOptions,
 ): Promise<BrowserContext> {
   seedProfile(userDataDir, options.uiLanguage);
-  return chromium.launchPersistentContext(userDataDir, {
+  const context = await chromium.launchPersistentContext(userDataDir, {
     // `channel: 'chromium'` is the full Chromium browser. Playwright's default
     // headless binary is the headless shell, which has no extension support, and
     // branded Chrome ignores `--load-extension`.
@@ -93,6 +126,10 @@ export async function launchExtension(
     colorScheme: options.colorScheme ?? undefined,
     args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`],
   });
+  // Before the test opens anything: every spec but `onboarding.spec.ts` is about a profile
+  // whose first run is over (§17).
+  if (options.onboarded !== false) await markOnboarded(context);
+  return context;
 }
 
 /**
@@ -123,6 +160,7 @@ export interface ExtensionFixtures {
 
 export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
   uiLanguage: ['en', { option: true }],
+  onboarded: [true, { option: true }],
 
   // Created before the context, so that it can start recording the moment the
   // browser is up and catch what the service worker logs while it boots.
@@ -136,11 +174,12 @@ export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
 
   // The profile lives in the test's own output directory, so Playwright creates
   // it, keeps it when the test fails and removes it when it passes.
-  context: async ({ recorder, uiLanguage, headless, colorScheme }, use, testInfo) => {
+  context: async ({ recorder, uiLanguage, headless, colorScheme, onboarded }, use, testInfo) => {
     const context: BrowserContext = await launchExtension(testInfo.outputPath('profile'), {
       uiLanguage,
       headless,
       colorScheme,
+      onboarded,
     });
     recorder.attach(context);
     await use(context);

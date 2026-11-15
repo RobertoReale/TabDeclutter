@@ -137,12 +137,16 @@ beforeAll(async () => {
   panelUrl = `chrome-extension://${new URL(worker.url()).host}/sidepanel.html`;
 
   // The history the rows' chips and the score read, written the way `tests/e2e/` writes
-  // it: the raw key `activity`, from inside an extension page.
+  // it: the raw key `activity`, from inside an extension page. `onboarded` goes with it:
+  // this is a fresh profile, and what §17 shows a fresh install is the first-run screen,
+  // which has no list in it to measure (TASKS.md M6.2). The budget is about the panel a
+  // person uses every day, so the profile is one that has answered it.
   const seeder = await context.newPage();
   await seeder.goto(panelUrl);
   await seeder.evaluate(async (store) => {
     await (globalThis as unknown as { chrome: PanelApi }).chrome.storage.local.set({
       activity: store,
+      onboarded: true,
     });
   }, activity);
   await seeder.close();

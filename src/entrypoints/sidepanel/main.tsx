@@ -4,6 +4,7 @@ import { panelLanguage, t } from '../../platform/i18n';
 import { App } from './App';
 import { closeAi } from './state/ai';
 import { startGuardState } from './state/guard';
+import { startOnboarding } from './state/onboarding';
 import { startLanguage } from './state/settings';
 import { startPanelState } from './state/tabs';
 // Tokens first: `base.css` reads them and declares no value of its own.
@@ -24,6 +25,9 @@ startGuardState();
 // §4.6's language: `browser.i18n` cannot be switched at runtime, so the setting is followed here
 // and `platform/i18n.ts` answers from the catalogue it asks for (docs/DECISIONS.md M6.1).
 startLanguage();
+// §17: the first run is a screen of the panel, so whether it is owed is read here, before the
+// first render, and no page is ever opened for the user.
+startOnboarding();
 
 // PLAN.md §7.3: the model's session is destroyed when the panel closes. `pagehide` and not
 // `unload`, which a bfcached document never gets; `closeAi` does nothing when there was no

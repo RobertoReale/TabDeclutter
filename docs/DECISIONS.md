@@ -3003,3 +3003,64 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   and `permissions.remove` to be called when the row is turned off;
   `tests/ext/bookmarks.test.ts` covers every answer the browser can give. The prompt itself, and
   what it says, remain unobserved.
+
+## M6.2 — "The first run is over" is an item of its own, not a setting
+
+- **Context:** §17 asks for a single screen on first run, and something has to remember that it was
+  answered. The obvious place is `Settings`, which is already one versioned storage item the panel
+  reads and writes.
+- **Decision:** `local:onboarded`, a boolean item of its own in `platform/storage.ts`, default
+  `false`. `state/onboarding.ts` reads it once at boot into an `onboardingNeeded` signal that is
+  tri-state: `null` until the read answers, and the panel renders nothing in that moment rather
+  than a frame of Declutter. A failed read resolves to "answered", so a profile can never be stuck
+  on the first run. `finishOnboarding` writes the two settings first and the flag second.
+- **Why:** `Settings` is "the user's choices" and every field of it is something §4.6 offers to
+  change; a flag nobody can see would be neither, and adding it would mean a settings migration for
+  a value that is not a setting. The write order is the one that fails safely: a storage error after
+  the answers are in makes the screen come back and be answered again, where the reverse would lose
+  them silently.
+
+## M6.2 — The first run asks §17's question in its own words, and "auto" is only preselected
+
+- **Context:** §17.3 asks "Quando apri una scheda già aperta" with three answers, and §8.1 says
+  the default guard mode is the one chosen in onboarding. The settings page already has three
+  labels for the same three modes (`MODE_CHOICES`), and invariant 2 forbids closing a tab without
+  an explicit gesture.
+- **Decision:** `ONBOARDING_MODE_CHOICES` is its own list, in §17.3's order with `auto` first and
+  preselected, with its own `onboardingGuard*` keys; `ONBOARDING_STALE_DAYS` is 3/7/14, a subset of
+  §4.6's five. `DEFAULT_SETTINGS.guard.mode` stays `'warn'`: nothing is stored until "Inizia".
+- **Why:** §17's wording is addressed to someone who has not met the extension yet ("Chiudila e
+  torna a quella esistente"), and the settings page's is a label next to a stored value; sharing
+  one list would force one of the two to read wrongly. Preselecting without storing is what keeps
+  §8.1 and invariant 2 both true — a person who installs the extension and never opens the panel
+  has a profile that closes nothing.
+
+## M6.2 — The whitelist link finishes the first run on its way out
+
+- **Context:** §17.3's "Hai una whitelist di Duplicate Tabs Closer?" link opens the editor of
+  §8.3, which lives inside the settings page — a view that only exists once the shell does.
+- **Decision:** `openWhitelistFromOnboarding` saves the answers given so far and stores the flag,
+  exactly as "Inizia" does, and then calls `showSettings('duplicates')`. The screen does not come
+  back afterwards.
+- **Why:** the alternative — the editor on top of the first run, to be returned to — is a second
+  way out of the screen and a state where the answers exist but are not stored. Someone who follows
+  that link has made the two choices on screen (the preselected ones count); treating the click as
+  an answer loses nothing and leaves the panel in one state instead of two.
+
+## M6.2 — Every test profile but the first run's is already past it
+
+- **Context:** a fresh Chromium profile is a fresh install, so from this task on the panel's first
+  document is the onboarding screen. Every E2E spec and the panel-opening budget launch fresh
+  profiles and look at the Declutter list.
+- **Decision:** `tests/e2e/fixtures/extension.ts` writes `onboarded: true` through the service
+  worker before any page exists, controlled by an `onboarded` test option that is `true` by default;
+  `onboarding.spec.ts` is the one spec that sets `test.use({ onboarded: false })`.
+  `tests/perf/panel-opening.perf.test.ts` writes the same key with the activity it seeds. The
+  Firefox harness cannot reach its background at all (`tests/e2e-firefox/fixtures/panel.ts`), so
+  `openPanel` writes the flag from the panel document and navigates the same page again — the same
+  tab, because the header counts the tabs that are open.
+- **Why:** the first run is one screen seen once, and a suite in which every test had to dismiss it
+  would be testing the dismissal fifty times and the views once each. Writing the flag from the
+  service worker, before the first panel document, means no panel ever reads it as `false` and then
+  watches it change. The budget measures the panel a person opens every day, which is a panel whose
+  first run is over.
