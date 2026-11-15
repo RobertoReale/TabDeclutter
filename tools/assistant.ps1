@@ -617,6 +617,60 @@ function Publish-Repository([hashtable] $State) {
     return $true
 }
 
+function Get-LimitWait {
+    <#
+        Whether the runner is waiting out a usage limit right now, and until when. That is
+        true only when the last line of the newest target log is phasekit's wait note: the
+        runner writes nothing else while it waits, and the first line of a resumed
+        conversation pushes the note up. A note older than half an hour (one is written every
+        fifteen minutes) belongs to a runner that is not waiting any more.
+    #>
+    $log = Get-ChildItem -LiteralPath $Cfg.logDir -Filter 'phase-*.log' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $log) { return $null }
+    $age = ((Get-Date) - $log.LastWriteTime).TotalMinutes
+    if ($age -gt 30) { return $null }
+    $last = @(Get-Content -LiteralPath $log.FullName -Tail 5 | Where-Object { $_.Trim() }) | Select-Object -Last 1
+    if (-not $last) { return $null }
+    $minutes = $null
+    # The minutes are formatted with the machine's culture: "2.880" or "2,880" for two days.
+    if ($last -match '^\[phasekit\] Usage limit reached\. Waiting ([\d.,]+) min') { $minutes = $Matches[1] }
+    elseif ($last -match '^\[phasekit\] \.\.\. still waiting out the usage limit, ([\d.,]+) min to go') { $minutes = $Matches[1] }
+    if ($null -eq $minutes) { return $null }
+    $n = [int] ($minutes -replace '[^\d]', '')
+    return [pscustomobject]@{ until = $log.LastWriteTime.AddMinutes($n); note = $last; log = $log.Name }
+}
+
+function Invoke-AccountSwitch([hashtable] $State) {
+    <#
+        The owner agreed (2026-11-15) that the build may use his other Claude account
+        instead of waiting out a usage limit. When the runner waits, the account it waits on
+        is recorded as limited until the announced reset, and runs move to an account that
+        is not limited; phasekit resumes the conversation under it within a minute. When
+        every account is limited, nothing changes and the runner keeps waiting. Logged, not
+        announced: it needs nothing from him.
+    #>
+    $wait = Get-LimitWait
+    if (-not $wait) { return }
+    if (-not $State.ContainsKey('limitedUntil') -or $State['limitedUntil'] -isnot [System.Collections.IDictionary]) { $State['limitedUntil'] = @{} }
+    # The note seen when the last switch happened is the old account's, still at the bottom
+    # of the log until the resumed conversation writes its first line. It says nothing
+    # about the account just chosen.
+    if ($State['switchNote'] -eq "$($wait.log)|$($wait.note)") { return }
+
+    $current = (Get-ActiveAccount).name
+    $State['limitedUntil'][$current] = $wait.until.ToString('o')
+    $now = Get-Date
+    $free = @(Get-ClaudeAccounts | Where-Object {
+            $_.name -ne $current -and (Test-Path (Join-Path $_.dir '.credentials.json')) -and
+            (-not $State['limitedUntil'][$_.name] -or ([datetime] $State['limitedUntil'][$_.name]) -lt $now)
+        })
+    if ($free.Count -eq 0) { return }
+    $pick = Set-ActiveAccount -Name $free[0].name
+    $State['switchNote'] = "$($wait.log)|$($wait.note)"
+    Write-Log ("account: $current is limited until {0:dd/MM HH:mm}; runs now use $($pick.name)" -f $wait.until)
+}
+
 # ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
@@ -697,6 +751,10 @@ function Invoke-Check {
     if ($s.gaveUp) {
         $key = Get-FileKey $GaveUpFile
         if ($state['gaveUpKey'] -ne $key) { $events.Add('Il watchdog ha smesso di riavviare la sequenza.'); $state['gaveUpKey'] = $key }
+    }
+
+    if ($s.status -eq 'running') {
+        try { Invoke-AccountSwitch -State $state } catch { Write-Log "account: switch failed ($($_.Exception.Message))" }
     }
 
     $items = Get-Todo $s

@@ -30,6 +30,11 @@ Never propose a manual check. When a stop has a technical answer (a flaky test, 
 decide it yourself, send it with `-Answer` and only tell him afterwards. Ask him only for a genuine
 product choice.
 
+**Since 2026-11-15 the build may use both of his Claude accounts** (`main` = `~/.claude`, `b` =
+`~/.claude-b`). When the runner waits out a usage limit, the assistant's check switches runs to an
+account that is not limited (`phasekit account <name>`) and logs it in `.phasekit/assistant.log`
+(`account: …`). The limits it has seen are in `.phasekit/assistant-state.json` (`limitedUntil`).
+
 Speak to him in **Italian, plainly, briefly**. He is not reading the code. Run every tool from the
 repository root with `pwsh -NoProfile -File tools/assistant.ps1 <mode>`.
 
