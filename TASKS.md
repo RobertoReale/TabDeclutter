@@ -1079,6 +1079,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [ ] M7.5 Packages and reproducible build
 - [ ] M7.6 Release checklist and final audit
 - [x] F.1 Perf budgets judged against the machine's own speed
+- [ ] F.2 The tracker reports a closed tab's write as an error
 
 ## 13. PHASE F — Fixes from the manual checks
 
@@ -1154,3 +1155,51 @@ person can see.
 - The throwaway 3× regression fails the gate on mains.
 - Under load the gate passes with a factor above 1.
 - The verdict function has its unit tests, and they run in `pnpm test`.
+
+### F.2 — The tracker reports a closed tab's write as an error
+
+**Where it came from.** No manual check started this task. Two e2e tests fail intermittently and
+stopped or slowed the unattended sequence with no change to the code involved:
+- `tests/e2e-firefox/guard.spec.ts > the extension logged no errors` collects
+  `TabDeclutter: tracker (new Error("Invalid tab ID: N"))`, about one run in four. It stopped the
+  merge of M4.3 on 2026-11-14 and was reported again by M4.4 and M5.1.
+- `tests/e2e/restart.spec.ts` (Chromium) collects `TabDeclutter: tracker Error: The browser is
+  shutting down.` and fails its `health` fixture. Reported by M4.3 and M6.2.
+
+M4.3's answer to that stop reproduced the first one on a clean `main` (`605cbb7`) and traced both to
+the same line: `saveSessionValues` in `src/entrypoints/background/tracker.ts` catches the failure of
+`sessions.setTabValue` for a tab that has just been closed (by the guard, or by the browser shutting
+down), and its own comment says that is expected, then calls `failed(error)`, which logs it with
+`console.error`. To a person this is an error in the console of an extension that did nothing
+wrong, and to the tests it is a real failure. The owner (Roberto) wants the sequence to keep going
+without stopping on this, and a real error must still be reported.
+
+**Spec.** PLAN.md §14 (no console errors), §5.5 (the tracker). Nothing a person can see changes.
+
+**What to do.**
+1. Reproduce first, on this branch, with the two tests above, and record the error lines.
+2. In `saveSessionValues`, a failed write for a tab that no longer exists is expected: do not
+   report it. Decide that from the tab, not from the error's text (the messages differ between
+   Chrome and Firefox): after the failure, ask whether the tab still exists (the module already has
+   `getTab`, which returns `undefined` for a tab that is gone, and also during shutdown). Report
+   with `failed(error)` only when the tab is still there. `readSessionValues` and every other caller
+   of `failed()` keep reporting as they do now.
+3. Tests in `tests/ext` (or `tests/unit` if the module is reachable there):
+   - `setTabValue` rejects and the tab is gone → `console.error` is not called, and the other tabs
+     of the same snapshot are still written;
+   - `setTabValue` rejects and the tab still exists → `console.error` is called once;
+   - each test must fail without the fix.
+4. Run each of the two e2e specs above at least 8 times in a row (alone, in the foreground), then
+   the full gates. Report the counts.
+5. One DECISIONS.md entry: "F.2 — a write for a closed tab is not an error", with the reason above.
+
+**Scope.** `src/entrypoints/background/tracker.ts`, its tests, `DECISIONS.md`. Do not touch the e2e
+error collector, the `health` fixture, any retry, or `phasekit.json`: the tests must pass because
+the error is gone, not because it is no longer looked for.
+
+**Done when.**
+- The two new tests pass, and each fails without the fix.
+- Both e2e specs pass 8 times in a row each.
+- The full `pnpm gates` is green.
+- If a lesson in the prompt (phasekit's LESSONS) describes either flake, it is reported as WRONG
+  with this fix as the evidence, so later agents stop rerunning a test that is now fixed.

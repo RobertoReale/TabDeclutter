@@ -43,6 +43,12 @@ flaky test and its signature, a tool trap), record it too:
 `phasekit lessons add -Text "when <condition> | <lesson> | evidence: <log or test>"`. Only
 verified facts with their evidence; never a product decision.
 
+**Review and fix rounds (since 2026-11-15, his choice).** `phasekit.json` has `"review": true`
+(an independent read-only reviewer, opus/high, before every merge) and `"fixRounds": ["same",
+"opus/xhigh"]` (a target rejected by the gates or the reviewer is told why and gets two more
+tries, the second on a stronger model, before the sequence stops). A stop after the rounds says
+"after 2 fix round(s)"; the reviewer's findings are in `.phasekit/logs/review-<target>-*.log`.
+
 Speak to him in **Italian, plainly, briefly**. He is not reading the code. Run every tool from the
 repository root with `pwsh -NoProfile -File tools/assistant.ps1 <mode>`.
 

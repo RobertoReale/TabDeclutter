@@ -16,6 +16,11 @@
   "strictMcp": true,
   "notify": true,
 
+  "review": true,
+  "reviewModel": "opus",
+  "reviewEffort": "high",
+  "fixRounds": ["same", "opus/xhigh"],
+
   "usageLimit": {
     "maxRetries": 10,
     "waitMinutes": 20,
@@ -75,6 +80,7 @@
     "M6.1",
     "M6.2",
     { "target": "M6.3", "model": "sonnet", "effort": "medium" },
+    { "target": "F.2", "note": "the tracker's closed-tab write logged as an error: the two e2e flakes" },
     "M6.4",
     { "target": "M7.1", "effort": "high" },
     { "target": "M7.2", "note": "adds the bundle size gate" },
