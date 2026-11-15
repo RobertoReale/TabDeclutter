@@ -35,6 +35,14 @@ product choice.
 account that is not limited (`phasekit account <name>`) and logs it in `.phasekit/assistant.log`
 (`account: …`). The limits it has seen are in `.phasekit/assistant-state.json` (`limitedUntil`).
 
+**Lessons (since 2026-11-15).** phasekit keeps a scored list of verified lessons in
+`.phasekit/logs/lessons.json`, gives it to every agent and collects the agents' LESSONS blocks
+(see phasekit's README). `pwsh -NoProfile -File ../phasekit/bin/phasekit.ps1 lessons` lists it.
+When you answer a stop and the answer is a lesson the next agent should not pay for again (a
+flaky test and its signature, a tool trap), record it too:
+`phasekit lessons add -Text "when <condition> | <lesson> | evidence: <log or test>"`. Only
+verified facts with their evidence; never a product decision.
+
 Speak to him in **Italian, plainly, briefly**. He is not reading the code. Run every tool from the
 repository root with `pwsh -NoProfile -File tools/assistant.ps1 <mode>`.
 
