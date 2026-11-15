@@ -938,5 +938,41 @@
   "whitelistErrorInvalidRegex": {
     "message": "non è un'espressione regolare valida",
     "description": "Why a whitelist line was ignored."
+  },
+  "onboardingIntro": {
+    "message": "TabDeclutter ti suggerisce quali schede chiudere e ti aiuta a organizzarle. Tutto resta sul tuo dispositivo.",
+    "description": "First sentence of the first-run screen."
+  },
+  "onboardingThreshold": {
+    "message": "Considera vecchia una scheda dopo",
+    "description": "Field of the first-run screen that chooses the age threshold."
+  },
+  "onboardingGuard": {
+    "message": "Quando apri una scheda già aperta",
+    "description": "Question of the first-run screen about duplicate protection."
+  },
+  "onboardingGuardAuto": {
+    "message": "Chiudila e torna a quella esistente",
+    "description": "Answer to the first-run duplicate question: close duplicates automatically."
+  },
+  "onboardingGuardWarn": {
+    "message": "Avvisami soltanto",
+    "description": "Answer to the first-run duplicate question: report duplicates but never close them."
+  },
+  "onboardingGuardOff": {
+    "message": "Non fare nulla",
+    "description": "Answer to the first-run duplicate question: no live checks at all."
+  },
+  "onboardingWhitelist": {
+    "message": "Hai una whitelist di Duplicate Tabs Closer? Incollala qui",
+    "description": "Link of the first-run screen that opens the whitelist editor."
+  },
+  "onboardingPartialData": {
+    "message": "Nei primi giorni i suggerimenti si basano su dati parziali e diventano più precisi con l'uso.",
+    "description": "Note of the first-run screen about what the suggestions are worth at the start."
+  },
+  "onboardingStart": {
+    "message": "Inizia",
+    "description": "Button that saves the first-run choices and opens the panel."
   }
 }

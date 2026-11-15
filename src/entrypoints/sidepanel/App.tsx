@@ -23,12 +23,14 @@ import { useEffect } from 'preact/hooks';
 import { t, type MessageKey } from '@/platform/i18n';
 import { GuardChip } from './components/GuardChip';
 import { countsText } from './format';
+import { onboardingNeeded } from './state/onboarding';
 import { language as panelLanguageSignal } from './state/settings';
 import { tabCount, windowCount } from './state/tabs';
 import type { ViewId } from './state/view';
 import { settingsOpen, showView, toggleSettings, view } from './state/view';
 import { ArchiveView } from './views/ArchiveView';
 import { DeclutterView } from './views/DeclutterView';
+import { OnboardingView } from './views/OnboardingView';
 // Type-only, so it is erased and the chunk is still fetched by the `import()` below.
 import type * as OrganizeModule from './views/OrganizeView';
 import { SettingsView } from './views/SettingsView';
@@ -45,6 +47,12 @@ export function App() {
   // `state/settings.ts` keeps: every view takes it as a prop, so one change re-renders the shell
   // and with it everything that writes a date, a count or a duration.
   const language = panelLanguageSignal.value;
+
+  // The first run of §17 is a screen of its own, and until the stored flag has been read
+  // (`null`) the panel shows nothing: see `state/onboarding.ts`.
+  const first = onboardingNeeded.value;
+  if (first === null) return null;
+  if (first) return <OnboardingView language={language} />;
 
   return (
     <div class="td-panel">

@@ -938,5 +938,41 @@
   "whitelistErrorInvalidRegex": {
     "message": "not a valid regular expression",
     "description": "Why a whitelist line was ignored."
+  },
+  "onboardingIntro": {
+    "message": "TabDeclutter suggests which tabs to close and helps you organize the rest. Everything stays on your device.",
+    "description": "First sentence of the first-run screen."
+  },
+  "onboardingThreshold": {
+    "message": "Consider a tab old after",
+    "description": "Field of the first-run screen that chooses the age threshold."
+  },
+  "onboardingGuard": {
+    "message": "When you open a tab that is already open",
+    "description": "Question of the first-run screen about duplicate protection."
+  },
+  "onboardingGuardAuto": {
+    "message": "Close it and go back to the existing one",
+    "description": "Answer to the first-run duplicate question: close duplicates automatically."
+  },
+  "onboardingGuardWarn": {
+    "message": "Just tell me",
+    "description": "Answer to the first-run duplicate question: report duplicates but never close them."
+  },
+  "onboardingGuardOff": {
+    "message": "Do nothing",
+    "description": "Answer to the first-run duplicate question: no live checks at all."
+  },
+  "onboardingWhitelist": {
+    "message": "Do you have a Duplicate Tabs Closer whitelist? Paste it here",
+    "description": "Link of the first-run screen that opens the whitelist editor."
+  },
+  "onboardingPartialData": {
+    "message": "In the first few days the suggestions are based on partial data and get more accurate as you use it.",
+    "description": "Note of the first-run screen about what the suggestions are worth at the start."
+  },
+  "onboardingStart": {
+    "message": "Start",
+    "description": "Button that saves the first-run choices and opens the panel."
   }
 }

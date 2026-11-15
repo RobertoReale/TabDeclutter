@@ -18,6 +18,9 @@ import {
   IN_DAYS,
   IN_MS,
   LANGUAGE_CHOICES,
+  ONBOARDING_DEFAULT_MODE,
+  ONBOARDING_MODE_CHOICES,
+  ONBOARDING_STALE_DAYS,
   parseDomains,
   RETENTION_DAYS,
   STALE_DAYS,
@@ -39,6 +42,35 @@ describe('the values the fields offer', () => {
   it('offer "automatica, IT, EN" for the language, automatic first', () => {
     expect(LANGUAGE_CHOICES.map((choice) => choice.value)).toEqual(['auto', 'en', 'it']);
     expect(LANGUAGE_CHOICES[0]?.value).toBe(DEFAULT_SETTINGS.language);
+  });
+});
+
+describe('what the first run asks (§17)', () => {
+  it('offers the three thresholds of §17.2, the default among them', () => {
+    expect(ONBOARDING_STALE_DAYS).toEqual([3, 7, 14]);
+    expect(ONBOARDING_STALE_DAYS).toContain(DEFAULT_SETTINGS.staleDays);
+    // A subset of §4.6's, so no first run can store a threshold the settings page cannot show
+    // as one of its own options.
+    for (const days of ONBOARDING_STALE_DAYS) expect(STALE_DAYS).toContain(days);
+  });
+
+  it('asks the duplicate question in §17.3 order, "chiudila" first and preselected', () => {
+    expect(ONBOARDING_MODE_CHOICES.map((choice) => choice.value)).toEqual(['auto', 'warn', 'off']);
+    expect(ONBOARDING_DEFAULT_MODE).toBe('auto');
+    expect(ONBOARDING_MODE_CHOICES[0]?.value).toBe(ONBOARDING_DEFAULT_MODE);
+  });
+
+  it("offers the three modes in words of its own, not the settings page's", () => {
+    expect(ONBOARDING_MODE_CHOICES.map((choice) => choice.label)).toEqual([
+      'onboardingGuardAuto',
+      'onboardingGuardWarn',
+      'onboardingGuardOff',
+    ]);
+  });
+
+  it('leaves the stored default at "warn" until the question is answered (invariant 2)', () => {
+    // Preselected is not chosen: nothing closes a tab on its own before "Inizia".
+    expect(DEFAULT_SETTINGS.guard.mode).toBe('warn');
   });
 });
 
