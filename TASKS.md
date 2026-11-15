@@ -1079,7 +1079,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [ ] M7.5 Packages and reproducible build
 - [ ] M7.6 Release checklist and final audit
 - [x] F.1 Perf budgets judged against the machine's own speed
-- [ ] F.2 The tracker reports a closed tab's write as an error
+- [x] F.2 The tracker reports a closed tab's write as an error
 
 ## 13. PHASE F — Fixes from the manual checks
 

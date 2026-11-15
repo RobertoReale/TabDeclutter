@@ -552,6 +552,49 @@ describe('on Firefox, where a tab carries its own record', () => {
     expect(errors).toHaveBeenCalledTimes(2);
   });
 
+  // F.2: `sessions.setTabValue` for a tab that has just been closed — by the guard, or by
+  // the browser on its way out — is expected and must not reach the console (PLAN.md §14).
+  it('does not report a tab value it could not write because the tab is gone', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const sessions = fakeSessions();
+    const tracker = start({ capabilities: capabilities({ sessionTabValues: true }), sessions });
+    const gone = await openTab('https://a.test/');
+    const other = await openTab('https://b.test/');
+    // The first write of the snapshot, the one for `gone`, and the browser then says it
+    // knows no such tab: exactly what a close between the event and the write looks like.
+    sessions.setTabValue.mockRejectedValueOnce(new Error('Invalid tab ID: 1'));
+    vi.spyOn(fakeBrowser.tabs, 'get').mockRejectedValue(new Error('No tab with id') as never);
+
+    await tracker.flush();
+
+    expect(sessions.setTabValue).toHaveBeenCalledTimes(2);
+    expect(errors).not.toHaveBeenCalled();
+    // The rest of the same snapshot was still written.
+    expect(sessions.values.get(other)).toMatchObject({ tabId: other });
+    expect(sessions.values.has(gone)).toBe(false);
+  });
+
+  it('still reports a tab value it could not write while the tab is there', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const sessions = fakeSessions();
+    const tracker = start({ capabilities: capabilities({ sessionTabValues: true }), sessions });
+    const gone = await openTab('https://a.test/');
+    const there = await openTab('https://b.test/');
+    sessions.setTabValue.mockRejectedValue(new Error('cannot write'));
+    // Only the first tab is gone; the second is one the browser still answers for, so its
+    // failure is a real one.
+    vi.spyOn(fakeBrowser.tabs, 'get').mockImplementation(((tabId: number) =>
+      tabId === gone
+        ? Promise.reject(new Error('No tab with id'))
+        : Promise.resolve({ id: tabId, url: 'https://b.test/' })) as never);
+
+    await tracker.flush();
+
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith('TabDeclutter: tracker', expect.any(Error));
+    expect(sessions.setTabValue).toHaveBeenCalledWith(there, 'td', expect.anything());
+  });
+
   it('does not touch the session store when the browser has no such API', async () => {
     const sessions = fakeSessions();
     const tracker = start({ capabilities: capabilities({ sessionTabValues: false }), sessions });
@@ -584,5 +627,64 @@ describe('when something goes wrong', () => {
     expect((await stored())[id]).toMatchObject({ url: 'https://a.test/' });
     expect((await stored())[404]).toBeUndefined();
     expect(errors).not.toHaveBeenCalled();
+  });
+
+  // F.2: the debounced write is the call a shutting-down browser is likeliest to reject,
+  // and an extension that did nothing wrong must not leave an error behind (PLAN.md §14).
+  it('does not report the write when the browser no longer answers', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const tracker = start();
+    await openTab('https://a.test/');
+    const gone = new Error('The browser is shutting down.');
+    vi.spyOn(fakeBrowser.storage.local, 'set').mockRejectedValue(gone as never);
+    vi.spyOn(fakeBrowser.storage.local, 'get').mockRejectedValue(gone as never);
+
+    await tracker.flush();
+
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  // The shutdown rejection catches whichever call is in flight, not only the write: here
+  // the read a listener does, which is what `tests/e2e/restart.spec.ts` kept collecting.
+  it('does not report a listener that failed because the browser no longer answers', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const tracker = start();
+    const gone = new Error('The browser is shutting down.');
+    vi.spyOn(fakeBrowser.storage.local, 'get').mockRejectedValue(gone as never);
+
+    await openTab('https://a.test/');
+    await tracker.flush();
+
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it('reports a listener that failed while the browser still answers', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const tracker = start();
+    // Only the listener's own read fails; the question put to the browser afterwards is
+    // answered, so this is a real failure.
+    vi.spyOn(fakeBrowser.storage.local, 'get').mockRejectedValueOnce(
+      new Error('cannot read') as never,
+    );
+
+    await openTab('https://a.test/');
+    await tracker.flush();
+
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith('TabDeclutter: tracker', expect.any(Error));
+  });
+
+  it('reports a write that failed while the browser still answers', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const tracker = start();
+    await openTab('https://a.test/');
+    vi.spyOn(fakeBrowser.storage.local, 'set').mockRejectedValue(
+      new Error('QUOTA_BYTES exceeded') as never,
+    );
+
+    await tracker.flush();
+
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith('TabDeclutter: tracker', expect.any(Error));
   });
 });
