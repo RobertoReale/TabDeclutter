@@ -35,11 +35,18 @@ export function TabRow({
   row,
   language,
   focused,
+  closing = false,
 }: {
   row: DeclutterRow;
   language: string;
   /** Whether this row holds the list's `tabindex="0"`. */
   focused: boolean;
+  /**
+   * §4.7's height collapse: a ghost of a row that `Section` is animating out after the
+   * real one has already left `section.rows`. Not a tab stop and not interactive — the
+   * tab it describes may already be gone.
+   */
+  closing?: boolean;
 }) {
   const { tab, scored } = row;
   const reason = reasonText(scored, t, language);
@@ -51,13 +58,19 @@ export function TabRow({
   // Its own signal, so a `Space` on another row does not re-render this one (§11).
   const selected = selectedSignal(tab.id).value;
 
+  const classes = ['td-row'];
+  if (selected) classes.push('td-row-picked');
+  if (closing) classes.push('td-row-closing');
+
   return (
     <div
-      class={selected ? 'td-row td-row-picked' : 'td-row'}
+      class={classes.join(' ')}
       role="row"
+      aria-hidden={closing || undefined}
       data-stop={rowStopId(tab.id)}
-      tabIndex={focused ? 0 : -1}
+      tabIndex={closing ? -1 : focused ? 0 : -1}
       onClick={() => {
+        if (closing) return;
         toggleSelected(tab.id);
       }}
     >

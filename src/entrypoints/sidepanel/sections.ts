@@ -21,12 +21,31 @@ export type SectionId = 'duplicates' | 'transient' | 'stale-unread' | 'stale' | 
  * strong guess, "Da valutare" is an invitation to look. A section with no rows is not in
  * the list at all.
  */
-const ORDER: readonly SectionId[] = ['duplicates', 'transient', 'stale-unread', 'stale', 'review'];
+export const ORDER: readonly SectionId[] = [
+  'duplicates',
+  'transient',
+  'stale-unread',
+  'stale',
+  'review',
+];
 
 /** One row: what the tab is showing, and what the score made of it. */
 export interface DeclutterRow {
   readonly tab: TabInfo;
   readonly scored: ScoredTab;
+}
+
+/**
+ * §4.7's "height collapse on close": a row that has just left `section.rows`, kept by
+ * `DeclutterView` for one more render so it has something to animate out from. `beforeId`
+ * is the id of the row still in the section it was in front of when it left, so it can be
+ * spliced back into that slot instead of appended after the rows that remain — `null` when
+ * nothing in the section was behind it (it was the section's last row, or the section's
+ * rows are gone too).
+ */
+export interface ExitingRow {
+  readonly row: DeclutterRow;
+  readonly beforeId: number | null;
 }
 
 export interface DeclutterSection {

@@ -1070,7 +1070,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M5.2 Prompt API adapter and integration
 - [x] M6.1 Complete settings
 - [x] M6.2 First-run onboarding
-- [ ] M6.3 Visual polish and final icon
+- [x] M6.3 Visual polish and final icon
 - [ ] M6.4 Accessibility audit and i18n completeness
 - [ ] M7.1 Complete E2E on both browsers
 - [ ] M7.2 Bundle budget as a gate

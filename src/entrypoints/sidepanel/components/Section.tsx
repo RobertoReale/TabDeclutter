@@ -22,7 +22,7 @@
 import { t, type MessageKey } from '@/platform/i18n';
 import { formatCount } from '../format';
 import { rowStopId, sectionStopId } from '../keyboard';
-import type { DeclutterSection, SectionId } from '../sections';
+import type { DeclutterRow, DeclutterSection, ExitingRow, SectionId } from '../sections';
 import { requestClose } from '../state/commands';
 import { closeAllDuplicates, duplicateCount } from '../state/guard';
 import { allSelected, deselectTabs, selectTabs } from '../state/selection';
@@ -42,6 +42,7 @@ export function Section({
   open,
   activeStop,
   language,
+  exiting,
   onToggle,
 }: {
   section: DeclutterSection;
@@ -50,8 +51,26 @@ export function Section({
   /** The id of the stop holding `tabindex="0"`, which may be in another section. */
   activeStop: string | null;
   language: string;
+  /**
+   * §4.7's "height collapse on close": rows that have just left `section.rows`, kept by
+   * `DeclutterView` for one more render so they have something to animate out from. Tracked
+   * above this component rather than inside it, because a section whose last row leaves
+   * drops out of `declutter.value.sections` entirely (`sections.ts` never returns an empty
+   * one) and would otherwise unmount before its own exit animation could play. `DeclutterView`
+   * keeps rendering this same `<Section>` (same key, `section.rows` emptied) rather than
+   * swapping to a different component for that case, for the same reason: see `ghostOnly`
+   * below. Each one's `beforeId` is where it is spliced back in among `section.rows` below,
+   * so it collapses in its old slot rather than at the bottom of the section.
+   */
+  exiting: readonly ExitingRow[];
   onToggle: () => void;
 }) {
+  // `sections.ts` never returns a section with no rows, so this can only be true of the
+  // synthesised, rows-emptied section `DeclutterView` renders for the window between a
+  // section's last real row leaving and its ghost timing out. No header, no stop, same as a
+  // folded section costs nothing (§11) — there is nothing left here a screen reader or the
+  // keyboard should reach.
+  const ghostOnly = section.rows.length === 0;
   const heading = t(
     'sectionHeading',
     t(NAMES[section.id]),
@@ -59,46 +78,86 @@ export function Section({
   );
   const stop = sectionStopId(section.id);
   const tabIds = section.rows.map((row) => row.tab.id);
+  const exitingIds = new Set(exiting.map((item) => item.row.tab.id));
+
+  // Splices each exiting row back in front of the row it sat in front of before it left
+  // (`beforeId`), rather than appending all of them after the rows that remain — that is
+  // what keeps a row's own height collapse happening in its old slot instead of at the
+  // bottom of the section (the reorder itself is harmless to Preact's keyed reconciliation,
+  // which already follows a row by its `key` wherever it moves; this is about where the
+  // user sees it collapse, not whether the transition plays).
+  const currentIds = new Set(tabIds);
+  const before = new Map<number, DeclutterRow[]>();
+  const trailing: DeclutterRow[] = [];
+  for (const { row, beforeId } of exiting) {
+    if (beforeId !== null && currentIds.has(beforeId)) {
+      const waiting = before.get(beforeId);
+      if (waiting === undefined) before.set(beforeId, [row]);
+      else waiting.push(row);
+    } else {
+      trailing.push(row);
+    }
+  }
+  const mergedRows: DeclutterRow[] = [];
+  for (const row of section.rows) {
+    const waiting = before.get(row.tab.id);
+    if (waiting !== undefined) mergedRows.push(...waiting);
+    mergedRows.push(row);
+  }
+  mergedRows.push(...trailing);
 
   return (
-    <div class="td-section" role="rowgroup">
-      <div
-        class="td-section-toggle"
-        role="row"
-        aria-expanded={open}
-        data-stop={stop}
-        tabIndex={activeStop === stop ? 0 : -1}
-        onClick={onToggle}
-      >
-        <span class="td-section-head" role="gridcell">
-          {/* Decorative: `aria-expanded` is what says which way it points. */}
-          <span class="td-caret" aria-hidden="true">
-            {open ? '▾' : '▸'}
+    <div class="td-section" role="rowgroup" aria-hidden={ghostOnly || undefined}>
+      {!ghostOnly && (
+        <div
+          class="td-section-toggle"
+          role="row"
+          aria-expanded={open}
+          data-stop={stop}
+          tabIndex={activeStop === stop ? 0 : -1}
+          onClick={onToggle}
+        >
+          <span class="td-section-head" role="gridcell">
+            {/* Decorative: `aria-expanded` is what says which way it points. */}
+            <span class="td-caret" aria-hidden="true">
+              {open ? '▾' : '▸'}
+            </span>
+            <span class="td-section-name">{heading}</span>
+
+            {/*
+             * §4.3's two section actions. Both stop the click: the header folds the section
+             * when it is clicked, and picking or closing its tabs is not that. Out of the tab
+             * order for the same reason as the row's (§4.8's single tab stop), with `Ctrl+A`
+             * and `Del` on the header doing from the keyboard what they do.
+             */}
+            <SelectAllButton tabIds={tabIds} />
+            <CloseAllButton section={section} tabIds={tabIds} language={language} />
           </span>
-          <span class="td-section-name">{heading}</span>
+        </div>
+      )}
 
+      {(open || ghostOnly) && (
+        <>
           {/*
-           * §4.3's two section actions. Both stop the click: the header folds the section
-           * when it is clicked, and picking or closing its tabs is not that. Out of the tab
-           * order for the same reason as the row's (§4.8's single tab stop), with `Ctrl+A`
-           * and `Del` on the header doing from the keyboard what they do.
+           * One array, one `.map()`, so a row that moves from `section.rows` into `exiting`
+           * keeps the same key in the same Preact Fragment across the two renders — Preact
+           * then patches its `closing` prop on the DOM node it already has rather than
+           * unmounting it and mounting a fresh one in a second, sibling Fragment, which has
+           * no prior painted frame for `base.css`'s transition to animate from.
            */}
-          <SelectAllButton tabIds={tabIds} />
-          <CloseAllButton section={section} tabIds={tabIds} language={language} />
-        </span>
-      </div>
-
-      {open &&
-        section.rows.map((row) => (
-          // By tab id, never by index (§11): a row keeps its DOM node while the list
-          // around it changes.
-          <TabRow
-            key={row.tab.id}
-            row={row}
-            language={language}
-            focused={activeStop === rowStopId(row.tab.id)}
-          />
-        ))}
+          {mergedRows.map((row) => (
+            // By tab id, never by index (§11): a row keeps its DOM node while the list
+            // around it changes.
+            <TabRow
+              key={row.tab.id}
+              row={row}
+              language={language}
+              focused={!exitingIds.has(row.tab.id) && activeStop === rowStopId(row.tab.id)}
+              closing={exitingIds.has(row.tab.id)}
+            />
+          ))}
+        </>
+      )}
     </div>
   );
 }

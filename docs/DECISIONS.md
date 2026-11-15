@@ -3064,3 +3064,60 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   service worker, before the first panel document, means no panel ever reads it as `false` and then
   watches it change. The budget measures the panel a person opens every day, which is a panel whose
   first run is over.
+
+## M6.3 — The icon is rasterised by `@resvg/resvg-js`, not exported by hand
+
+- **Context:** the "Done when" asks for the 16/32/48/128 PNGs to be "generated reproducibly" from
+  one source SVG, which rules out a PNG exported once from a design tool and committed as a binary
+  nobody can regenerate or diff against its source.
+- **Decision:** `@resvg/resvg-js` 2.6.2, a dev dependency, rasterises `src/public/icon/icon.svg` to
+  the four sizes in `tools/generate-icons.mjs`, a script with no flags to get wrong — it always
+  reads that one file and always writes those four. The PNGs are still committed (the manifest and
+  the build need them without a build step that shells out to Rust), and the script is what proves
+  "reproducibly": running it again reproduces the committed bytes.
+- **Why:** resvg renders deterministically from the SVG's own geometry with a prebuilt native
+  binary and no system install (no headless Chromium, no ImageMagick on the runner), which is the
+  part a hand-exported PNG cannot promise. A dev dependency, not a runtime one: nothing the
+  extension itself loads needs an SVG rasteriser.
+
+## M6.3 — The ghost row's state lives in `DeclutterView`, not in `Section`
+
+- **Context:** §4.7's "height collapse on close" needs a row that has just left the list to render
+  once more, playing an exit transition, before it is actually gone from the document. The first
+  attempt kept that one render's worth of state inside `Section` itself, since a row leaving is a
+  `section.rows` change. But `sections.ts`'s `toSections()` never returns a section with zero rows,
+  and `DeclutterView`'s own empty state swaps in the moment `list.total` reaches zero — so a
+  section whose *last* row leaves, or the list's last row of all, unmounts the very component
+  meant to hold the ghost before it has rendered once.
+- **Decision:** the exiting-rows state moved to `DeclutterView`, which sees the stable top-level
+  `list.sections` sequence (including a section that just vanished from it entirely) and
+  `list.total` both. It tracks a row as "gone" only once its tab id is absent from *every* section
+  in the new `list.sections` — not merely from the section it used to be in, which a row
+  reclassified by a score recompute (the seeded history landing, for one) would also trigger and
+  wrongly ghost. Each gone row gets its own clear timer, keyed by tab id and independent of the
+  effect's own re-runs: `list.sections` is a new array on every `declutter` recompute, including
+  ones a ghost has nothing to do with, and an effect cleanup tied to that reference cancelled and
+  lost a row's clear timer before it ever fired. `DeclutterView` keeps rendering the list area
+  (rather than swapping in `<EmptyState>`) for as long as any ghost remains, and caches the last
+  real shape of every section it has seen (`sectionTemplates`); a section gone from `list.sections`
+  but still holding a ghost renders through that *same* `<Section>`, same key, rows emptied from the
+  cached template, rather than a separate component. A first attempt rendered a dedicated
+  `GhostSection` for that case instead, but a `key`-matched row only keeps its own DOM node — the
+  one the exit transition has to animate from — when it stays inside the same component instance
+  across the two renders; moving it into a second, sibling component unmounted and remounted it, so
+  the row had no prior painted frame to transition from.
+
+  `DeclutterView` also hands `Section` each exiting row's `beforeId`: the tab id of the row, still
+  in that section, that it sat in front of before it left (`null` if nothing did, or the section's
+  own rows are gone too). `Section` splices each exiting row back in front of that row rather than
+  appending all of them after the ones that remain, and `DeclutterView` sorts the combined
+  live-and-ghost section list by `sections.ts`'s own `ORDER` rather than appending ghost-only
+  sections after the live ones — both are about *where* a row or section collapses, not whether its
+  transition plays: the key match alone already keeps the DOM node (and so the transition) correct
+  regardless of position, but appending at the end moved it to the bottom of its list first, which
+  read as a jump rather than a collapse in place.
+- **Why:** only the top-level view can see a section (or the whole list) across the exact render
+  in which it empties out; anything living inside the section is gone by then. Reusing the same
+  `<Section>` instance, rather than swapping to a dedicated ghost component, is what keeps a row's
+  own DOM node — and so its transition — intact across the two renders that matter: the one where
+  it is still a real row, and the one where it is a ghost of itself.
