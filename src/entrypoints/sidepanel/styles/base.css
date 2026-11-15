@@ -298,10 +298,44 @@ button {
   contain-intrinsic-size: auto 46px;
   padding: var(--td-space-1) var(--td-space-2);
   border-radius: var(--td-radius-sm);
+  /*
+   * §4.7: rows appear in 150 ms ease-out. `max-height` is the one property that
+   * also lets `.td-row-closing` below collapse the row's own space rather than
+   * just fading it in place — 200px is generous enough for a wrapped meta line,
+   * never reached by a real row, so it never clips one.
+   */
+  overflow: hidden;
+  max-height: 200px;
+  opacity: 1;
+  animation: td-row-in var(--td-duration) var(--td-ease);
+  transition:
+    max-height var(--td-duration) var(--td-ease),
+    opacity var(--td-duration) var(--td-ease),
+    padding var(--td-duration) var(--td-ease);
 }
 
 .td-row:hover {
   background: var(--td-hover);
+}
+
+@keyframes td-row-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+ * §4.7's height collapse on close: `Section` keeps a closed row's last known
+ * shape mounted for one transition's worth of time (see `EXIT_MS`) so this has
+ * something to animate — a row Preact has already unmounted cannot transition.
+ */
+.td-row-closing {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
+  animation: none;
 }
 
 /*

@@ -24,7 +24,7 @@
  */
 
 import { useSignal } from '@preact/signals';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { t } from '@/platform/i18n';
 import { activateTab } from '@/platform/tabs';
@@ -36,7 +36,13 @@ import { SelectionBar } from '../components/SelectionBar';
 import { Toast } from '../components/Toast';
 import { activeStop, nextStop, stopsOf, type OpenSection, type Stop } from '../keyboard';
 import { forgottenWindowText } from '../reasons';
-import type { ForgottenWindow, SectionId } from '../sections';
+import {
+  ORDER,
+  type DeclutterSection,
+  type ExitingRow,
+  type ForgottenWindow,
+  type SectionId,
+} from '../sections';
 import {
   asking,
   cancelClose,
@@ -54,6 +60,15 @@ import {
   toggleSelected,
 } from '../state/selection';
 import { declutter, tabCount } from '../state/tabs';
+
+/**
+ * §4.7's "height collapse on close" plays on a row that is no longer in `declutter.value`
+ * at all, so it has to outlive the data by this long before it is dropped from local state.
+ * Longer than `--td-duration` (150 ms) by a safety margin: under reduced motion the CSS
+ * collapses instantly and the extra time is simply invisible, never a delay the user waits
+ * through.
+ */
+const EXIT_MS = 200;
 
 export function DeclutterView({ language }: { language: string }) {
   /**
@@ -73,6 +88,125 @@ export function DeclutterView({ language }: { language: string }) {
   }));
   const stops = stopsOf(sections);
   const active = activeStop(stops, chosen.value);
+
+  /**
+   * The last real shape of every section still in `list.sections`, kept one render past the
+   * point where a section's own last row leaves and it drops out of `list.sections` entirely
+   * (`sections.ts` never returns an empty one) — `ghostOnly` below renders that section again,
+   * rows emptied, from this cache, rather than switching to a different component for it.
+   */
+  const sectionTemplates = useRef<Map<SectionId, DeclutterSection>>(new Map());
+  for (const section of list.sections) sectionTemplates.current.set(section.id, section);
+
+  /*
+   * §4.7's "height collapse on close" plays on a row that is no longer in `declutter.value`
+   * at all. Tracked here rather than inside `Section`, because a section whose last row
+   * leaves drops out of `list.sections` entirely (`sections.ts` never returns an empty one,
+   * and this view's own empty state takes over the moment `list.total` reaches zero) — in
+   * either case the row's own `<Section>` would already be gone before a transition could
+   * play on it.
+   */
+  const [exiting, setExiting] = useState<
+    Readonly<Partial<Record<SectionId, readonly ExitingRow[]>>>
+  >({});
+  const previousSections = useRef<readonly DeclutterSection[]>(list.sections);
+  /**
+   * One timer per row, outliving whatever re-render happens in between — `list.sections` is
+   * a new array on every `declutter` recompute, including ones that touch nothing a row
+   * left over, and an effect cleanup tied to that reference would cancel and lose a row's
+   * own clear timer before it had a reason to.
+   */
+  const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(
+    () => () => {
+      for (const timer of timers.current.values()) clearTimeout(timer);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const previous = previousSections.current;
+    previousSections.current = list.sections;
+    // Globally, not per section: a row reclassified into another section (the seeded
+    // history landing, a score recomputed) is still in the list and never a ghost — only
+    // one that `list.sections` drops altogether (closed, kept) is.
+    const stillThere = new Set(
+      list.sections.flatMap((section) => section.rows.map((row) => row.tab.id)),
+    );
+    const gone = new Map<SectionId, readonly ExitingRow[]>();
+    for (const section of previous) {
+      // Rows still in this same section (if it still has any) are the only valid anchors —
+      // a gone row is spliced back in front of the nearest one of these that follows it in
+      // the old order, so it collapses in place instead of jumping to the end of the list
+      // (§4.7's "height collapse on close" is about where, not only whether).
+      const currentIds = new Set(
+        list.sections.find((current) => current.id === section.id)?.rows.map((row) => row.tab.id),
+      );
+      const left: ExitingRow[] = [];
+      for (const [at, row] of section.rows.entries()) {
+        if (stillThere.has(row.tab.id)) continue;
+        const after = section.rows
+          .slice(at + 1)
+          .find((candidate) => currentIds.has(candidate.tab.id));
+        left.push({ row, beforeId: after?.tab.id ?? null });
+      }
+      if (left.length > 0) gone.set(section.id, left);
+    }
+    if (gone.size === 0) return;
+
+    setExiting((current) => {
+      const next = { ...current };
+      for (const [id, rows] of gone) {
+        const goneIds = new Set(rows.map((item) => item.row.tab.id));
+        next[id] = [...(next[id] ?? []).filter((item) => !goneIds.has(item.row.tab.id)), ...rows];
+      }
+      return next;
+    });
+
+    for (const [id, rows] of gone) {
+      for (const { row } of rows) {
+        const tabId = row.tab.id;
+        const existing = timers.current.get(tabId);
+        if (existing !== undefined) clearTimeout(existing);
+        timers.current.set(
+          tabId,
+          setTimeout(() => {
+            timers.current.delete(tabId);
+            setExiting((current) => {
+              const remaining = (current[id] ?? []).filter((item) => item.row.tab.id !== tabId);
+              const next = { ...current };
+              if (remaining.length === 0) delete next[id];
+              else next[id] = remaining;
+              return next;
+            });
+          }, EXIT_MS),
+        );
+      }
+    }
+  }, [list.sections]);
+
+  /**
+   * A section whose rows are gone entirely still has ghosts to show until they time out —
+   * rendered through the same `<Section>` key as before, rows emptied, so the row inside it
+   * keeps its own DOM node too (`Section`'s own comment on `ghostOnly`).
+   */
+  const ghostOnly: readonly OpenSection[] = Object.keys(exiting)
+    .filter((id) => !list.sections.some((section) => section.id === id))
+    .map((id) => sectionTemplates.current.get(id as SectionId))
+    .filter((section): section is DeclutterSection => section !== undefined)
+    .map((section) => ({
+      section: { ...section, rows: [] },
+      open: byHand.value[section.id] ?? !section.collapsed,
+    }));
+  const hasGhosts =
+    ghostOnly.length > 0 || sections.some(({ section }) => exiting[section.id] !== undefined);
+  // §4.3's fixed order, not append-after-the-live-ones: a section that just emptied out
+  // keeps its own slot in the list rather than jumping to the bottom while its ghost row
+  // finishes closing.
+  const renderedSections = [...sections, ...ghostOnly].sort(
+    (left, right) => ORDER.indexOf(left.section.id) - ORDER.indexOf(right.section.id),
+  );
 
   function toggle(id: SectionId, open: boolean): void {
     byHand.value = { ...byHand.value, [id]: !open };
@@ -213,7 +347,7 @@ export function DeclutterView({ language }: { language: string }) {
 
   return (
     <>
-      {list.total === 0 ? (
+      {list.total === 0 && !hasGhosts ? (
         <EmptyState text={t('declutterEmpty')} />
       ) : (
         <>
@@ -235,13 +369,14 @@ export function DeclutterView({ language }: { language: string }) {
             onKeyDown={onKeyDown}
             onFocusIn={onFocusIn}
           >
-            {sections.map(({ section, open }) => (
+            {renderedSections.map(({ section, open }) => (
               <Section
                 key={section.id}
                 section={section}
                 open={open}
                 activeStop={active?.id ?? null}
                 language={language}
+                exiting={exiting[section.id] ?? []}
                 onToggle={() => {
                   toggle(section.id, open);
                 }}

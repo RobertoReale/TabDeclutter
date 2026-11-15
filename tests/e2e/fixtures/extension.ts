@@ -68,6 +68,8 @@ export interface LaunchOptions {
   readonly headless: boolean;
   /** `prefers-color-scheme`, or `null` for the browser's own default. */
   readonly colorScheme?: 'light' | 'dark' | 'no-preference' | null;
+  /** `prefers-reduced-motion`, or `null` for the browser's own default. */
+  readonly reducedMotion?: 'reduce' | 'no-preference' | null;
   /**
    * Whether the profile is past the first run of PLAN.md §17. True by default, because a fresh
    * profile is a fresh install and the onboarding screen would be the only thing in the panel:
@@ -124,6 +126,9 @@ export async function launchExtension(
     // Passed on so `test.use({ colorScheme: 'dark' })` reaches a persistent context,
     // which does not get the runner's options for free.
     colorScheme: options.colorScheme ?? undefined,
+    // `prefers-reduced-motion` (PLAN.md §4.7). Passed on for the same reason as
+    // `colorScheme`: a persistent context does not pick up the runner's option on its own.
+    reducedMotion: options.reducedMotion ?? undefined,
     args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`],
   });
   // Before the test opens anything: every spec but `onboarding.spec.ts` is about a profile
@@ -174,11 +179,16 @@ export const test = base.extend<ExtensionOptions & ExtensionFixtures>({
 
   // The profile lives in the test's own output directory, so Playwright creates
   // it, keeps it when the test fails and removes it when it passes.
-  context: async ({ recorder, uiLanguage, headless, colorScheme, onboarded }, use, testInfo) => {
+  context: async (
+    { recorder, uiLanguage, headless, colorScheme, reducedMotion, onboarded },
+    use,
+    testInfo,
+  ) => {
     const context: BrowserContext = await launchExtension(testInfo.outputPath('profile'), {
       uiLanguage,
       headless,
       colorScheme,
+      reducedMotion,
       onboarded,
     });
     recorder.attach(context);

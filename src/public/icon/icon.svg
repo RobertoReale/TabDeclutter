@@ -1,0 +1,13 @@
+<!--
+  The extension icon, PLAN.md §4.7: "a stylised tab with a sparkle", in the
+  accent blue of tokens.css (td-accent, #1a73e8) so it reads as the same
+  product as the panel. One flat colour and two simple shapes: a rounded tab,
+  a four point sparkle, because anything finer than that is lost at 16 px.
+
+  `tools/generate-icons.mjs` rasterises this to the PNG sizes the manifest
+  needs; this file is the only one a person edits.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="3" y="8" width="21" height="17" rx="4" fill="#1a73e8" />
+  <path fill="#1a73e8" d="M25 2 27 8 25 14 23 8Z M19 8 25 6 31 8 25 10Z" />
+</svg>
