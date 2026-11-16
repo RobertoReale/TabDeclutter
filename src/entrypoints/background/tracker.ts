@@ -104,7 +104,15 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
 
   /** How a listener hands its work over: in order, and never unhandled. */
   function handle(action: () => Promise<void>): void {
-    void run(action).catch(failed);
+    // Reported inside the queued work, so that a `flush()` waiting behind it sees the
+    // report done: the queue is what keeps the handlers in order.
+    void run(async () => {
+      try {
+        await action();
+      } catch (error: unknown) {
+        await report(error);
+      }
+    });
   }
 
   async function load(): Promise<ActivityStore> {
@@ -118,7 +126,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
     dirty = true;
     timer ??= setTimeout(() => {
       timer = undefined;
-      void write().catch(failed);
+      void write().catch((error: unknown) => void report(error));
     }, debounceMs);
   }
 
@@ -137,7 +145,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
     const snapshot = { ...store };
     const saved = [...touched];
     touched.clear();
-    await activityItem.setValue(snapshot);
+    if (!(await writeStore(snapshot))) return;
     if (sessions !== undefined) await saveSessionValues(sessions, snapshot, saved);
   }
 
@@ -323,7 +331,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
   // Firefox fires it from 106; on an MV3 service worker it is best effort either way,
   // which is why the debounce above is a second and not two.
   browser.runtime.onSuspend?.addListener(() => {
-    void write().catch(failed);
+    void write().catch((error: unknown) => void report(error));
   });
 
   return { flush: write };
@@ -370,6 +378,42 @@ async function readSessionValues(
   return restored;
 }
 
+/** The store, written unless there is no browser left to write to (see `report`). */
+async function writeStore(snapshot: ActivityStore): Promise<boolean> {
+  try {
+    await activityItem.setValue(snapshot);
+    return true;
+  } catch (error: unknown) {
+    await report(error);
+    return false;
+  }
+}
+
+/**
+ * A failure, unless the browser is on its way out (F.2).
+ *
+ * A browser shutting down rejects whichever call the tracker happens to have in flight —
+ * the debounced write, a read of the foreground clock — and an extension that did nothing
+ * wrong must not leave an error in the console for it (PLAN.md §14). As in
+ * `saveSessionValues`, the question goes to the browser and never to the error's message,
+ * which differs between Chrome and Firefox: a store that no longer answers at all is a
+ * browser that is gone, while one that answers means the failure was the extension's own
+ * (no space, a quota) and still reports.
+ */
+async function report(error: unknown): Promise<void> {
+  if (await storageAnswers()) failed(error);
+}
+
+/** Whether the browser still answers at all, asked of the store the tracker writes to. */
+async function storageAnswers(): Promise<boolean> {
+  try {
+    await activityItem.getValue();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Only the records that changed, and only inside a write, never once per event. */
 async function saveSessionValues(
   sessions: SessionTabValues,
@@ -382,8 +426,13 @@ async function saveSessionValues(
     try {
       await sessions.setTabValue(tabId, SESSION_KEY, record);
     } catch (error: unknown) {
-      // A tab closed between the event and the write: nothing to attach the value to.
-      failed(error);
+      // A tab closed between the event and the write — by the guard, or by the browser
+      // taking every tab with it on the way out — has nothing left to attach the value to.
+      // That is expected and not the extension's fault, so it is not reported (F.2): the
+      // console of an extension that did nothing wrong must stay clean (PLAN.md §14). The
+      // question goes to the tab and not to the error's message, which differs between
+      // Chrome and Firefox. A write that failed with the tab still there is a real failure.
+      if ((await getTab(tabId)) !== undefined) failed(error);
     }
   }
 }

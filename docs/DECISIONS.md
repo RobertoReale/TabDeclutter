@@ -3121,3 +3121,36 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   `<Section>` instance, rather than swapping to a dedicated ghost component, is what keeps a row's
   own DOM node — and so its transition — intact across the two renders that matter: the one where
   it is still a real row, and the one where it is a ghost of itself.
+
+## F.2 — a write for a closed tab is not an error
+- **Context:** `tests/e2e-firefox/guard.spec.ts > the extension logged no errors` collected
+  `TabDeclutter: tracker (new Error("Invalid tab ID: 4"))` about one run in four, and
+  `tests/e2e/restart.spec.ts` (Chromium) collected `TabDeclutter: tracker Error: The browser is
+  shutting down.` about one run in eight. Both were reported by earlier targets and both stopped or
+  slowed the sequence with no change to the code involved.
+- **Decision:** a failure whose target no longer exists is not reported. In `saveSessionValues` the
+  tracker asks the browser for the tab after `sessions.setTabValue` rejects (`getTab`, already in
+  the module) and calls `failed(error)` only when the tab is still there. Everywhere else in the
+  module the catch sites (the debounced write, the suspend flush, and each listener's queued work)
+  go through one `report()` that asks whether the store still answers at all — a read of the
+  activity item — and calls `failed(error)` only then. `readSessionValues` and `failed()` itself
+  are unchanged.
+- **Why:** both failures mean the thing being written to is gone — the tab was closed between the
+  event and the write, or the browser is taking everything with it — which is the extension
+  behaving correctly, while PLAN.md §14 asks for no console errors. The question is asked of the
+  browser and never of the error's message, because the messages differ between Chrome and Firefox
+  ("Invalid tab ID: 4" versus "The browser is shutting down."). A failure with the store still
+  answering (a quota, no space) is real and still reaches the console. The task expected
+  `saveSessionValues` to be the only source, which held for Firefox but not for Chromium, where
+  that function never runs (`caps.sessionTabValues` is false): instrumenting every awaited call in
+  the module traced the shutdown error first to the debounce timer's `activityItem.setValue` and
+  then, once that was guarded, to a listener's `foregroundItem.getValue()`. A shutdown rejects
+  whichever call is in flight, so the guard belongs at every catch site in the module rather than
+  at one of them. Measured before the fix: the Firefox spec failed 1 run in 4, the Chromium spec
+  2 runs in 16.
+- **Not fixed here:** the same shutdown rejection is also logged by `src/entrypoints/background/badge.ts`
+  (`TabDeclutter: badge Error: The browser is shutting down.`, seen once in 14 runs of
+  `restart.spec.ts`), and the other background modules report through the same kind of bare
+  `console.error`. That is outside this task's scope (`tracker.ts`, its tests, this file), so
+  `restart.spec.ts` can still fail for that reason until a later task gives the background a shared
+  shutdown-aware report.
