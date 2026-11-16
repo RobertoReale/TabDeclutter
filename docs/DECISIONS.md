@@ -3220,3 +3220,46 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   overflow, which is below what the guideline asks of any content. **Not verified by hand:** what a
   screen reader actually announces on the main actions — the roles, names and `aria-live` regions
   are asserted in the E2E tests, but no automated check hears NVDA speak.
+
+## M7.1 — TEST-COVERAGE.md is where §14 is gathered, not MANUAL-CHECKS.md
+- **Context:** the task says to gather in MANUAL-CHECKS all the manual items of §14, and that file
+  has been closed to new entries since 2026-11-09 — the task predates the owner's decision.
+- **Decision:** `docs/TEST-COVERAGE.md` carries the whole of §14, one row per item, pointing at the
+  test and the gate that prove it, or at the MANUAL-CHECKS entry that already covers it; nothing is
+  added to MANUAL-CHECKS and nothing in it is ticked. `tests/unit/test-coverage.test.ts` keeps the
+  list from going stale: every path it names must exist, every entry it cites must be in
+  MANUAL-CHECKS, and every E2E spec of either suite must be accounted for.
+- **Why:** the task's **Done when** already names TEST-COVERAGE.md as the place the correspondence
+  lives, so one document holds it and the closed file is left alone. **Not verified by hand:** what
+  a screen reader announces (as M6.4 recorded); opening the Firefox sidebar from its button, which
+  no API offers a test; a restart of a signed Firefox build, which stays in MANUAL-CHECKS (setup)
+  for release time; and real Multi-Account Containers, which need a second add-on in the profile —
+  each of the four covered as far as a test can reach, as its row says.
+
+## M7.1 — the system theme on Firefox comes from a pref, not from the driver
+- **Context:** §14's only uncovered item was the dark theme on Firefox. Puppeteer has no
+  `colorScheme` for Firefox the way Playwright has for Chromium, and BiDi offers nothing like CDP's
+  `emulateMediaFeatures`.
+- **Decision:** `openPanel` takes `prefs`, merged into `extraPrefsFirefox`, and
+  `tests/e2e-firefox/theme.spec.ts` launches one browser with `ui.systemUsesDarkTheme: 1` and
+  `layout.css.prefers-color-scheme.content-override: 0`, another with `0` and `1`, and asserts
+  `prefers-color-scheme` and the body's WCAG luminance in each.
+- **Why:** the override pref is Gecko's own switch for exactly this
+  ([StaticPrefList.yaml](https://searchfox.org/mozilla-central/source/modules/libpref/init/StaticPrefList.yaml),
+  `layout.css.prefers-color-scheme.content-override`: 0 dark, 1 light, 2 follow the system). Forcing
+  both schemes, rather than reading the one the host machine is in, is what makes the test prove the
+  panel follows the system instead of merely being dark somewhere.
+
+## M7.1 — the axe audits wait for the fades to settle
+- **Context:** `tests/e2e/a11y.spec.ts` "axe finds nothing serious in any view" failed twice on an
+  unchanged tree — `serious color-contrast` on `.td-row-actions > .td-action:nth-child(3)`, in the
+  audit of the duplicate protection menu, in both the light and the dark run — and passed on the
+  runs before and after.
+- **Decision:** `expectAccessible` now waits, before `analyze()`, until no `CSSTransition` is still
+  running on the page.
+- **Why:** a row's actions are `opacity: 0` unless the row is hovered or focused (`base.css`), so
+  the click that opens the guard menu starts a 150 ms (`--td-duration`) fade-out under the audit;
+  axe reads the colours at the instant it runs, blends the half-transparent text into the surface
+  and reports a contrast failure no user can see — and misses nothing when the fade has finished,
+  since at `opacity: 0` axe skips the element and at `opacity: 1` it judges the real colours. Only
+  transitions are awaited, never animations, so a looping animation cannot hang an audit.

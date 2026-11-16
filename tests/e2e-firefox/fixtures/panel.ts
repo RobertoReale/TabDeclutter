@@ -264,6 +264,14 @@ export interface PanelOptions {
    * selected; `declutter.spec.ts` does that by reading the selection back.
    */
   readonly tabs?: readonly string[];
+  /**
+   * Extra Firefox preferences, merged over the ones every session needs.
+   *
+   * For what only the browser itself can decide and no API exposes: the system theme
+   * (`theme.spec.ts`). Puppeteer has no `colorScheme` for Firefox, the way Playwright has
+   * for Chromium, so the pref is the knob.
+   */
+  readonly prefs?: Readonly<Record<string, string | number | boolean>>;
 }
 
 /**
@@ -287,6 +295,7 @@ export async function openPanel(options: PanelOptions = {}): Promise<PanelSessio
       // See collectErrors: the only way to observe the extension's console.
       'devtools.console.stdout.content': true,
       'devtools.console.stdout.chrome': false,
+      ...options.prefs,
     },
   });
 
