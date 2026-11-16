@@ -96,7 +96,12 @@
     --td-hover: rgba(232, 234, 237, 0.08);
     --td-border: #3c4043;
     --td-text: #e8eaed;
-    --td-text-muted: #9aa0a6;
+    /* Lighter than Chrome's own dark secondary grey (#9aa0a6), which clears AA on
+       `--td-surface` but not on the backgrounds that stack on it: the host, the
+       reason and the chip of a *selected* row sit on `--td-accent-subtle`, where
+       #9aa0a6 is 4.4:1 (axe's `color-contrast`, M6.4). This value clears 4.5:1 on
+       every dark background the muted text can land on, hover included. */
+    --td-text-muted: #b4bac0;
 
     --td-accent: #8ab4f8;
     /* The dark accent is light, so what sits on it has to be dark. */

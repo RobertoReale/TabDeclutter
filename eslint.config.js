@@ -40,6 +40,31 @@ const untrustedHtmlRules = {
   ],
 };
 
+/**
+ * Invariant 11 (TASKS.md §2): every visible string goes through i18n. A lint rule and
+ * not a test, because the thing being forbidden is a shape of source code rather than a
+ * behaviour, and the author is told where it is as they write it (M6.4, docs/DECISIONS.md).
+ *
+ * Two shapes carry text to the user from the source itself: a text node between tags, and
+ * a literal in one of the attributes a browser or a screen reader reads out. `alt=""` is
+ * deliberate and stays legal, and anything computed (`title={tab.url}`) is not a literal.
+ * `label` is missing from the list on purpose: our own fields take a `MessageKey` under
+ * that name, so its literals are keys, not text.
+ */
+const visibleText =
+  'alt|title|placeholder|aria-label|aria-description|aria-placeholder|aria-roledescription|aria-valuetext';
+
+const i18nRules = [
+  {
+    selector: 'JSXText[value=/[A-Za-z]/]',
+    message: "Invariant 11: visible strings go through i18n. Render {t('key')} instead.",
+  },
+  {
+    selector: `JSXAttribute[name.name=/^(${visibleText})$/] > Literal[value=/[A-Za-z]/]`,
+    message: "Invariant 11: visible strings go through i18n. Pass t('key') instead.",
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -89,6 +114,20 @@ export default tseslint.config(
         'error',
         { name: 'chrome', message: 'Invariant 4: src/core/ is pure TypeScript, no browser API.' },
         { name: 'browser', message: 'Invariant 4: src/core/ is pure TypeScript, no browser API.' },
+      ],
+    },
+  },
+
+  {
+    // Invariant 11, on the only files that render anything. The invariant-7 selectors
+    // come along because a second `no-restricted-syntax` for the same file replaces the
+    // first one's options rather than adding to them.
+    files: ['src/**/*.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...untrustedHtmlRules['no-restricted-syntax'].slice(1),
+        ...i18nRules,
       ],
     },
   },

@@ -423,9 +423,10 @@ test.describe('in English', () => {
   }) => {
     const { panel } = await seed(context, extensionId);
 
-    // The roles M2.3 chose, in the DOM (docs/DECISIONS.md): one grid, named by a string
-    // only a screen reader hears, a rowgroup per section, and every row a single cell.
-    const grid = panel.getByRole('grid', { name: message('en', 'declutterList') });
+    // The roles M2.3 chose, in the DOM (docs/DECISIONS.md): one grid — a `treegrid` since
+    // M6.4, because its header rows carry `aria-expanded` — named by a string only a screen
+    // reader hears, a rowgroup per section, and every row a single cell.
+    const grid = panel.getByRole('treegrid', { name: message('en', 'declutterList') });
     await expect(grid).toHaveCount(1);
 
     // What the list holds is the previous test's subject; here the shape is read off the

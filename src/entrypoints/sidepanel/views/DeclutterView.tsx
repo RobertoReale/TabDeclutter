@@ -358,13 +358,16 @@ export function DeclutterView({ language }: { language: string }) {
           ))}
 
           {/*
-           * `grid` and not `listbox`: a row holds a checkbox and three buttons, and an
+           * A grid and not a `listbox`: a row holds a checkbox and three buttons, and an
            * `option` may hold no interactive element at all (docs/DECISIONS.md).
+           * `treegrid` — ARIA's grid with collapsible rows — rather than plain `grid`,
+           * because `Section`'s header is a row carrying `aria-expanded`, which ARIA only
+           * allows on a row inside a `treegrid` (axe's `aria-conditional-attr`, M6.4).
            */}
           <div
             ref={grid}
             class="td-list"
-            role="grid"
+            role="treegrid"
             aria-label={t('declutterList')}
             onKeyDown={onKeyDown}
             onFocusIn={onFocusIn}
