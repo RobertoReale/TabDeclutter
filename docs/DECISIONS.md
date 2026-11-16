@@ -3154,3 +3154,69 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   `console.error`. That is outside this task's scope (`tracker.ts`, its tests, this file), so
   `restart.spec.ts` can still fail for that reason until a later task gives the background a shared
   shutdown-aware report.
+
+## M6.4 — the axe audit runs inside the Chromium E2E tests, on seeded views
+- **Context:** §13 M6 asks for zero "serious"/"critical" axe violations on every view, in both
+  themes. An extension page is `chrome-extension://`, under the MV3 content security policy.
+- **Decision:** `@axe-core/playwright` 4.14.0, pinned, as a dev dependency, in
+  `tests/e2e/a11y.spec.ts`: one walk of Declutter, Organize, Archive and the two settings screens
+  per theme, plus the first run in a profile of its own, filtering axe's default rule set by
+  `impact` rather than by WCAG tag (the acceptance is phrased in impacts). Each view is audited
+  with content in it — the seeded tabs and archive of `declutter.spec.ts` and `organize.spec.ts` —
+  and the three surfaces that exist only after a gesture (the selection bar, the chip menu, the
+  archive's confirmation) are audited where the user meets them.
+- **Why:** [the library injects axe with `page.evaluate`](https://github.com/dequelabs/axe-core-npm/tree/develop/packages/playwright),
+  not with `addScriptTag`, so it runs under the panel's CSP unchanged; an empty profile would have
+  proved nothing about the widgets, and a tag filter would have answered a different question.
+
+## M6.4 — the Declutter list is a `treegrid`
+- **Context:** axe's `aria-conditional-attr` (serious) failed on all three section headers: ARIA
+  allows `aria-expanded` on a `row` only inside a `treegrid`, and M2.3 chose `grid` with the fold
+  on the header row ("the section header is a row with `aria-expanded`, not a button").
+- **Decision:** `role="treegrid"` on `.td-list`, and nothing else: the rows, the cells, the roving
+  tab stop and the keys are M2.3's.
+- **Why:** `treegrid` [is ARIA's grid whose rows collapse](https://www.w3.org/TR/wai-aria-1.2/#treegrid),
+  a subclass of `grid` and so still one of the two roles §4.8 names. The alternative was a
+  disclosure `<button>` inside the header cell, which M2.3 rejected on its own merits — it puts a
+  second tab stop inside the single one §4.8 asks for — and which would also have collided with
+  `DeclutterView`'s own `Enter`/`Space` handling. Left/Right expanding is not implemented: §4.8
+  lists the keys the list answers, and `Enter` on a header already folds it.
+
+## M6.4 — the dark muted grey is lighter than Chrome's own
+- **Context:** axe's `color-contrast` (serious) failed in the dark theme on a *selected* row's
+  host, reason and chip: `--td-text-muted` (#9aa0a6) on `--td-accent-subtle` over `--td-surface`
+  is 4.4:1, just under AA, while on the surface alone it is 6.1:1.
+- **Decision:** the dark `--td-text-muted` becomes #b4bac0. Nothing else moves: not the selected
+  row's weight, not the hover veil, not the light theme.
+- **Why:** §4.7's palette promises AA for body text, and the pair that broke it is a background
+  stacked on a background — weakening the selection tint instead would pay for contrast with the
+  one cue that says a row is picked. #b4bac0 clears 4.5:1 on every dark background the muted text
+  can land on, hover over a selected row included, and stays clearly dimmer than `--td-text`.
+
+## M6.4 — "no hand-written visible string" is a lint rule, not a test
+- **Context:** the task leaves the choice open. `MessageKey` already makes an unknown key a compile
+  error, so what is unguarded is text that never asks for a key at all.
+- **Decision:** ESLint. `no-restricted-syntax` on `src/**/*.tsx` forbids a `JSXText` node
+  containing a letter and a string literal in `alt`, `title`, `placeholder` or the `aria-*`
+  attributes that are read out. `alt=""` stays legal, anything computed (`title={tab.url}`) is not
+  a literal, and `label` is left out because our own fields take a `MessageKey` under that name.
+  The unused half is a test (`tests/unit/i18n-usage.test.ts`): the catalogues may ship no key the
+  sources have stopped mentioning.
+- **Why:** the forbidden thing is a shape of source code, which is what a linter reads, and the
+  author is told the file and the column as they write it rather than from a test name. Both halves
+  are already gated — the lint gate and the unit gate — so neither needs a gate of its own. No new
+  dependency: `no-restricted-syntax` is in ESLint itself. The invariant-7 selectors are repeated in
+  the new block because a second `no-restricted-syntax` for the same file replaces the first one's
+  options instead of adding to them.
+
+## M6.4 — 200% zoom is a reflow test, NVDA is not verified by hand
+- **Context:** the **Done when** asks for two MANUAL-CHECKS entries, "NVDA sulle azioni principali"
+  and "zoom al 200%", and that file is closed to new entries (2026-11-09).
+- **Decision:** the zoom is automated: one Chromium test sets `zoom: 2` on the root at a 640 px
+  viewport and asserts no horizontal overflow and a clean axe run. NVDA is not automated.
+- **Why:** CSS `zoom` is what Chromium's own zoom control does to layout, and 640 at zoom 2 leaves
+  the 320 CSS pixels [WCAG 1.4.10](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html) asks
+  content to reflow into. The test is not vacuous: at 400 px (200 effective) it reported 179 px of
+  overflow, which is below what the guideline asks of any content. **Not verified by hand:** what a
+  screen reader actually announces on the main actions — the roles, names and `aria-live` regions
+  are asserted in the E2E tests, but no automated check hears NVDA speak.
