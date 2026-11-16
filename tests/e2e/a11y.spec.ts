@@ -273,8 +273,23 @@ function described(violation: {
  *
  * The violations are listed in the failure rather than counted, because an axe failure is
  * only useful if it says which rule broke on which element.
+ *
+ * The audit waits for the fades to finish first. axe reads the colours at the instant it
+ * runs, and a row's actions are `opacity: 0` until the row is hovered or focused
+ * (`base.css`), so the 150 ms of `--td-duration` after a click that moves the focus away
+ * leave them half transparent: axe then blends them into the surface behind and reports a
+ * contrast violation that no user can see. Measured on the duplicate protection menu, whose
+ * audit follows the click that opens it. Only transitions are awaited — never a looping
+ * animation, which would never settle.
  */
 async function expectAccessible(panel: Page, surface: string): Promise<void> {
+  await panel.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) => !(animation instanceof CSSTransition) || animation.playState !== 'running',
+      ),
+  );
   const { violations } = await new AxeBuilder({ page: panel }).analyze();
   const serious = violations
     .filter((violation) => violation.impact === 'serious' || violation.impact === 'critical')
