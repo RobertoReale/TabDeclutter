@@ -21,6 +21,9 @@
   "reviewEffort": "high",
   "fixRounds": ["same", "opus/xhigh"],
 
+  "switchAccounts": true,
+  "limitFallback": ["agy:claude-opus-5-5-high", "agy:gemini-4-hydrogen-xhigh"],
+
   "usageLimit": {
     "maxRetries": 10,
     "waitMinutes": 20,

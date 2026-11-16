@@ -49,6 +49,13 @@ verified facts with their evidence; never a product decision.
 tries, the second on a stronger model, before the sequence stops). A stop after the rounds says
 "after 2 fix round(s)"; the reviewer's findings are in `.phasekit/logs/review-<target>-*.log`.
 
+**When the allowance runs out (since 2026-11-16, his choice).** `"switchAccounts": true`: phasekit
+itself moves the same conversation to the other Claude account that is not spent
+(`~/.phasekit/account-limits.json` records which are). Only when both are spent does
+`"limitFallback"` hand the target, in a fresh session, to Claude Opus 5.5 High on Antigravity's
+quota, then to Gemini 4 Hydrogen XHigh. No paid credits (`agyCredits` stays off). The journal
+says "handing over to agy:…" when that happens.
+
 Speak to him in **Italian, plainly, briefly**. He is not reading the code. Run every tool from the
 repository root with `pwsh -NoProfile -File tools/assistant.ps1 <mode>`.
 
