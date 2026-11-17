@@ -9,7 +9,8 @@ The gate names are the `name` fields of `phasekit.json`'s `gates` array, which i
 definition of green: `unit tests` (`pnpm test`, Vitest over `tests/unit` and `tests/ext`),
 `e2e chromium` (`pnpm e2e`, Playwright over `tests/e2e`), `e2e firefox` (`pnpm e2e:firefox`,
 Vitest + Puppeteer/BiDi over `tests/e2e-firefox`), `perf budgets`, `web-ext lint`, `lint`,
-`typecheck`, `build chrome`, `build firefox`.
+`typecheck`, `build chrome`, `build firefox`, `permissions docs` (`tools/check-permissions.mjs`),
+`bundle size` (`tools/size.mjs`).
 
 `tests/unit/test-coverage.test.ts` keeps this file honest: every path it names has to exist, every
 `MANUAL-CHECKS.md` entry it cites has to be there, and every E2E spec of either suite has to be
@@ -97,21 +98,22 @@ named here. A new spec that is not in this list fails the `unit tests` gate.
 
 ## Release checklist
 
-Every box is for M7.6, which runs the checklist itself. This says what will prove each one.
+This says what proves each box. The checklist itself, run with its results, is
+`docs/RELEASE-CHECKLIST.md`.
 
 | §14 box | Proved by |
 |---|---|
-| Chrome and Firefox builds generated from the same commit, same version | Gates `build chrome` and `build firefox` run on one tree; one version in `package.json`, asserted for both targets by `tests/unit/manifest.test.ts`. The packages come from that same tree: `pnpm zip` and `pnpm zip:firefox`, in `.github/workflows/release.yml` on a `v*` tag. |
+| Chrome and Firefox builds generated from the same commit, same version | Gates `build chrome` and `build firefox` run on one tree. `build/manifest.ts` declares no `version`, so WXT writes the one in `package.json` into both manifests; no test asserts it, and `docs/RELEASE-CHECKLIST.md` reads it from both packages. The packages come from that same tree: `pnpm zip` and `pnpm zip:firefox`, in `.github/workflows/release.yml` on a `v*` tag. |
 | `web-ext lint` with 0 errors, `data_collection_permissions` and `gecko.id` present | Gate `web-ext lint`; both fields are asserted in `tests/unit/manifest.test.ts`, "the Firefox manifest". |
 | AMO sources zip without minified files, reproducible build verified | `tools/verify-reproducible.mjs` (`pnpm reproducible`, a step of `.github/workflows/release.yml`): it fails on a sources zip holding build output, dependencies, tests, a minified file or a file git does not track, then rebuilds from that zip in a fresh folder and compares every file with the add-on zip. |
 | All flows verified on Chrome **and** Firefox | Gates `e2e chromium` and `e2e firefox`, which are the two sections above. |
 | Zero network requests | Gate `e2e chromium`: every Playwright spec ends on the recorder's `takeForeignRequests` (invariant 1), and that the recorder really catches one is `tests/e2e/recorder.spec.ts`. On Firefox, no remote favicon by construction (`tests/unit/favicon.test.ts`). |
-| Permissions = those of section 5.4, each one justified | `tests/unit/manifest.test.ts`, "both manifests"; the prose is PERMISSIONS.md (M7.3). |
+| Permissions = those of section 5.4, each one justified | `tests/unit/manifest.test.ts`: the exact lists in "the Chrome manifest" and "the Firefox manifest", no host permission and `bookmarks` only optional in "both manifests"; the prose is PERMISSIONS.md (M7.3), held to the built manifests by gate `permissions docs`. |
 | Performance budgets met | Gate `perf budgets`, with `tests/unit/perf-budget-power.test.ts` and `tests/unit/perf-budget-verdict.test.ts` over the measurement itself; the JS bundle budgets are gate `bundle size` (`tools/size.mjs`, both builds). |
 | No console errors/warnings | Gate `e2e chromium` (the recorder's `takeConsoleErrors` in every spec, proved by `tests/e2e/recorder.spec.ts`) and gate `e2e firefox` (`session.errors.take()`, proved by `tests/e2e-firefox/console.spec.ts`). |
 | en/it i18n complete | `tests/unit/i18n.test.ts` (the catalogues agree, key by key and placeholder by placeholder) and `tests/unit/i18n-usage.test.ts` (invariant 11: no key the code asks for is missing, none the catalogues ship is dead). |
 | axe clean | Gate `e2e chromium`: `tests/e2e/a11y.spec.ts` — "axe finds nothing serious in any view", in both themes, plus the onboarding screen. |
-| PRIVACY.md, PERMISSIONS.md, STORE_LISTING.md, AMO_REVIEW.md with 1280×800 screenshots | M7.3 (the documents) and M7.4 (the screenshots). |
+| PRIVACY.md, PERMISSIONS.md, STORE_LISTING.md, AMO_REVIEW.md with 1280×800 screenshots | `tests/unit/store-docs.test.ts` (the documents against the code and the manifests), gate `permissions docs` (PERMISSIONS.md against both manifests), and `scripts/store-screenshots.ts` (`pnpm screenshots`, the screenshots in `docs/store/screenshots/chrome/`). |
 
 ## Beyond §14's lists, also in the gates
 

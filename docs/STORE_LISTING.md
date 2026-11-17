@@ -97,7 +97,11 @@ Se usi ancora Duplicate Tabs Closer, disattivalo per evitare conflitti.
 
 ### Assets
 
-128×128 icon, 1280×800 screenshots (see M7.4), 440×280 small promo tile.
+- 128×128 icon: `src/public/icon/icon-128.png` (also in the package).
+- 1280×800 screenshots: the five PNGs in `docs/store/screenshots/chrome/` (`pnpm screenshots`
+  makes them again). AMO takes the same files.
+- 440×280 small promo tile: not made yet; it has to exist before the first Chrome Web Store
+  submission (`docs/RELEASE-CHECKLIST.md`, "Left before submission").
 
 ## Firefox Add-ons (AMO)
 

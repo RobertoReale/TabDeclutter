@@ -30,17 +30,21 @@ are in `docs/PERMISSIONS.md`.
 
 ## Documents
 
-| File                    | What it is                                                          |
-| ----------------------- | ------------------------------------------------------------------- |
-| `PLAN.md`               | The product spec.                                                   |
-| `TASKS.md`              | The execution plan.                                                 |
-| `CHANGELOG.md`          | What changed in each version.                                       |
-| `docs/PRIVACY.md`       | The privacy policy linked from both stores.                         |
-| `docs/PERMISSIONS.md`   | Every permission, per browser, with its warning and reason.         |
-| `docs/STORE_LISTING.md` | The texts for the Chrome Web Store and AMO, in Italian and English. |
-| `docs/AMO_REVIEW.md`    | How AMO reviewers rebuild the Firefox package.                      |
-| `docs/DECISIONS.md`     | Every choice the spec left open.                                    |
-| `docs/TEST-COVERAGE.md` | Where each item of the test strategy is tested.                     |
+| File                        | What it is                                                           |
+| --------------------------- | -------------------------------------------------------------------- |
+| `PLAN.md`                   | The product spec.                                                    |
+| `TASKS.md`                  | The execution plan.                                                  |
+| `CHANGELOG.md`              | What changed in each version.                                        |
+| `docs/PRIVACY.md`           | The privacy policy linked from both stores.                          |
+| `docs/PERMISSIONS.md`       | Every permission, per browser, with its warning and reason.          |
+| `docs/STORE_LISTING.md`     | The texts for the Chrome Web Store and AMO, in Italian and English.  |
+| `docs/store/`               | The 1280×800 store screenshots (`pnpm screenshots`).                 |
+| `docs/AMO_REVIEW.md`        | How AMO reviewers rebuild the Firefox package.                       |
+| `docs/RELEASE-CHECKLIST.md` | The release checklist of PLAN.md §14, with the evidence of each box. |
+| `docs/DECISIONS.md`         | Every choice the spec left open.                                     |
+| `docs/TEST-COVERAGE.md`     | Where each item of the test strategy is tested.                      |
+| `docs/MANUAL-CHECKS.md`     | The checks done by hand, and the ones left for publication.          |
+| `docs/CLUSTER-REVIEW.md`    | A review of the topic groups on the 300-tab fixture.                 |
 
 ## Building from source
 
