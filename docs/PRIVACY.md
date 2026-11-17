@@ -48,7 +48,9 @@ Nothing else is kept. Uninstalling the extension removes all of it.
   bookmarked, and never changes a bookmark. You can turn it off, and revoke the permission, at any
   time.
 - **Site icons.** On Chrome the icons come from the browser's own local cache, with no request to
-  the websites. On Firefox the browser supplies the icon of each tab.
+  the websites. Firefox has no such cache for extensions, so there each tab is shown with a
+  coloured badge holding the first letter of its site, drawn by the extension, unless the tab
+  already carries its icon as embedded data. No icon is ever downloaded.
 
 ## Your control
 

@@ -3347,3 +3347,42 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   workflow is checked with `pnpm dlx @action-validator/cli@0.6.0`, which also rejects broken YAML.
 - **Why:** a release should pass at least what every merge to main passes. Submission stays
   manual until the first publication on each store (PLAN.md §12.3; MANUAL-CHECKS `(setup)`).
+
+## M7.6 — The release checklist lives in docs/RELEASE-CHECKLIST.md
+- **Context:** PLAN.md §14 has the release checklist as boxes, and M7 asks for it "fully ticked".
+  PLAN.md is the binding spec, and a ticked box there would carry no evidence.
+- **Decision:** `docs/RELEASE-CHECKLIST.md` takes every box of §14 in order, with its status, the
+  command that was run and what it printed, or a pointer to `docs/MANUAL-CHECKS.md`. PLAN.md is
+  not edited. `docs/TEST-COVERAGE.md` keeps saying how each box is proved and points to it.
+- **Why:** the evidence belongs next to the status, and the spec stays the spec.
+
+## M7.6 — ci.yml brought back in line with the gates
+- **Context:** ci.yml says that its steps mirror the `gates` array of `phasekit.json` in order
+  (TASKS.md M0.6). It ran `perf budgets` before `build chrome` and lacked `permissions docs` and
+  `bundle size`, which later tasks added to the gates.
+- **Decision:** the steps now follow the twelve gates exactly. The timing comment says eight to ten
+  minutes. Checked with `pnpm dlx @action-validator/cli@0.6.0 .github/workflows/ci.yml`.
+- **Why:** the file's own promise and TASKS.md M0.6 were untrue. release.yml already ran all
+  twelve.
+
+## M7.6 — Chrome's Prompt API warning, assessed
+- **Context:** §14 asks for no console warnings, and the E2E collectors watch only errors. A
+  temporary, uncommitted change logged warnings for one run of each suite. Chromium logged 11, all
+  `Unable to create a text session because the service is not running.` on `sidepanel.html`.
+  Firefox logged 0.
+- **Decision:** accepted as it is. Chrome writes it when the panel calls
+  `LanguageModel.availability()` (PLAN.md §7.3) in a browser whose on-device model service is not
+  running. The extension writes no warning of its own. The collectors stay on errors.
+- **Why:** the only way to silence it is to not ask whether the model exists, which §7.3 requires.
+  Not verified by hand: whether a regular Chrome with or without the model writes it.
+
+## M7.6 — What the release checklist could not prove by hand
+- **Context:** §14 and §13 (M7) name checks done by a person: all flows on both browsers,
+  DevTools → Network on the panel and the service worker, and a test with 1000 tabs in 10 windows
+  on each browser. Manual checks are closed since 2026-11-09.
+- **Decision:** the boxes rest on the automated evidence in `docs/RELEASE-CHECKLIST.md`. Not
+  verified by hand: the flows outside the E2E suites, the Network panel (Firefox has no run-time
+  request check; its builds were read for network calls instead), and the 1000 tabs × 10 windows
+  test (its budgets are measured by `perf budgets`). The steps that need an account are the open
+  `(setup)` entries of `docs/MANUAL-CHECKS.md`. The 440×280 promo tile of §12.2 does not exist yet.
+- **Why:** no task can do these by hand, and the checklist says so instead of ticking them.

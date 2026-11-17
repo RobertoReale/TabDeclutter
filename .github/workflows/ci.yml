@@ -25,7 +25,7 @@ jobs:
   gates:
     runs-on: ubuntu-latest
     # The suites launch real browsers, so a hang is possible; the whole
-    # sequence takes about five minutes locally.
+    # sequence takes eight to ten minutes locally.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -64,11 +64,11 @@ jobs:
       - name: unit tests
         run: pnpm test
 
-      - name: perf budgets
-        run: pnpm perf
-
       - name: build chrome
         run: pnpm build
+
+      - name: perf budgets
+        run: pnpm perf
 
       - name: build firefox
         run: pnpm build:firefox
@@ -76,8 +76,14 @@ jobs:
       - name: web-ext lint
         run: pnpm lint:firefox
 
+      - name: permissions docs
+        run: node tools/check-permissions.mjs
+
       - name: e2e chromium
         run: pnpm e2e
 
       - name: e2e firefox
         run: pnpm e2e:firefox
+
+      - name: bundle size
+        run: pnpm size

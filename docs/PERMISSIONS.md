@@ -27,7 +27,7 @@ an install prompt. "None" means the browser shows no warning of its own for it.
 | `alarms`      | None                                                        | Wakes the background every few hours to purge expired archive entries, periodically to refresh the badge, and to end a pause of the duplicate protection.                                  |
 | `favicon`     | None of its own (covered by the `tabs` warning)             | Shows each tab's icon from Chrome's local cache (`/_favicon/`), so no request is made to any website.                                                                                      |
 | `sessions`    | Together with `tabs` it widens the warning above (no warning of its own) | Lets "Undo" restore a closed tab with its history and scroll position, instead of just reopening its address.                                                                              |
-| `contextMenus`| None                                                        | Adds "Always keep this tab", "Always protect this site" and the duplicate actions to the right-click menu of the page and of the toolbar icon.                                                                                |
+| `contextMenus`| None                                                        | Adds "Always keep this tab", "Always protect this site" and "Allow duplicates for this site" to the right-click menu of the page, and the duplicate protection's actions (reopen the last duplicate closed, pause the protection) to the right-click menu of the toolbar icon. |
 
 ## Chrome (optional)
 
@@ -44,10 +44,12 @@ an install prompt. "None" means the browser shows no warning of its own for it.
 | `storage`     | None                                                        | Keeps the settings, the tab activity map, the archive of closed tabs and the whitelist on the device, and the short-lived duplicate-guard state.                                          |
 | `alarms`      | None                                                        | Wakes the event page every few hours to purge expired archive entries, periodically to refresh the badge, and to end a pause of the duplicate protection.                                  |
 | `sessions`    | "Access recently closed tabs" (it: "Accedere alle schede chiuse di recente") | Lets "Undo" restore a closed tab with its history, instead of just reopening its address.                                                                                                  |
-| `menus`       | None                                                        | Firefox's name for the context menu: adds "Always keep this tab", "Always protect this site" and the duplicate actions to the right-click menu of the page and of the toolbar button.                                                                              |
+| `menus`       | None                                                        | Firefox's name for the context menu: adds "Always keep this tab", "Always protect this site" and "Allow duplicates for this site" to the right-click menu of the page and of a tab, and the duplicate protection's actions (reopen the last duplicate closed, pause the protection) to the right-click menu of the toolbar button. |
 
-Firefox has no `sidePanel` and no `favicon` permission: the panel is the `sidebar_action`, and the
-browser supplies the tab icons. The manifest declares `data_collection_permissions: { required: ["none"] }`.
+Firefox has no `sidePanel` and no `favicon` permission: the panel is the `sidebar_action`, and
+each tab is shown with a coloured badge holding the first letter of its site (or with its icon, when
+the tab already carries it as embedded data), so no icon is ever downloaded. The manifest declares
+`data_collection_permissions: { required: ["none"] }`.
 
 ## Firefox (optional)
 
