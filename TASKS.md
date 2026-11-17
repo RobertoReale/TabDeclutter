@@ -1075,7 +1075,7 @@ Ticked **in the same commit** as the task, never before. `phasekit status` shows
 - [x] M7.1 Complete E2E on both browsers
 - [x] M7.2 Bundle budget as a gate
 - [x] M7.3 Store documents
-- [ ] M7.4 Store screenshots
+- [x] M7.4 Store screenshots
 - [ ] M7.5 Packages and reproducible build
 - [ ] M7.6 Release checklist and final audit
 - [x] F.1 Perf budgets judged against the machine's own speed

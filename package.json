@@ -28,6 +28,7 @@
     "e2e:firefox": "wxt build -b firefox && vitest run --config vitest.firefox.config.ts",
     "gates": "node tools/gates.mjs",
     "size": "node tools/size.mjs",
+    "screenshots": "wxt build && node --experimental-strip-types scripts/store-screenshots.ts",
     "postinstall": "wxt prepare && playwright install chromium"
   },
   "dependencies": {
