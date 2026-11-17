@@ -24,7 +24,8 @@ pnpm build:firefox
 
 The result is `.output/firefox-mv3/`, the content of the add-on. `pnpm zip:firefox` runs the same
 build and writes the add-on zip and the sources zip. The sources zip holds no minified or
-generated code, no `.output/` and no `node_modules/`.
+generated code, no `.output/` and no `node_modules/`; it leaves out the test suites and the store
+screenshots too, which the build does not read.
 
 `pnpm install` runs a `postinstall` step that also downloads Chromium for the test suites
 (`playwright install chromium`). It is not used by the build and does not touch the output.
@@ -58,6 +59,12 @@ warning is listed with its assessment in `docs/DECISIONS.md` or in the release c
 ## Reproducibility
 
 The Firefox package and the package rebuilt from the sources zip, with the versions above, are
-meant to be identical. The release task that checks this (rebuild from the sources zip and diff
-against the add-on zip) is M7.5; until it is done this file claims the instructions, not the
-result.
+identical, file for file. `pnpm reproducible` (`tools/verify-reproducible.mjs`) proves it: it runs
+`pnpm zip:firefox`, checks that the sources zip holds no build output, dependencies, tests,
+minified file or file git does not track, unpacks it into a fresh temporary folder, runs the two
+build commands above there, and compares every file of the rebuilt `.output/firefox-mv3/` byte for
+byte with the add-on zip. The release workflow (`.github/workflows/release.yml`) runs it on every
+`v*` tag before it attaches the zips to the GitHub Release.
+
+The add-on is minified, like the Chrome one: the sources zip is what a reviewer reads, and the
+size budgets of the extension apply to both builds.

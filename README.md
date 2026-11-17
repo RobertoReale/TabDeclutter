@@ -57,7 +57,10 @@ pnpm build:firefox   # Firefox → .output/firefox-mv3
 ```
 
 `pnpm zip` and `pnpm zip:firefox` produce the store packages; the Firefox one also produces the
-sources zip that AMO requires.
+sources zip that AMO requires. `pnpm reproducible` makes the Firefox packages, rebuilds the add-on
+from the sources zip in a temporary folder and fails unless every file is identical. A `v*` tag runs
+the same checks on GitHub (`.github/workflows/release.yml`) and attaches the three zips to a GitHub
+Release; nothing is submitted to the stores.
 
 ## Loading the build by hand
 

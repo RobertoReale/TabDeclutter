@@ -3308,3 +3308,42 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Context:** the panel is a narrow column, but the stores want 1280×800. Firefox's panel is a privileged `moz-extension://` document: WebDriver BiDi refuses `browsingContext.setViewport` and `captureScreenshot` there (`unsupported operation … privileged scope`). A drawing of the DOM into a canvas was tried and rejected: no checkboxes, wrong layout, the window could not be narrowed.
 - **Decision:** `pnpm screenshots` builds the Chromium bundle and runs `scripts/store-screenshots.ts` (Playwright). Each view is captured at 460×720 and composed by a plain Chromium page into a 1280×800 frame (caption left, panel right); the PNG size is asserted. Five images in `docs/store/screenshots/chrome/`, English only, used for both stores because Firefox ships the same UI bundle. Demo hosts are served from 127.0.0.1 under non-HSTS-preloaded names (gitlab.com, mdn, lwn.net, kayak.com, metoffice.gov.uk, …), since Chromium upgrades preloaded hosts to https before host-resolver rules apply. The panel's `Date.now` is shifted 45 days ahead so seeded ages show (the score also counts `tab.lastAccessed`). Not a gate. Firefox is not driven, so the shared `openPanel` fixture is unchanged.
 - **Why:** an honest panel capture beats a faked one. Fonts come from the system stack, so images are not byte-identical across machines. Not verified by hand: review the screenshots before submission (MANUAL-CHECKS is closed).
+
+## M7.5 — the Firefox build stays minified
+- **Context:** PLAN.md §12.3 asks to consider `minify: false` for Firefox, to ease human review.
+- **Decision:** keep Vite's minification on both builds. Reviewers read the sources zip, and
+  `pnpm reproducible` proves that it rebuilds the minified add-on file for file.
+- **Why:** measured on this tree, an unminified Firefox build without tldts is 51.5 KB gzip for
+  the background script and 89.3 KB for the panel's main chunk. The budgets of PLAN.md §11,
+  enforced on both builds by the `bundle size` gate, are 18 KB and 60 KB, so turning minification
+  off would mean weakening a gate. AMO accepts minified code when the sources and build
+  instructions come with it
+  (https://extensionworkshop.com/documentation/publish/source-code-submission/).
+
+## M7.5 — what the sources zip holds, and how reproducibility is proved
+- **Context:** WXT's default sources zip left out `.nvmrc`, which docs/AMO_REVIEW.md pins Node
+  with. It took in generated data (the `tests/fixtures/tabs-*.json` fixtures, the store
+  screenshots) and the helpers of test suites whose specs it already drops. It also took in any
+  untracked file found in an ignored folder.
+- **Decision:** `zip` in `wxt.config.ts` adds `.nvmrc` and excludes `tests/**`, `docs/store/**`
+  and the ignored output folders. `tools/verify-reproducible.mjs` (`pnpm reproducible`) runs
+  `pnpm zip:firefox` and fails if the sources zip holds output, dependencies, tests, a `*.min.*`
+  file, a code line over 1000 characters or a file git does not track. It then unpacks the zip
+  into `os.tmpdir()`, runs `pnpm install --frozen-lockfile && pnpm build:firefox` and compares
+  every file of the rebuilt `.output/firefox-mv3/` byte for byte with the add-on zip, not the zips
+  themselves. The script is not a gate: it reinstalls every dependency (about 100 s locally). It
+  runs in `release.yml`, which is where PLAN.md §12.3 puts the CI check.
+- **Why:** the zips are compared by content because a zip also carries entry metadata. The
+  sources zip keeps the repository's documents and tools, since they are tracked sources and
+  neither minified nor generated. The zip is read with `node:zlib`, which needs no new dependency.
+
+## M7.5 — release.yml mirrors the gates, then packages
+- **Context:** PLAN.md §12.4 lists a subset of the checks for the release workflow, and leaves
+  `wxt submit` optional.
+- **Decision:** on a `v*` tag, one job checks the tag against the `package.json` version and runs
+  every gate of `phasekit.json` in order, set up as in ci.yml. It then runs `pnpm zip` and
+  `pnpm reproducible` and creates the GitHub Release with `gh release create` and the three zips.
+  It needs `contents: write`. There is no `wxt submit` step and there are no store secrets. The
+  workflow is checked with `pnpm dlx @action-validator/cli@0.6.0`, which also rejects broken YAML.
+- **Why:** a release should pass at least what every merge to main passes. Submission stays
+  manual until the first publication on each store (PLAN.md §12.3; MANUAL-CHECKS `(setup)`).
