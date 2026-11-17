@@ -7,7 +7,40 @@ Nothing is closed without an explicit gesture, every suggestion comes with a rea
 close can be undone, and no data ever leaves the device: no network requests, no analytics. The
 optional on-device AI only improves group names.
 
-See `PLAN.md` for the product spec and `TASKS.md` for the execution plan.
+## What it does
+
+- **Declutter**: the open tabs ranked by how likely you are to be done with them, each with a
+  plain reason. Close, keep, discard or protect a site, one by one or in bulk.
+- **Organize**: native tab groups by site or by topic; on Chrome, the on-device model can improve
+  the group names (optional).
+- **Duplicate protection**: warns you, or closes the duplicate, the moment a tab becomes a copy of
+  another. Whitelist, URL comparison rules and pause; it understands the pattern list of
+  Duplicate Tabs Closer. If you still use that extension, turn it off to avoid conflicts.
+- **Archive and undo**: closed tabs are kept for a while and can be restored.
+- Badge with the number of suggestions, keyboard shortcuts (`Alt+Shift+D` opens the panel), light
+  and dark theme, Italian and English.
+
+Works on Chrome 121 or later (also Edge, Brave, Vivaldi) and Firefox 140 or later. Incognito
+windows are not supported.
+
+## Privacy
+
+No data is collected or transmitted. See `docs/PRIVACY.md`. The permissions and why each is needed
+are in `docs/PERMISSIONS.md`.
+
+## Documents
+
+| File                    | What it is                                                          |
+| ----------------------- | ------------------------------------------------------------------- |
+| `PLAN.md`               | The product spec.                                                   |
+| `TASKS.md`              | The execution plan.                                                 |
+| `CHANGELOG.md`          | What changed in each version.                                       |
+| `docs/PRIVACY.md`       | The privacy policy linked from both stores.                         |
+| `docs/PERMISSIONS.md`   | Every permission, per browser, with its warning and reason.         |
+| `docs/STORE_LISTING.md` | The texts for the Chrome Web Store and AMO, in Italian and English. |
+| `docs/AMO_REVIEW.md`    | How AMO reviewers rebuild the Firefox package.                      |
+| `docs/DECISIONS.md`     | Every choice the spec left open.                                    |
+| `docs/TEST-COVERAGE.md` | Where each item of the test strategy is tested.                     |
 
 ## Building from source
 

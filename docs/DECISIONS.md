@@ -3286,3 +3286,20 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   kept WXT storage: tldts is data rather than the extension's own code, as for the panel, and a
   home-grown migration layer is a data-safety risk that a few KB of a once-loaded worker do not justify.
 - **Why:** an honest budget that the spec's own design meets, with ~470 B of headroom to watch.
+
+## M7.3 — the privacy policy is linked from the repository, and the permission table is a test input
+- **Context:** PLAN.md §12.1 says the policy is hosted "e.g. on GitHub Pages", and asks for a
+  check that `PERMISSIONS.md` matches the manifests. No page exists yet and the repository has no
+  remote.
+- **Decision:** the documents link to `https://github.com/RobertoReale/TabDeclutter/blob/main/docs/PRIVACY.md`
+  (the repository the sequence creates at its end). `PERMISSIONS.md` has one table per browser and
+  kind (`## Chrome (required)`, `## Chrome (optional)`, and the same for Firefox) whose first column
+  is compared by `tests/unit/store-docs.test.ts` with `buildManifest`; the new gate `permissions docs` (`tools/check-permissions.mjs`, after both
+  builds, which the unit gate precedes) compares it with the built manifests and fails if one is missing. The same test checks the listing limits (132 and 250
+  characters), that the Chrome short descriptions equal `extDescription`, and that `AMO_REVIEW.md`
+  names the versions of `.nvmrc` and `packageManager`. Firefox warning texts come from Firefox's own
+  `extensionPermissions.ftl` (`tabs` and `sessions` each show one: "Access browser tabs", "Access recently
+  closed tabs"); Chrome's from Chromium's permission message rules (`tabs` + `sessions` show "Read your browsing history on all your signed-in devices") and its documentation (not verified
+  by hand: the wording on a real Chrome install prompt).
+- **Why:** a URL on the repository works the day it is public and can be swapped for Pages later in
+  one place; the unit test runs in the existing gate, so no gate is added.
