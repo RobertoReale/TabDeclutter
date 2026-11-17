@@ -24,6 +24,9 @@
   "switchAccounts": true,
   "limitFallback": ["agy:claude-opus-5-5-high", "agy:gemini-4-hydrogen-xhigh"],
 
+  "arbiter": true,
+  "arbiterModel": "agy:claude-opus-5-5-high",
+
   "usageLimit": {
     "maxRetries": 10,
     "waitMinutes": 20,

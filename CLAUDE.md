@@ -56,6 +56,13 @@ itself moves the same conversation to the other Claude account that is not spent
 quota, then to Gemini 4 Hydrogen XHigh. No paid credits (`agyCredits` stays off). The journal
 says "handing over to agy:…" when that happens.
 
+**The arbiter (since 2026-11-17, his choice).** `"arbiter": true` with Claude Opus 5.5 High on
+Antigravity's quota: when a target stops with a question, a read-only arbiter answers it if the
+answer is technical and the target carries on; a product choice still stops the sequence, with
+the arbiter's summary in the stop note. Every answer is in `.phasekit/logs/decisions.md`. When
+you report on the build, mention any new entry there in one plain Italian sentence, so he
+knows what was decided in his name.
+
 Speak to him in **Italian, plainly, briefly**. He is not reading the code. Run every tool from the
 repository root with `pwsh -NoProfile -File tools/assistant.ps1 <mode>`.
 
