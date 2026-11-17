@@ -27,6 +27,7 @@
     "e2e": "wxt build && playwright test",
     "e2e:firefox": "wxt build -b firefox && vitest run --config vitest.firefox.config.ts",
     "gates": "node tools/gates.mjs",
+    "size": "node tools/size.mjs",
     "postinstall": "wxt prepare && playwright install chromium"
   },
   "dependencies": {

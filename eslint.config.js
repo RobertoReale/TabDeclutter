@@ -71,6 +71,7 @@ export default tseslint.config(
       'node_modules/',
       '.output/',
       '.wxt/',
+      '.analysis/',
       'coverage/',
       'test-results/',
       'playwright-report/',
