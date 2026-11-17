@@ -38,4 +38,25 @@ export default defineConfig({
   // The content is in build/manifest.ts, where a unit test can check it
   // against PLAN.md §5.4.
   manifest: ({ browser }) => buildManifest(browser),
+  // The sources zip AMO requires (PLAN.md §12.3), made by `pnpm zip:firefox`. WXT's defaults
+  // already leave out `node_modules/`, `.output/`, the dot-directories (`.wxt/`, `.phasekit/`,
+  // `.git/`) and every `*.test.*`/`*.spec.*` file. On top of that: `.nvmrc` goes in, because
+  // docs/AMO_REVIEW.md pins Node with it; the rest of `tests/` and the store screenshots go out,
+  // because they are generated data the build never reads; and so does whatever a local run
+  // leaves behind in ignored folders. `tools/verify-reproducible.mjs` checks the result.
+  zip: {
+    includeSources: ['**/*', '.nvmrc'],
+    excludeSources: [
+      'tests/**',
+      'docs/store/**',
+      'coverage/**',
+      'test-results/**',
+      'playwright-report/**',
+      'blob-report/**',
+      'web-ext-artifacts/**',
+      'stats*.html',
+      '**/*.local',
+      '**/*.tsbuildinfo',
+    ],
+  },
 });

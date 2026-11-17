@@ -101,9 +101,9 @@ Every box is for M7.6, which runs the checklist itself. This says what will prov
 
 | §14 box | Proved by |
 |---|---|
-| Chrome and Firefox builds generated from the same commit, same version | Gates `build chrome` and `build firefox` run on one tree; one version in `package.json`, asserted for both targets by `tests/unit/manifest.test.ts`. The packaging is M7.5. |
+| Chrome and Firefox builds generated from the same commit, same version | Gates `build chrome` and `build firefox` run on one tree; one version in `package.json`, asserted for both targets by `tests/unit/manifest.test.ts`. The packages come from that same tree: `pnpm zip` and `pnpm zip:firefox`, in `.github/workflows/release.yml` on a `v*` tag. |
 | `web-ext lint` with 0 errors, `data_collection_permissions` and `gecko.id` present | Gate `web-ext lint`; both fields are asserted in `tests/unit/manifest.test.ts`, "the Firefox manifest". |
-| AMO sources zip without minified files, reproducible build verified | M7.5. |
+| AMO sources zip without minified files, reproducible build verified | `tools/verify-reproducible.mjs` (`pnpm reproducible`, a step of `.github/workflows/release.yml`): it fails on a sources zip holding build output, dependencies, tests, a minified file or a file git does not track, then rebuilds from that zip in a fresh folder and compares every file with the add-on zip. |
 | All flows verified on Chrome **and** Firefox | Gates `e2e chromium` and `e2e firefox`, which are the two sections above. |
 | Zero network requests | Gate `e2e chromium`: every Playwright spec ends on the recorder's `takeForeignRequests` (invariant 1), and that the recorder really catches one is `tests/e2e/recorder.spec.ts`. On Firefox, no remote favicon by construction (`tests/unit/favicon.test.ts`). |
 | Permissions = those of section 5.4, each one justified | `tests/unit/manifest.test.ts`, "both manifests"; the prose is PERMISSIONS.md (M7.3). |

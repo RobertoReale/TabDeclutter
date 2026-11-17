@@ -23,6 +23,8 @@ First version, for Chrome (121 and later) and Firefox (140 and later).
 - A badge with the number of suggested tabs, keyboard shortcuts, context menu items, light and
   dark themes, Italian and English, and keyboard and screen-reader accessibility.
 - Store documents: privacy policy, permissions, store listings, notes for AMO review.
+- Store packages for Chrome and Firefox, with a Firefox sources zip that rebuilds the add-on
+  identically (`pnpm reproducible`), and a release workflow on `v*` tags.
 
 ### Privacy
 

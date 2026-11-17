@@ -17,6 +17,7 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
+    "reproducible": "node tools/verify-reproducible.mjs",
     "lint": "eslint . && prettier --check .",
     "lint:firefox": "web-ext lint -s .output/firefox-mv3",
     "typecheck": "wxt prepare && tsc --noEmit",

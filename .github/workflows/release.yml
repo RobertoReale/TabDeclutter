@@ -1,0 +1,106 @@
+# A release, from a `v*` tag (PLAN.md §12.4): the same checks as ci.yml, then the store packages,
+# the proof that AMO can rebuild the Firefox one from its sources, and a GitHub Release with the
+# three zips attached. Nothing is submitted to the stores: the first publication on each store is
+# done by hand, and `wxt submit` is turned on only after it (PLAN.md §12.3, §12.4).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Creating the GitHub Release is the one write.
+permissions:
+  contents: write
+
+# Two pushes of the same tag must not race to create the same release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The gates take about ten minutes locally; the rebuild from the sources zip adds two.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      # pnpm before Node, so setup-node finds it when it primes the store
+      # cache. The version comes from `packageManager` in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # One version for both stores (PLAN.md §12.1): the tag must name it.
+      - name: Tag matches the version in package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version"
+            exit 1
+          fi
+
+      # As in ci.yml: the E2E harness takes Firefox from FIREFOX_PATH.
+      - name: Download Firefox for the Firefox E2E
+        run: |
+          installed="$(pnpm dlx @puppeteer/browsers@3.2.6 install firefox@stable --path "$RUNNER_TEMP/firefox")"
+          echo "$installed"
+          echo "FIREFOX_PATH=$(echo "$installed" | tail -1 | cut -d ' ' -f 2-)" >> "$GITHUB_ENV"
+
+      # One step per gate of phasekit.json, named as there and in the same order.
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm lint
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: unit tests
+        run: pnpm test
+
+      - name: build chrome
+        run: pnpm build
+
+      - name: perf budgets
+        run: pnpm perf
+
+      - name: build firefox
+        run: pnpm build:firefox
+
+      - name: web-ext lint
+        run: pnpm lint:firefox
+
+      - name: permissions docs
+        run: node tools/check-permissions.mjs
+
+      - name: e2e chromium
+        run: pnpm e2e
+
+      - name: e2e firefox
+        run: pnpm e2e:firefox
+
+      - name: bundle size
+        run: pnpm size
+
+      # The packages: `.output/<name>-<version>-chrome.zip`, then the Firefox add-on zip and its
+      # sources zip.
+      - name: Chrome package
+        run: pnpm zip
+
+      # Makes the two Firefox zips and rebuilds the add-on from the sources zip in a fresh folder,
+      # with the commands of docs/AMO_REVIEW.md; fails unless every file is identical.
+      - name: Firefox packages, rebuilt from the sources zip
+        run: pnpm reproducible
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" .output/*.zip \
+            --title "TabDeclutter ${GITHUB_REF_NAME#v}" \
+            --notes "Packages for the Chrome Web Store (-chrome.zip) and Firefox Add-ons (-firefox.zip, with -sources.zip for AMO review). What changed is in CHANGELOG.md."
