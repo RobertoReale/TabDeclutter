@@ -107,7 +107,7 @@ Every box is for M7.6, which runs the checklist itself. This says what will prov
 | All flows verified on Chrome **and** Firefox | Gates `e2e chromium` and `e2e firefox`, which are the two sections above. |
 | Zero network requests | Gate `e2e chromium`: every Playwright spec ends on the recorder's `takeForeignRequests` (invariant 1), and that the recorder really catches one is `tests/e2e/recorder.spec.ts`. On Firefox, no remote favicon by construction (`tests/unit/favicon.test.ts`). |
 | Permissions = those of section 5.4, each one justified | `tests/unit/manifest.test.ts`, "both manifests"; the prose is PERMISSIONS.md (M7.3). |
-| Performance budgets met | Gate `perf budgets`, with `tests/unit/perf-budget-power.test.ts` and `tests/unit/perf-budget-verdict.test.ts` over the measurement itself. The bundle budget is M7.2. |
+| Performance budgets met | Gate `perf budgets`, with `tests/unit/perf-budget-power.test.ts` and `tests/unit/perf-budget-verdict.test.ts` over the measurement itself; the JS bundle budgets are gate `bundle size` (`tools/size.mjs`, both builds). |
 | No console errors/warnings | Gate `e2e chromium` (the recorder's `takeConsoleErrors` in every spec, proved by `tests/e2e/recorder.spec.ts`) and gate `e2e firefox` (`session.errors.take()`, proved by `tests/e2e-firefox/console.spec.ts`). |
 | en/it i18n complete | `tests/unit/i18n.test.ts` (the catalogues agree, key by key and placeholder by placeholder) and `tests/unit/i18n-usage.test.ts` (invariant 11: no key the code asks for is missing, none the catalogues ship is dead). |
 | axe clean | Gate `e2e chromium`: `tests/e2e/a11y.spec.ts` — "axe finds nothing serious in any view", in both themes, plus the onboarding screen. |

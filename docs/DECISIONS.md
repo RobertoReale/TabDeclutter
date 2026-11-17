@@ -3263,3 +3263,26 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   and reports a contrast failure no user can see — and misses nothing when the fade has finished,
   since at `opacity: 0` axe skips the element and at `opacity: 1` it judges the real colours. Only
   transitions are awaited, never animations, so a looping animation cannot hang an audit.
+
+## M7.2 — both JS budgets are measured without tldts, by a second build with it stubbed
+- **Context:** PLAN.md §11 excludes tldts from the JS budgets, and gzip cannot be split into
+  per-module shares.
+- **Decision:** `tools/size.mjs` builds each browser twice: the real build (with WXT's `--analyze`
+  treemap, `.analysis/<target>.html`) and the same build with `tldts-experimental` aliased to
+  `build/tldts-stub.ts` (`TD_SIZE_WITHOUT_TLDTS=1`, into `.analysis/no-tldts/`). Both budgets are
+  judged on the stubbed files, each gzipped at level 9; the shipped size is printed for information.
+  "Initial JS" is the HTML's or manifest's scripts plus their static imports, never a dynamic
+  `import()`. 1 KB = 1000 B, the stricter reading. No new dependency: WXT ships its own fork of
+  rollup-plugin-visualizer (`@aklinker1/rollup-plugin-visualizer`) behind `--analyze`.
+- **Why:** real gzip of real files; the stub's answer depends on its input, so the minifier cannot
+  drop the code that uses a domain.
+
+## M7.2 — the background budget is 18 KB, excluding tldts (owner's decision, PLAN.md §11 amended)
+- **Context:** §11 set the background at ≤ 15 KB with tldts counted. As shipped it is 64,545 B gzip
+  (Chrome), of which the public suffix list is ~47 KB; without tldts it is 17,530 B, and the one cut
+  found to go below 15 KB, replacing WXT `storage.defineItem`, would break §10. The panel measures
+  35,124 B without tldts (83,814 B shipped), within its 60 KB.
+- **Decision:** the owner amended §11's background row to "≤ 18 KB (excluding tldts, if used)" and
+  kept WXT storage: tldts is data rather than the extension's own code, as for the panel, and a
+  home-grown migration layer is a data-safety risk that a few KB of a once-loaded worker do not justify.
+- **Why:** an honest budget that the spec's own design meets, with ~470 B of headroom to watch.

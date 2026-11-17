@@ -711,7 +711,7 @@ Everything in `chrome.storage.local` through typed, versioned items (WXT `storag
 | Metric | Budget |
 |---|---|
 | Side panel JS (gzip) | ≤ 60 KB (excluding tldts, if used: consider the lightweight variant) |
-| Background JS (gzip) | ≤ 15 KB |
+| Background JS (gzip) | ≤ 18 KB (excluding tldts, if used) |
 | Panel open → list visible with 300 tabs | ≤ 150 ms |
 | Scoring 1000 tabs | ≤ 15 ms |
 | Clustering 300 tabs (without AI) | ≤ 50 ms |
