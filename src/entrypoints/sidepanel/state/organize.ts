@@ -28,7 +28,7 @@
 
 import { computed, signal } from '@preact/signals';
 
-import type { Llm, groupByAi as GroupByAi } from '@/core/ai-grouping';
+import type { AiFallbackReason, Llm, groupByAi as GroupByAi } from '@/core/ai-grouping';
 import {
   proposeGroups,
   type ClusterMode,
@@ -40,7 +40,14 @@ import { applyGroups, applyMessage, undoGroups, type ApplyResult } from '@/platf
 import { aiProposalItem } from '@/platform/storage';
 import { NO_WINDOW } from '@/platform/tabs';
 import { isMovableTab, organizeWindows, type OrganizeWindowsResult } from '@/platform/windows';
-import { aiActive, aiModel, availability, checkAi, type AiAvailability } from './ai';
+import {
+  aiActive,
+  aiModel,
+  availability,
+  checkAi,
+  PANEL_AI_TIMEOUT_MS,
+  type AiAvailability,
+} from './ai';
 import {
   applyOptionsOf,
   clusterOptionsOf,
@@ -119,9 +126,59 @@ export const aiWorking = signal(false);
  */
 export const aiFallbackNotice = signal(false);
 
+/** Short diagnostic reason for the last AI fallback (e.g. `timeout`, `error (NotSupportedError)`). */
+export const aiFallbackDetail = signal<string | null>(null);
+
 /** Clears the AI fallback warning (e.g. when the user disables AI or switches away from topic). */
 export function clearAiFallbackNotice(): void {
   aiFallbackNotice.value = false;
+  aiFallbackDetail.value = null;
+}
+
+function recordAiFallback(reason: AiFallbackReason | undefined, detail?: string): void {
+  aiFallbackNotice.value = true;
+  const summary =
+    detail !== undefined && detail !== ''
+      ? reason !== undefined
+        ? `${reason}: ${detail}`
+        : detail
+      : (reason ?? null);
+  aiFallbackDetail.value = summary;
+  console.warn('TabDeclutter: on-device AI fallback:', summary ?? 'unknown');
+}
+
+/**
+ * Remaps real Chrome tab IDs (often 9-10 digit integers) to compact 1..N integers before
+ * sending them to the small on-device model so it never transposes digits, then restores the
+ * real tab IDs in the returned proposal.
+ */
+function withCompactTabIds(tabs: readonly TabInfo[]): {
+  readonly compact: TabInfo[];
+  readonly restore: (proposal: GroupProposal) => GroupProposal;
+} {
+  const realByShort = new Map<number, number>();
+  const compact = tabs.map((tab, index) => {
+    const shortId = index + 1;
+    realByShort.set(shortId, tab.id);
+    return { ...tab, id: shortId };
+  });
+  return {
+    compact,
+    restore: (proposal) => ({
+      mode: proposal.mode,
+      groups: proposal.groups
+        .map((group) => ({
+          ...group,
+          tabIds: group.tabIds
+            .map((id) => realByShort.get(id))
+            .filter((id): id is number => id !== undefined),
+        }))
+        .filter((group) => group.tabIds.length > 0),
+      ungrouped: proposal.ungrouped
+        .map((id) => realByShort.get(id))
+        .filter((id): id is number => id !== undefined),
+    }),
+  };
 }
 
 /** The run in flight, which "Annulla" aborts. */
@@ -154,26 +211,33 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
   const controller = new AbortController();
   running = controller;
   aiWorking.value = true;
-  aiFallbackNotice.value = false;
+  clearAiFallbackNotice();
   let drafted: Draft | null = null;
   try {
     const groupBy = deps.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
     const model = deps.model ?? (await aiModel());
-    const result = await groupBy(tabs, model, { ...chosen, signal: controller.signal });
+    const mapped = withCompactTabIds(tabs);
+    const result = await groupBy(mapped.compact, model, {
+      ...chosen,
+      timeoutMs: PANEL_AI_TIMEOUT_MS,
+      signal: controller.signal,
+    });
     // A newer run, or a changed question, owns the answer now: this one is stale.
     if (running !== controller) return;
     if (result.source === 'ai') {
-      drafted = draftOf(result.proposal);
-      aiFallbackNotice.value = false;
+      drafted = draftOf(mapped.restore(result.proposal));
+      clearAiFallbackNotice();
     } else if (result.fallbackReason !== 'empty' && result.fallbackReason !== 'aborted') {
-      aiFallbackNotice.value = true;
+      recordAiFallback(result.fallbackReason, result.fallbackDetail);
     }
   } catch (error: unknown) {
     // A model that cannot even be reached is not fatal: §7.2 has already answered,
     // and we surface a warning without changing the user's AI setting.
-    console.error('TabDeclutter: group by topic with the model', error);
     if (running === controller && !controller.signal.aborted) {
-      aiFallbackNotice.value = true;
+      recordAiFallback(
+        'error',
+        error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      );
     }
   } finally {
     if (running === controller) {
@@ -210,7 +274,7 @@ export async function organizeWindowsWithAi(
   request: OrganizeWindowsWithAiOptions,
 ): Promise<OrganizeWindowsResult> {
   const organize = request.deps?.organize ?? organizeWindows;
-  aiFallbackNotice.value = false;
+  clearAiFallbackNotice();
 
   if (request.useTabGroups || request.clusterMode !== 'topic' || !request.useAi) {
     return organize({
@@ -243,29 +307,33 @@ export async function organizeWindowsWithAi(
     });
   }
 
-  // Group across every open window together by placing movable tabs in one virtual window.
+  // Group across every open window together by placing movable tabs in one virtual window,
+  // with compact 1..N IDs so the small local model never drops digits from Chrome's 10-digit IDs.
   const unified: TabInfo[] = movable.map((tab, index) => ({
     ...tab,
     windowId: 1,
     index,
     groupId: NO_GROUP_ID,
   }));
+  const mapped = withCompactTabIds(unified);
 
   // Supersede any previous in-flight AI grouping run so rapid clicks always win cleanly.
   running?.abort();
   const controller = new AbortController();
   running = controller;
   aiWorking.value = true;
+  clearAiFallbackNotice();
   let proposal: GroupProposal | undefined;
 
   try {
     const groupBy = request.deps?.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
     const model = request.deps?.model ?? (await aiModel());
-    const result = await groupBy(unified, model, {
+    const result = await groupBy(mapped.compact, model, {
       minSiteTabs: 2,
       minClusterTabs: 2,
       includePinned: false,
       includeGrouped: true,
+      timeoutMs: PANEL_AI_TIMEOUT_MS,
       signal: controller.signal,
     });
     if (
@@ -276,18 +344,25 @@ export async function organizeWindowsWithAi(
       return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
     }
     if (result.source === 'ai') {
-      proposal = result.proposal;
-      aiFallbackNotice.value = false;
-      void aiProposalItem.setValue(result.proposal).catch(() => undefined);
+      const restored = mapped.restore(result.proposal);
+      if (restored.groups.length > 0) {
+        proposal = restored;
+        clearAiFallbackNotice();
+        void aiProposalItem.setValue(restored).catch(() => undefined);
+      } else {
+        recordAiFallback('no-groups');
+      }
     } else if (result.fallbackReason !== 'empty') {
-      aiFallbackNotice.value = true;
+      recordAiFallback(result.fallbackReason, result.fallbackDetail);
     }
   } catch (error: unknown) {
     if (running !== controller || controller.signal.aborted) {
       return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
     }
-    console.error('TabDeclutter: organize windows with the model', error);
-    aiFallbackNotice.value = true;
+    recordAiFallback(
+      'error',
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+    );
   } finally {
     if (running === controller) {
       running = null;
@@ -313,7 +388,7 @@ export function cancelAiGrouping(): void {
 export function resetAiGrouping(): void {
   running = null;
   aiWorking.value = false;
-  aiFallbackNotice.value = false;
+  clearAiFallbackNotice();
   answer.value = null;
 }
 

@@ -78,6 +78,7 @@ export interface LanguageModelSession {
     options?: { readonly responseConstraint?: unknown; readonly signal?: AbortSignal },
   ): Promise<string>;
   measureInputUsage?(input: string, options?: { readonly signal?: AbortSignal }): Promise<number>;
+  clone?(options?: { readonly signal?: AbortSignal }): Promise<LanguageModelSession>;
   destroy(): void;
 }
 
@@ -183,9 +184,45 @@ export class AiSession implements Llm {
 
   async prompt(input: string, options: LlmPromptOptions = {}): Promise<string> {
     return this.#within(options.signal, async (signal) => {
-      const session = await this.#session(signal);
-      return session.prompt(input, { responseConstraint: options.responseConstraint, signal });
+      const base = await this.#session(signal);
+      const constraint = sanitizeConstraint(options.responseConstraint);
+      try {
+        return await this.#ask(base, input, constraint, signal);
+      } catch (error: unknown) {
+        if (signal.aborted || isTerminalPromptError(error)) throw error;
+        console.warn('TabDeclutter: on-device AI prompt failed, retrying cleanly', error);
+        // Reset the base session in case Chrome left it in an invalid state, then retry once
+        // unconstrained with an explicit English-name reminder (avoids both constrained-decoder
+        // failures and Chrome's "untested output language" filter on Italian tab titles).
+        this.close();
+        const fresh = await this.#session(signal);
+        const retryInput = `${input}\nIMPORTANT: Every group "name" MUST be 1-3 simple English words only (e.g. "Math", "Videos", "Email").`;
+        return this.#ask(fresh, retryInput, undefined, signal);
+      }
     });
+  }
+
+  /**
+   * Prompts an isolated clone of `base` when the browser supports `session.clone()`, so
+   * repeated groupings reuse the KV-cached system prompt without accumulating history tokens.
+   */
+  async #ask(
+    base: LanguageModelSession,
+    input: string,
+    responseConstraint: unknown,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const promptOpts =
+      responseConstraint === undefined ? { signal } : { responseConstraint, signal };
+    if (typeof base.clone === 'function') {
+      const isolated = await base.clone({ signal });
+      try {
+        return await isolated.prompt(input, promptOpts);
+      } finally {
+        isolated.destroy();
+      }
+    }
+    return base.prompt(input, promptOpts);
   }
 
   /**
@@ -326,6 +363,49 @@ export async function downloadModel(options: DownloadOptions = {}): Promise<AiAv
     return checkAvailability(options.api ?? languageModel());
   }
   return 'available';
+}
+
+/**
+ * Chrome's Prompt API docs recommend keeping `responseConstraint` structural and avoiding
+ * `maxLength` / `maxItems` constraints inside JSON Schema, which can trigger `NotSupportedError`
+ * or degenerate token compression in constrained decoding; client-side validation still enforces
+ * both limits. Returns `constraint` unchanged by reference when no problematic keywords appear.
+ */
+function hasUnsupportedConstraintKeyword(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some(hasUnsupportedConstraintKeyword);
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'maxLength' || key === 'maxItems') return true;
+    if (hasUnsupportedConstraintKeyword(nested)) return true;
+  }
+  return false;
+}
+
+function stripConstraintLimits(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(stripConstraintLimits);
+  const out: Record<string, unknown> = {};
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key === 'maxLength' || key === 'maxItems') continue;
+    out[key] = stripConstraintLimits(nested);
+  }
+  if (out.type === 'object' && !('additionalProperties' in out)) {
+    out.additionalProperties = false;
+  }
+  return out;
+}
+
+function sanitizeConstraint(constraint: unknown): unknown {
+  if (constraint === undefined || !hasUnsupportedConstraintKeyword(constraint)) {
+    return constraint;
+  }
+  return stripConstraintLimits(constraint);
+}
+
+function isTerminalPromptError(error: unknown): boolean {
+  if (error === null || typeof error !== 'object' || !('name' in error)) return false;
+  const name = String((error as { name: unknown }).name);
+  return name === 'AbortError' || name === 'TimeoutError' || name === 'QuotaExceededError';
 }
 
 /**

@@ -60,7 +60,7 @@ export interface Llm {
 export const SYSTEM_PROMPT =
   'You organize browser tabs into a small number of topical groups. ' +
   "Group by the user's task or topic, not by website. " +
-  'Use short group names (1-3 words). Prefer 3-8 groups. ' +
+  'Use short English group names (1-3 words). Prefer 3-8 groups. ' +
   "Tabs that fit nowhere go to 'Other'.";
 
 /** PLAN.md §7.3: the title a tab is listed with is truncated to this many characters. */
@@ -123,6 +123,8 @@ export interface AiGroupingResult {
   readonly answered: number;
   /** The first failure, when there was one. */
   readonly fallbackReason?: AiFallbackReason;
+  /** Short technical detail for the first failure (e.g. error name/message), when available. */
+  readonly fallbackDetail?: string;
 }
 
 /**
@@ -174,9 +176,9 @@ export function tabLine(tab: Pick<TabInfo, 'id' | 'title' | 'url'>): string {
 /** The prompt for one batch: the tab list, and what to answer with. */
 export function buildPrompt(tabs: readonly Pick<TabInfo, 'id' | 'title' | 'url'>[]): string {
   return [
-    'Group these tabs. One tab per line, as id|title|host:',
+    'Group these tabs by topic. One tab per line, as id|title|host:',
     tabs.map((tab) => tabLine(tab)).join('\n'),
-    'Answer with JSON only. Use each id at most once, and no id that is not listed.',
+    'Answer with JSON only: {"groups":[{"name":"Short English Topic","tabIds":[1,2]}]}. Use each id at most once, and no id that is not listed.',
   ].join('\n');
 }
 
@@ -228,6 +230,8 @@ interface Outcome {
   readonly answered: number;
   /** The first failure of this outcome, when there was one. */
   readonly reason: AiFallbackReason | undefined;
+  /** Short diagnostic detail for `reason`, when available. */
+  readonly detail: string | undefined;
 }
 
 function merged(left: Outcome, right: Outcome): Outcome {
@@ -238,10 +242,16 @@ function merged(left: Outcome, right: Outcome): Outcome {
     prompts: left.prompts + right.prompts,
     answered: left.answered + right.answered,
     reason: left.reason ?? right.reason,
+    detail: left.detail ?? right.detail,
   };
 }
 
-function failed(tabs: readonly TabInfo[], reason: AiFallbackReason, prompts: number): Outcome {
+function failed(
+  tabs: readonly TabInfo[],
+  reason: AiFallbackReason,
+  prompts: number,
+  detail?: string,
+): Outcome {
   return {
     drafts: [],
     ungrouped: [],
@@ -249,6 +259,7 @@ function failed(tabs: readonly TabInfo[], reason: AiFallbackReason, prompts: num
     prompts,
     answered: 0,
     reason,
+    detail,
   };
 }
 
@@ -262,6 +273,21 @@ function errorName(error: unknown): string {
   return error !== null && typeof error === 'object' && 'name' in error
     ? String((error as { name: unknown }).name)
     : '';
+}
+
+function errorDetail(error: unknown): string | undefined {
+  if (error === null || error === undefined) return undefined;
+  if (typeof error === 'object') {
+    const name = errorName(error);
+    const message =
+      'message' in error && typeof (error as { message: unknown }).message === 'string'
+        ? (error as { message: string }).message.trim()
+        : '';
+    if (name !== '' && message !== '') return `${name}: ${message}`.slice(0, 140);
+    if (name !== '') return name.slice(0, 140);
+    if (message !== '') return message.slice(0, 140);
+  }
+  return String(error).slice(0, 140);
 }
 
 /**
@@ -336,13 +362,38 @@ type Validation =
 
 const UNPARSABLE: Validation = { ok: false, reason: 'unparsable' };
 
-function validate(answer: string, batch: readonly TabInfo[], settings: Settings): Validation {
-  let parsed: unknown;
+/**
+ * Parses JSON from the model's answer, tolerating markdown code fences (` ```json ... ``` `)
+ * or short surrounding prose when the model answers without a hard decoding constraint.
+ */
+function parseModelJson(answer: string): { ok: true; value: unknown } | { ok: false } {
   try {
-    parsed = JSON.parse(answer);
+    return { ok: true, value: JSON.parse(answer) };
   } catch {
-    return UNPARSABLE;
+    const stripped = answer
+      .trim()
+      .replace(/^```(?:json)?\s*/iu, '')
+      .replace(/\s*```$/u, '')
+      .trim();
+    try {
+      return { ok: true, value: JSON.parse(stripped) };
+    } catch {
+      const start = stripped.indexOf('{');
+      const end = stripped.lastIndexOf('}');
+      if (start === -1 || end <= start) return { ok: false };
+      try {
+        return { ok: true, value: JSON.parse(stripped.slice(start, end + 1)) };
+      } catch {
+        return { ok: false };
+      }
+    }
   }
+}
+
+function validate(answer: string, batch: readonly TabInfo[], settings: Settings): Validation {
+  const decoded = parseModelJson(answer);
+  if (!decoded.ok) return UNPARSABLE;
+  const parsed = decoded.value;
   if (parsed === null || typeof parsed !== 'object') return UNPARSABLE;
   const groups = (parsed as { groups?: unknown }).groups;
   if (!Array.isArray(groups)) return UNPARSABLE;
@@ -401,11 +452,13 @@ async function askBatch(llm: Llm, batch: readonly TabInfo[], settings: Settings)
   try {
     answer = await promptWithin(llm, input, settings);
   } catch (error) {
-    if (error instanceof PromptTimeout) return failed(batch, 'timeout', 1);
     const name = errorName(error);
+    if (error instanceof PromptTimeout || name === 'TimeoutError') {
+      return failed(batch, 'timeout', 1);
+    }
     if (name === QUOTA_ERROR) return split(llm, batch, settings, 'quota', 1);
     if (name === 'AbortError') return failed(batch, 'aborted', 1);
-    return failed(batch, 'error', 1);
+    return failed(batch, 'error', 1, errorDetail(error));
   }
 
   const checked = validate(answer, batch, settings);
@@ -417,6 +470,7 @@ async function askBatch(llm: Llm, batch: readonly TabInfo[], settings: Settings)
     prompts: 1,
     answered: 1,
     reason: undefined,
+    detail: undefined,
   };
 }
 
@@ -628,6 +682,7 @@ export async function groupByAi(
     prompts: 0,
     answered: 0,
     reason: undefined,
+    detail: undefined,
   };
   for (const batch of planBatches(eligible, fallback, settings)) {
     outcome = merged(outcome, await askBatch(llm, batch, settings));
@@ -641,6 +696,7 @@ export async function groupByAi(
       prompts: outcome.prompts,
       answered: 0,
       fallbackReason: outcome.reason,
+      ...(outcome.detail === undefined ? {} : { fallbackDetail: outcome.detail }),
     };
   }
 
@@ -659,5 +715,6 @@ export async function groupByAi(
     prompts: outcome.prompts,
     answered: outcome.answered,
     ...(outcome.reason === undefined ? {} : { fallbackReason: outcome.reason }),
+    ...(outcome.detail === undefined ? {} : { fallbackDetail: outcome.detail }),
   };
 }

@@ -327,6 +327,31 @@ describe('the answer is not trusted', () => {
     expect(membership(result.proposal)).toEqual({ Rust: [1, 2, 3, 4, 5, 6] });
   });
 
+  it('extracts JSON wrapped in markdown fences or brief prose', async () => {
+    const fenced = fakeLlm(
+      () => `\`\`\`json\n${answerWith({ name: 'Math', tabIds: [1, 2, 3] })}\n\`\`\``,
+    );
+    const fencedResult = await groupByAi(SIX_TABS, fenced, at(0));
+    expect(fencedResult.source).toBe('ai');
+    expect(membership(fencedResult.proposal)).toEqual({ Math: [1, 2, 3] });
+
+    const wrapped = fakeLlm(
+      () => `Here are the groups:\n${answerWith({ name: 'Cooking', tabIds: [4, 5, 6] })}\nDone.`,
+    );
+    const wrappedResult = await groupByAi(SIX_TABS, wrapped, at(0));
+    expect(wrappedResult.source).toBe('ai');
+    expect(membership(wrappedResult.proposal)).toEqual({ Cooking: [4, 5, 6] });
+  });
+
+  it('recognizes a TimeoutError thrown by the session as a timeout fallback', async () => {
+    const llm = fakeLlm(() => {
+      throw named('TimeoutError');
+    });
+    const result = await groupByAi(SIX_TABS, llm, at(0));
+    expect(result.source).toBe('fallback');
+    expect(result.fallbackReason).toBe('timeout');
+  });
+
   it('keeps at most maxGroups groups per window, the rest in "Altro"', async () => {
     const llm = fakeLlm(() =>
       answerWith(
@@ -379,6 +404,7 @@ describe('when the model cannot answer', () => {
     });
     const result = await groupByAi(SIX_TABS, llm, at(0));
     expect(result.fallbackReason).toBe('error');
+    expect(result.fallbackDetail).toContain('the session is gone');
     expect(result.proposal).toEqual(fallbackOf(SIX_TABS));
   });
 

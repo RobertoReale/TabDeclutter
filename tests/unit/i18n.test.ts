@@ -234,6 +234,7 @@ describe('the message catalogues', () => {
       'organizeAiEnable',
       'organizeAiEnableHint',
       'organizeAiFallback',
+      'organizeAiFallbackDetail',
       'organizeAiUnavailable',
       'organizeAiUse',
       'organizeAiWorking',

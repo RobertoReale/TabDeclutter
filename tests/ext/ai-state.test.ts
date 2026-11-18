@@ -580,4 +580,69 @@ describe('persisting topic + AI preferences without resets or races', () => {
     expect(stored.autoOrganizeMode).toBe('topic');
     expect(stored.useOnDeviceAi).toBe(true);
   });
+
+  it('remaps 10-digit Chrome tab IDs to compact 1..N IDs for the model and restores real IDs', async () => {
+    const bigTabs: TabInfo[] = [
+      tab(1_396_528_417, 'https://gemini.google.com/app/1', { title: 'Basi ortogonali' }),
+      tab(1_396_528_429, 'https://gemini.google.com/app/2', { title: 'Dubbi su derivate' }),
+      tab(1_396_528_501, 'https://youtube.com/watch?v=1', { title: 'Live #30', windowId: 2 }),
+      tab(1_396_528_512, 'https://youtube.com/watch?v=2', { title: 'Live #33', windowId: 2 }),
+    ];
+    panelData.value = {
+      ...data(bigTabs),
+      settings: { ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true },
+    };
+    await checkAi({ capabilities: CHROME, llm });
+    let seenIds: number[] = [];
+    const received: OrganizeWindowsOptions[] = [];
+
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      deps: {
+        groupBy: async (inputTabs) => {
+          seenIds = inputTabs.map((t) => t.id);
+          return {
+            source: 'ai',
+            prompts: 1,
+            answered: 1,
+            proposal: {
+              mode: 'topic',
+              groups: [
+                { key: 'math', title: 'Math', color: 'blue', windowId: 1, tabIds: [1, 2] },
+                { key: 'videos', title: 'Videos', color: 'red', windowId: 1, tabIds: [3, 4] },
+              ],
+              ungrouped: [],
+            },
+          };
+        },
+        organize: async (opts) => {
+          received.push(opts);
+          return { movedTabs: 4, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+
+    // The model only ever saw compact 1..4 IDs, never 10-digit Chrome IDs.
+    expect(seenIds).toEqual([1, 2, 3, 4]);
+    // `organizeWindows` received the exact original 10-digit Chrome tab IDs back.
+    expect(received[0]?.proposal?.groups).toEqual([
+      {
+        key: 'math',
+        title: 'Math',
+        color: 'blue',
+        windowId: 1,
+        tabIds: [1_396_528_417, 1_396_528_429],
+      },
+      {
+        key: 'videos',
+        title: 'Videos',
+        color: 'red',
+        windowId: 1,
+        tabIds: [1_396_528_501, 1_396_528_512],
+      },
+    ]);
+  });
 });

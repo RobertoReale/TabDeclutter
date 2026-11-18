@@ -383,6 +383,10 @@
     "message": "The on-device AI could not finish grouping, so local topic grouping was used instead. Your setting was kept.",
     "description": "Warning shown in the Organize view when the on-device model fails or times out and local topic grouping is used without changing the user's AI preference."
   },
+  "organizeAiFallbackDetail": {
+    "message": "Details: $1",
+    "description": "Short technical reason shown under the AI fallback warning so the user or developer can see why the browser's model fell back. $1 is the reason code or error."
+  },
   "organizeAiUnavailable": {
     "message": "Chrome's on-device AI is currently unavailable, so local topic grouping will be used instead. Your setting was kept.",
     "description": "Warning shown in the Organize view when the user enabled on-device AI but the browser currently reports the model as unavailable or unsupported."

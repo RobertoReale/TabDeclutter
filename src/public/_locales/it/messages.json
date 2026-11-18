@@ -383,6 +383,10 @@
     "message": "L'AI on-device non è riuscita a completare il raggruppamento: è stato usato il raggruppamento locale per argomento. La tua impostazione è rimasta attiva.",
     "description": "Warning shown in the Organize view when the on-device model fails or times out and local topic grouping is used without changing the user's AI preference."
   },
+  "organizeAiFallbackDetail": {
+    "message": "Dettagli: $1",
+    "description": "Short technical reason shown under the AI fallback warning so the user or developer can see why the browser's model fell back. $1 is the reason code or error."
+  },
   "organizeAiUnavailable": {
     "message": "L'AI on-device di Chrome al momento non è disponibile: verrà usato il raggruppamento locale per argomento. La tua impostazione è rimasta attiva.",
     "description": "Warning shown in the Organize view when the user enabled on-device AI but the browser currently reports the model as unavailable or unsupported."

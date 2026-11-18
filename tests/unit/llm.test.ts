@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { SYSTEM_PROMPT } from '../../src/core/ai-grouping';
+import { responseConstraintFor, SYSTEM_PROMPT } from '../../src/core/ai-grouping';
 import type {
   LanguageModelCreateOptions,
   LanguageModelMonitor,
@@ -329,6 +329,88 @@ describe('AiSession', () => {
     const session = new AiSession({ api });
 
     await expect(session.measureInputUsage('one')).rejects.toThrow(/cannot measure/);
+  });
+
+  it('strips maxLength and maxItems from responseConstraint and adds additionalProperties: false', async () => {
+    const api = new FakeApi();
+    const session = new AiSession({ api });
+
+    await session.prompt('one', { responseConstraint: responseConstraintFor(8, 24) });
+
+    const sent = api.sessions[0]?.asked[0]?.responseConstraint as Record<string, unknown>;
+    expect(sent).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      required: ['groups'],
+      properties: {
+        groups: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['name', 'tabIds'],
+            properties: {
+              name: { type: 'string' },
+              tabIds: { type: 'array', items: { type: 'integer' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('clones the base session when clone() is supported and destroys the clone afterwards', async () => {
+    const clonedSessions: FakeSession[] = [];
+    const baseSession = new FakeSession(async () => '{"groups":[]}');
+    const cloneable: LanguageModelSession = {
+      prompt: baseSession.prompt.bind(baseSession),
+      destroy: baseSession.destroy.bind(baseSession),
+      clone: async () => {
+        const copy = new FakeSession(async () => '{"groups":[{"name":"Math","tabIds":[1,2]}]}');
+        clonedSessions.push(copy);
+        return copy;
+      },
+    };
+    const api = {
+      availability: async () => 'available',
+      create: async () => cloneable,
+    };
+    const session = new AiSession({ api });
+
+    await expect(session.prompt('tabs')).resolves.toContain('Math');
+    expect(clonedSessions).toHaveLength(1);
+    expect(clonedSessions[0]?.destroyed).toBe(1);
+    expect(baseSession.destroyed).toBe(0);
+  });
+
+  it('retries cleanly without responseConstraint when Chrome rejects with NotSupportedError', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let calls = 0;
+    const api = new FakeApi({
+      answer: async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new DOMException(
+            'The model attempted to output text in an untested language.',
+            'NotSupportedError',
+          );
+        }
+        return '{"groups":[{"name":"Math","tabIds":[1,2]}]}';
+      },
+    });
+    const session = new AiSession({ api });
+
+    const reply = await session.prompt('1|Basi ortogonali|gemini.google.com', {
+      responseConstraint: responseConstraintFor(8, 24),
+    });
+
+    expect(reply).toContain('Math');
+    expect(calls).toBe(2);
+    // Reset the session after the error and dropped responseConstraint on the retry.
+    expect(api.created).toHaveLength(2);
+    expect(api.sessions[1]?.asked[0]?.responseConstraint).toBeUndefined();
+    expect(api.sessions[1]?.asked[0]?.input).toContain('simple English words only');
+    warn.mockRestore();
   });
 });
 

@@ -108,9 +108,15 @@ export async function setUseAi(next: boolean): Promise<void> {
   applyLocalSettings(updated);
 }
 
+/**
+ * Prompt budget for interactive on-device AI calls in the side panel: generous enough for a
+ * cold Gemini Nano model load on a laptop while remaining interruptible at any time via Cancel.
+ */
+export const PANEL_AI_TIMEOUT_MS = 45_000;
+
 /** The panel's session, created on the first prompt and reused (PLAN.md §7.3). */
 export async function aiModel(deps: AiDeps = {}): Promise<Llm> {
-  return (await llmModule(deps)).panelSession();
+  return (await llmModule(deps)).panelSession({ timeoutMs: PANEL_AI_TIMEOUT_MS });
 }
 
 /**

@@ -40,6 +40,7 @@ import {
 } from '../state/ai';
 import {
   aiBadge,
+  aiFallbackDetail,
   aiFallbackNotice,
   aiQuestion,
   aiWorking,
@@ -485,9 +486,14 @@ function AiPanel({
       )}
 
       {wanted && !unavailable && aiFallbackNotice.value && (
-        <p class="td-warning" role="status" aria-live="polite">
-          {t('organizeAiFallback')}
-        </p>
+        <>
+          <p class="td-warning" role="status" aria-live="polite">
+            {t('organizeAiFallback')}
+          </p>
+          {aiFallbackDetail.value !== null && (
+            <p class="td-field-hint">{t('organizeAiFallbackDetail', aiFallbackDetail.value)}</p>
+          )}
+        </>
       )}
 
       {aiWorking.value && (
