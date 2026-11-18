@@ -21,7 +21,7 @@ import { useEffect, useRef } from 'preact/hooks';
 
 import { caps } from '@/platform/capabilities';
 import { t, type MessageKey } from '@/platform/i18n';
-import { organizeWindows, ungroupAllOpenTabs } from '@/platform/windows';
+import { ungroupAllOpenTabs } from '@/platform/windows';
 import type { ClusterMode } from '@/core/cluster';
 import { NO_GROUP_ID, type AutoWindowMode } from '@/core/types';
 import { EmptyState } from '../components/EmptyState';
@@ -40,16 +40,19 @@ import {
 } from '../state/ai';
 import {
   aiBadge,
+  aiFallbackNotice,
   aiQuestion,
   aiWorking,
   appliedMessage,
   applyDraft,
   brought,
   cancelAiGrouping,
+  clearAiFallbackNotice,
   dismissApplied,
   draft,
   mode,
   options,
+  organizeWindowsWithAi,
   plannedTabs,
   scope,
   setMode,
@@ -60,7 +63,7 @@ import {
   working,
 } from '../state/organize';
 import { setSetting, settings } from '../state/settings';
-import { tabs } from '../state/tabs';
+import { loaded, panelData, tabs } from '../state/tabs';
 
 /** §4.4.1's scope, without "Selezione", which only exists once something was brought in. */
 const SCOPES: readonly { readonly value: OrganizeScope; readonly label: MessageKey }[] = [
@@ -113,6 +116,7 @@ const OPTIONS: readonly {
 export function OrganizeView({ language }: { language: string }) {
   if (!caps.tabGroups) return <EmptyState text={t('organizeNoGroups')} />;
 
+  const ready = loaded.value;
   const current = draft.value;
   const chosen = options.value;
   const carried = brought.value;
@@ -124,12 +128,34 @@ export function OrganizeView({ language }: { language: string }) {
     nextWindowMode: AutoWindowMode = currentSettings.autoWindowMode,
     nextClusterMode: ClusterMode = mode.value,
     nextUseTabGroups: boolean = currentSettings.useTabGroups,
+    nextUseAi: boolean = useAi.value,
   ): void {
-    void organizeWindows({
+    void organizeWindowsWithAi({
       windowMode: nextWindowMode,
       clusterMode: nextClusterMode,
       useTabGroups: nextUseTabGroups,
+      useAi: nextUseAi,
+      focusedWindowId: panelData.value?.focusedWindowId,
     }).catch(report);
+  }
+
+  function handleToggleAi(checked: boolean): void {
+    if (!checked) {
+      cancelAiGrouping();
+      clearAiFallbackNotice();
+    }
+    void setUseAi(checked)
+      .then(() => {
+        if (checked && !currentSettings.useTabGroups && currentSettings.autoOrganize) {
+          runWindowOrganizeNow(
+            currentSettings.autoWindowMode,
+            mode.value,
+            currentSettings.useTabGroups,
+            true,
+          );
+        }
+      })
+      .catch(report);
   }
 
   // When autoOrganize and useTabGroups are enabled, apply any proposed groups automatically.
@@ -139,7 +165,7 @@ export function OrganizeView({ language }: { language: string }) {
     current.groups.filter((g) => g.selected).map((g) => [g.key, g.title, g.color, g.tabIds]),
   ]);
   useEffect(() => {
-    if (!isAuto || !currentSettings.useTabGroups) {
+    if (!ready || !isAuto || !currentSettings.useTabGroups) {
       lastAutoApplied.current = '';
       return;
     }
@@ -153,7 +179,10 @@ export function OrganizeView({ language }: { language: string }) {
     return () => {
       clearTimeout(timer);
     };
-  }, [isAuto, currentSettings.useTabGroups, autoProposalKey]);
+  }, [ready, isAuto, currentSettings.useTabGroups, autoProposalKey]);
+
+  // Wait for the persisted settings snapshot before painting the form so defaults never flash.
+  if (!ready) return null;
 
   // The titles the preview shows, by id. Built here and not in the preview: the draft holds
   // ids only, which is what lets the edits be pure functions over numbers.
@@ -268,6 +297,10 @@ export function OrganizeView({ language }: { language: string }) {
           value={mode.value}
           onChange={(event) => {
             const nextMode = event.currentTarget.value as ClusterMode;
+            if (nextMode !== 'topic') {
+              cancelAiGrouping();
+              clearAiFallbackNotice();
+            }
             setMode(nextMode);
             setSetting('autoOrganizeMode', nextMode);
             if (currentSettings.autoOrganize) {
@@ -284,7 +317,13 @@ export function OrganizeView({ language }: { language: string }) {
       </label>
       <p class="td-field-hint">{t('windowUseTabGroupsHint')}</p>
 
-      {mode.value === 'topic' && <AiPanel language={language} />}
+      {mode.value === 'topic' && (
+        <AiPanel
+          language={language}
+          useTabGroups={currentSettings.useTabGroups}
+          onToggleAi={handleToggleAi}
+        />
+      )}
 
       {currentSettings.useTabGroups && (
         <>
@@ -366,26 +405,53 @@ export function OrganizeView({ language }: { language: string }) {
  * Mounted only in topic mode, they also keep the model's module unfetched until the user
  * asks for the one feature that can use it (§11).
  */
-function AiPanel({ language }: { language: string }) {
+function AiPanel({
+  language,
+  useTabGroups,
+  onToggleAi,
+}: {
+  language: string;
+  useTabGroups: boolean;
+  onToggleAi: (checked: boolean) => void;
+}) {
   const wanted = useAi.value;
   useEffect(() => {
     if (wanted) void checkAi().catch(report);
   }, [wanted]);
 
-  // Asked again whenever the question changes, and never while the model is not active:
-  // `startAiGrouping` decides for itself, so the effect only has to tell it that
-  // something moved.
+  // Asked again whenever the question changes, and only when the tab-groups preview is active:
+  // when organizing windows without tab groups, the AI runs inside `organizeWindowsWithAi` over
+  // all windows rather than computing an unused preview.
   const active = aiActive.value;
   const question = aiQuestion.value;
   useEffect(() => {
+    if (!useTabGroups) return;
     void startAiGrouping().catch(report);
-  }, [active, question]);
+  }, [useTabGroups, active, question]);
 
   const state = availability.value;
-  if (!aiOffered.value) return null;
+  // Never hide or discard the AI panel once the user has turned on-device AI on: if the model
+  // becomes unavailable or unsupported, keep their checkbox checked and show a clear warning.
+  if (!wanted && !aiOffered.value) return null;
+
+  const unavailable = state === 'unavailable' || state === 'unsupported';
+  const showCheckbox = wanted || state === 'available';
 
   return (
     <div class="td-ai">
+      {showCheckbox && (
+        <label class="td-check">
+          <input
+            type="checkbox"
+            checked={wanted}
+            onChange={(event) => {
+              onToggleAi(event.currentTarget.checked);
+            }}
+          />
+          <span>{t('organizeAiUse')}</span>
+        </label>
+      )}
+
       {state === 'downloadable' && (
         <>
           {/*
@@ -412,17 +478,16 @@ function AiPanel({ language }: { language: string }) {
         </p>
       )}
 
-      {state === 'available' && (
-        <label class="td-check">
-          <input
-            type="checkbox"
-            checked={useAi.value}
-            onChange={(event) => {
-              void setUseAi(event.currentTarget.checked).catch(report);
-            }}
-          />
-          <span>{t('organizeAiUse')}</span>
-        </label>
+      {wanted && unavailable && (
+        <p class="td-warning" role="status" aria-live="polite">
+          {t('organizeAiUnavailable')}
+        </p>
+      )}
+
+      {wanted && !unavailable && aiFallbackNotice.value && (
+        <p class="td-warning" role="status" aria-live="polite">
+          {t('organizeAiFallback')}
+        </p>
       )}
 
       {aiWorking.value && (

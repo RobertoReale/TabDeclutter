@@ -233,6 +233,8 @@ describe('the message catalogues', () => {
       'organizeAiDownloading',
       'organizeAiEnable',
       'organizeAiEnableHint',
+      'organizeAiFallback',
+      'organizeAiUnavailable',
       'organizeAiUse',
       'organizeAiWorking',
       'organizeAppliedOne',

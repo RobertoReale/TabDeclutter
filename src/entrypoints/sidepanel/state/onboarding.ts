@@ -14,8 +14,9 @@
 import { signal } from '@preact/signals';
 
 import { DEFAULT_SETTINGS, type GuardMode } from '@/core/types';
-import { onboardedItem, readSettings, saveSettings } from '@/platform/storage';
+import { onboardedItem, updateSettings } from '@/platform/storage';
 import { ONBOARDING_DEFAULT_MODE } from '../settings-fields';
+import { applyLocalSettings } from './tabs';
 
 /**
  * Whether the onboarding is what the panel has to show. `null` until the stored flag has been
@@ -56,15 +57,15 @@ export function startOnboarding(): void {
  * user with the screen again rather than with choices they made and that were never stored.
  */
 export async function finishOnboarding(): Promise<void> {
-  const current = await readSettings();
   const guardMode = draftGuardMode.value;
-  await saveSettings({
+  const next = await updateSettings((current) => ({
     ...current,
     staleDays: draftStaleDays.value,
     autoDeclutter: guardMode === 'auto',
     autoOrganize: guardMode === 'auto',
     guard: { ...current.guard, mode: guardMode },
-  });
+  }));
+  applyLocalSettings(next);
   await onboardedItem.setValue(true);
   onboardingNeeded.value = false;
 }

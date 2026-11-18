@@ -17,7 +17,7 @@
  */
 
 import { isAuthUrl, isBlankUrl } from '../core/classify';
-import { proposeGroups, siteKey, type ClusterMode } from '../core/cluster';
+import { proposeGroups, siteKey, type ClusterMode, type GroupProposal } from '../core/cluster';
 import { tabUrl } from '../core/duplicates';
 import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '../core/types';
 import { asTabInfos, attempt, NO_WINDOW, type BrowserTab } from './tabs';
@@ -29,7 +29,7 @@ import { asTabInfos, attempt, NO_WINDOW, type BrowserTab } from './tabs';
  * - never blank / New Tab pages (`chrome://newtab`, `about:blank`) while the user may be typing in the address bar
  * - never OAuth / sign-in pages (`isAuthUrl`) which often open in dedicated popup windows
  */
-function isMovableTab(tab: TabInfo): boolean {
+export function isMovableTab(tab: TabInfo): boolean {
   if (tab.pinned) return false;
   const url = tabUrl(tab);
   if (url === '' || isBlankUrl(url) || isAuthUrl(url)) return false;
@@ -58,6 +58,8 @@ export interface OrganizeWindowsOptions {
   readonly clusterMode: ClusterMode;
   readonly useTabGroups?: boolean;
   readonly focusedWindowId?: number;
+  /** Optional precomputed proposal (e.g. from Chrome's on-device AI in the side panel). */
+  readonly proposal?: GroupProposal;
   readonly api?: WindowsOrganizeApi;
 }
 
@@ -115,6 +117,7 @@ export async function organizeWindows(
       allTabs,
       options.clusterMode,
       options.focusedWindowId,
+      options.proposal,
       api,
     );
     return { movedTabs: moved, ungroupedTabs, windowsCount: 1 };
@@ -124,6 +127,7 @@ export async function organizeWindows(
     allTabs,
     options.clusterMode,
     options.focusedWindowId,
+    options.proposal,
     api,
   );
   return { movedTabs: result.movedTabs, ungroupedTabs, windowsCount: result.windowsCount };
@@ -137,6 +141,7 @@ async function mergeAndSortIntoOneWindow(
   allTabs: readonly TabInfo[],
   clusterMode: ClusterMode,
   focusedWindowId: number | undefined,
+  precomputed: GroupProposal | undefined,
   api: WindowsOrganizeApi,
 ): Promise<number> {
   const windowCounts = new Map<number, number>();
@@ -161,7 +166,7 @@ async function mergeAndSortIntoOneWindow(
     (tab) => tab.windowId === targetWindowId && !isMovableTab(tab),
   ).length;
 
-  const sortedIds = orderedTabIds(movable, clusterMode, targetWindowId);
+  const sortedIds = orderedTabIds(movable, clusterMode, targetWindowId, precomputed);
 
   // Check if everything is already in targetWindowId in this exact order.
   const currentInTarget = allTabs
@@ -209,26 +214,13 @@ async function splitIntoThematicWindows(
   allTabs: readonly TabInfo[],
   clusterMode: ClusterMode,
   focusedWindowId: number | undefined,
+  precomputed: GroupProposal | undefined,
   api: WindowsOrganizeApi,
 ): Promise<{ readonly movedTabs: number; readonly windowsCount: number }> {
   const movable = allTabs.filter(isMovableTab);
   if (movable.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
-  // Treat all movable tabs as a single pool (windowId: 1) so `proposeGroups` clusters
-  // related tabs even when they are currently scattered across different windows.
-  const unified = movable.map((tab, index) => ({
-    ...tab,
-    windowId: 1,
-    index,
-    groupId: NO_GROUP_ID,
-  }));
-
-  const proposal = proposeGroups(unified, clusterMode, {
-    minSiteTabs: 2,
-    minClusterTabs: 2,
-    includePinned: false,
-    includeGrouped: true,
-  });
+  const proposal = resolveWindowProposal(movable, clusterMode, 1, precomputed);
 
   const byId = new Map(movable.map((tab) => [tab.id, tab]));
 
@@ -369,6 +361,50 @@ async function splitIntoThematicWindows(
 }
 
 /**
+ * Resolves the cluster proposal for `movable` tabs: uses a precomputed AI proposal when
+ * supplied (strictly filtered to `movable` tabs so protected tabs are never touched), or
+ * falls back to the deterministic local heuristic (`proposeGroups`).
+ */
+function resolveWindowProposal(
+  movable: readonly TabInfo[],
+  clusterMode: ClusterMode,
+  virtualWindowId: number,
+  precomputed: GroupProposal | undefined,
+): GroupProposal {
+  if (precomputed !== undefined) {
+    const movableIds = new Set(movable.map((tab) => tab.id));
+    const placed = new Set<number>();
+    const groups = precomputed.groups
+      .map((group) => {
+        const tabIds = group.tabIds.filter((id) => {
+          if (!movableIds.has(id) || placed.has(id)) return false;
+          placed.add(id);
+          return true;
+        });
+        return { ...group, tabIds };
+      })
+      .filter((group) => group.tabIds.length > 0);
+    const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
+    if (groups.length > 0) {
+      return { mode: precomputed.mode, groups, ungrouped };
+    }
+  }
+
+  const unified = movable.map((tab, index) => ({
+    ...tab,
+    windowId: virtualWindowId,
+    index,
+    groupId: NO_GROUP_ID,
+  }));
+  return proposeGroups(unified, clusterMode, {
+    minSiteTabs: 2,
+    minClusterTabs: 2,
+    includePinned: false,
+    includeGrouped: true,
+  });
+}
+
+/**
  * Computes a clean, deterministic ordering of `tabs` by site or by topic:
  * clusters with the most tabs come first, followed by remaining tabs sorted by domain.
  */
@@ -376,19 +412,9 @@ function orderedTabIds(
   tabs: readonly TabInfo[],
   clusterMode: ClusterMode,
   virtualWindowId: number,
+  precomputed: GroupProposal | undefined,
 ): readonly number[] {
-  const unified = tabs.map((tab, index) => ({
-    ...tab,
-    windowId: virtualWindowId,
-    index,
-    groupId: NO_GROUP_ID,
-  }));
-  const proposal = proposeGroups(unified, clusterMode, {
-    minSiteTabs: 2,
-    minClusterTabs: 2,
-    includePinned: false,
-    includeGrouped: true,
-  });
+  const proposal = resolveWindowProposal(tabs, clusterMode, virtualWindowId, precomputed);
 
   const grouped = proposal.groups.flatMap((group) => [...group.tabIds]);
   const byId = new Map(tabs.map((tab) => [tab.id, tab]));

@@ -25,8 +25,9 @@ import {
   requestBookmarksPermission,
 } from '@/platform/bookmarks';
 import { panelLanguage, requestedLocale, t, useLocale } from '@/platform/i18n';
-import { protectedDomainsItem, readSettings, saveSettings } from '@/platform/storage';
-import { panelData } from './tabs';
+import { protectedDomainsItem, updateSettings } from '@/platform/storage';
+import { clearModeOverrideIf } from './organize-request';
+import { applyLocalSettings, panelData } from './tabs';
 
 /** The stored settings, or the defaults until the first read comes back. */
 export const settings = computed<Settings>(() => panelData.value?.settings ?? DEFAULT_SETTINGS);
@@ -52,7 +53,11 @@ export const language = signal<string>(panelLanguage());
 
 /** Changes one setting (§4.6). */
 export function setSetting<K extends keyof Settings>(key: K, value: Settings[K]): void {
-  run(update((current) => ({ ...current, [key]: value })));
+  run(
+    update((current) => ({ ...current, [key]: value })).then(() => {
+      if (key === 'autoOrganizeMode') clearModeOverrideIf(value as Settings['autoOrganizeMode']);
+    }),
+  );
 }
 
 /** Replaces "Siti protetti" with what the editor holds. */
@@ -128,9 +133,10 @@ export function startLanguage(): () => void {
   });
 }
 
-/** Read, change, write: the panel never writes a settings snapshot it took earlier. */
+/** Serialized read-change-write: the panel never writes a settings snapshot it took earlier. */
 async function update(change: (current: Settings) => Settings): Promise<void> {
-  await saveSettings(change(await readSettings()));
+  const next = await updateSettings(change);
+  applyLocalSettings(next);
 }
 
 function run(work: Promise<unknown>): void {

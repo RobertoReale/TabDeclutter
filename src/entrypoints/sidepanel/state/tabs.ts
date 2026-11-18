@@ -93,6 +93,21 @@ const EMPTY_SCORING: ScoringResult = { tabs: [], windows: [] };
 /** The snapshot, or `null` until the first read comes back. */
 export const panelData = signal<PanelData | null>(null);
 
+/** Monotonic counter bumped whenever this panel commits a local settings write. */
+let localSettingsVersion = 0;
+
+/**
+ * Mirrors a settings value that this panel just persisted to `storage.local` into `panelData`
+ * immediately, so controlled checkboxes/radios/selects never snap back during the 150 ms
+ * `storage.onChanged` debounce window or while an earlier read is in flight.
+ */
+export function applyLocalSettings(next: Settings): void {
+  localSettingsVersion += 1;
+  const current = panelData.value;
+  if (current === null) return;
+  panelData.value = { ...current, settings: next };
+}
+
 /** Whether the panel has anything to show yet. */
 export const loaded = computed(() => panelData.value !== null);
 
@@ -179,7 +194,15 @@ export function startPanelState(options: PanelStateOptions = {}): PanelStateHand
   }
 
   async function reload(): Promise<void> {
-    panelData.value = await read(now());
+    const before = localSettingsVersion;
+    const next = await read(now());
+    // If this panel wrote newer settings while `read()` was in flight, keep those newer
+    // settings until the debounced `storage.onChanged` reload reads them back from storage.
+    if (localSettingsVersion !== before && panelData.value !== null) {
+      panelData.value = { ...next, settings: panelData.value.settings };
+      return;
+    }
+    panelData.value = next;
   }
 
   /** What every listener does: ask for a read, at most once per window. */

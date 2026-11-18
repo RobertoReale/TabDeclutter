@@ -33,9 +33,11 @@ import {
 } from '../../src/entrypoints/sidepanel/state/ai';
 import {
   aiBadge,
+  aiFallbackNotice,
   aiWorking,
   cancelAiGrouping,
   draft,
+  organizeWindowsWithAi,
   resetAiGrouping,
   setMode,
   setOptions,
@@ -43,10 +45,12 @@ import {
   startAiGrouping,
 } from '../../src/entrypoints/sidepanel/state/organize';
 import { brought } from '../../src/entrypoints/sidepanel/state/organize-request';
+import { setSetting } from '../../src/entrypoints/sidepanel/state/settings';
 import { panelData, type PanelData } from '../../src/entrypoints/sidepanel/state/tabs';
 import type { Capabilities } from '../../src/platform/capabilities';
 import type { AiAvailability, DownloadOptions, LlmModule } from '../../src/platform/llm';
-import { readSettings } from '../../src/platform/storage';
+import { aiProposalItem, readSettings, saveSettings } from '../../src/platform/storage';
+import type { OrganizeWindowsOptions } from '../../src/platform/windows';
 
 const NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
 
@@ -434,5 +438,146 @@ describe('grouping by topic with the model (§7.3)', () => {
 
     expect(aiBadge.value).toBe(false);
     expect(draft.value.groups.map((group) => group.title)).not.toContain('Reading');
+  });
+});
+
+describe('persisting topic + AI preferences without resets or races', () => {
+  it('preserves every rapid setting change made back to back without overwriting any', async () => {
+    setSetting('autoOrganizeMode', 'topic');
+    void setUseAi(true);
+    setSetting('autoWindowMode', 'split-windows');
+
+    // Wait for the serialized local:settings queue to drain.
+    await setUseAi(true);
+    const stored = await readSettings();
+    expect(stored.autoOrganizeMode).toBe('topic');
+    expect(stored.useOnDeviceAi).toBe(true);
+    expect(stored.autoWindowMode).toBe('split-windows');
+  });
+
+  it('uses the on-device AI proposal for window organization and saves it for autopilot', async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true });
+    await checkAi({ capabilities: CHROME, llm });
+    const received: OrganizeWindowsOptions[] = [];
+
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      focusedWindowId: 1,
+      deps: {
+        groupBy: async () => answered('ai'),
+        organize: async (opts) => {
+          received.push(opts);
+          return { movedTabs: 4, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.proposal?.groups.map((g) => g.title)).toEqual(['Reading', 'Work']);
+    expect(aiFallbackNotice.value).toBe(false);
+    expect((await aiProposalItem.getValue())?.groups.map((g) => g.title)).toEqual([
+      'Reading',
+      'Work',
+    ]);
+  });
+
+  it('warns on AI failure and never flips useOnDeviceAi or autoOrganizeMode', async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true });
+    await checkAi({ capabilities: CHROME, llm });
+    const received: OrganizeWindowsOptions[] = [];
+
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      deps: {
+        groupBy: async () => ({
+          ...answered('fallback'),
+          fallbackReason: 'timeout',
+        }),
+        organize: async (opts) => {
+          received.push(opts);
+          return { movedTabs: 2, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.proposal).toBeUndefined();
+    expect(aiFallbackNotice.value).toBe(true);
+    const stored = await readSettings();
+    expect(stored.autoOrganizeMode).toBe('topic');
+    expect(stored.useOnDeviceAi).toBe(true);
+  });
+
+  it('falls back without changing settings when the model reports unavailable', async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true });
+    llm.state = 'unavailable';
+    await checkAi({ capabilities: CHROME, llm });
+    const received: OrganizeWindowsOptions[] = [];
+
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      deps: {
+        organize: async (opts) => {
+          received.push(opts);
+          return { movedTabs: 1, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.proposal).toBeUndefined();
+    const stored = await readSettings();
+    expect(stored.autoOrganizeMode).toBe('topic');
+    expect(stored.useOnDeviceAi).toBe(true);
+  });
+
+  it('stops cleanly on Cancel without scrambling windows or raising a warning', async () => {
+    await saveSettings({ ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true });
+    await checkAi({ capabilities: CHROME, llm });
+    let organized = 0;
+    let started: () => void = () => undefined;
+    const begun = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+
+    const pending = organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      deps: {
+        groupBy: async (_tabs, _model, options = {}) =>
+          new Promise<AiGroupingResult>((resolve) => {
+            started();
+            options.signal?.addEventListener('abort', () => {
+              resolve({ ...answered('fallback'), fallbackReason: 'aborted' });
+            });
+          }),
+        organize: async () => {
+          organized += 1;
+          return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 1 };
+        },
+      },
+    });
+
+    await begun;
+    cancelAiGrouping();
+    await pending;
+
+    expect(organized).toBe(0);
+    expect(aiWorking.value).toBe(false);
+    expect(aiFallbackNotice.value).toBe(false);
+    const stored = await readSettings();
+    expect(stored.autoOrganizeMode).toBe('topic');
+    expect(stored.useOnDeviceAi).toBe(true);
   });
 });

@@ -29,10 +29,18 @@
 import { computed, signal } from '@preact/signals';
 
 import type { Llm, groupByAi as GroupByAi } from '@/core/ai-grouping';
-import { proposeGroups, type GroupColor } from '@/core/cluster';
-import type { TabInfo } from '@/core/types';
+import {
+  proposeGroups,
+  type ClusterMode,
+  type GroupColor,
+  type GroupProposal,
+} from '@/core/cluster';
+import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '@/core/types';
 import { applyGroups, applyMessage, undoGroups, type ApplyResult } from '@/platform/groups';
-import { aiActive, aiModel } from './ai';
+import { aiProposalItem } from '@/platform/storage';
+import { NO_WINDOW } from '@/platform/tabs';
+import { isMovableTab, organizeWindows, type OrganizeWindowsResult } from '@/platform/windows';
+import { aiActive, aiModel, availability, checkAi, type AiAvailability } from './ai';
 import {
   applyOptionsOf,
   clusterOptionsOf,
@@ -105,6 +113,17 @@ export const aiBadge = computed(() => aiDraft.value !== null && edited.value ===
 /** Whether the model is being asked right now, which is what the spinner shows (§7.3). */
 export const aiWorking = signal(false);
 
+/**
+ * Whether the last AI grouping run failed or timed out and fell back to local topic grouping.
+ * Shown as an informational warning without ever mutating the user's AI or mode settings.
+ */
+export const aiFallbackNotice = signal(false);
+
+/** Clears the AI fallback warning (e.g. when the user disables AI or switches away from topic). */
+export function clearAiFallbackNotice(): void {
+  aiFallbackNotice.value = false;
+}
+
 /** The run in flight, which "Annulla" aborts. */
 let running: AbortController | null = null;
 
@@ -135,6 +154,7 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
   const controller = new AbortController();
   running = controller;
   aiWorking.value = true;
+  aiFallbackNotice.value = false;
   let drafted: Draft | null = null;
   try {
     const groupBy = deps.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
@@ -142,11 +162,19 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
     const result = await groupBy(tabs, model, { ...chosen, signal: controller.signal });
     // A newer run, or a changed question, owns the answer now: this one is stale.
     if (running !== controller) return;
-    if (result.source === 'ai') drafted = draftOf(result.proposal);
+    if (result.source === 'ai') {
+      drafted = draftOf(result.proposal);
+      aiFallbackNotice.value = false;
+    } else if (result.fallbackReason !== 'empty' && result.fallbackReason !== 'aborted') {
+      aiFallbackNotice.value = true;
+    }
   } catch (error: unknown) {
-    // A model that cannot even be reached is not an error the user has to read about:
-    // §7.2 has already answered, and the preview is showing it.
+    // A model that cannot even be reached is not fatal: §7.2 has already answered,
+    // and we surface a warning without changing the user's AI setting.
     console.error('TabDeclutter: group by topic with the model', error);
+    if (running === controller && !controller.signal.aborted) {
+      aiFallbackNotice.value = true;
+    }
   } finally {
     if (running === controller) {
       running = null;
@@ -158,6 +186,124 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
   }
 }
 
+export interface OrganizeWindowsWithAiOptions {
+  readonly windowMode: AutoWindowMode;
+  readonly clusterMode: ClusterMode;
+  readonly useTabGroups: boolean;
+  readonly useAi: boolean;
+  readonly focusedWindowId?: number;
+  readonly deps?: AiRunDeps & {
+    readonly check?: () => Promise<AiAvailability>;
+    readonly organize?: typeof organizeWindows;
+  };
+}
+
+/**
+ * Organizes browser windows, using Chrome's on-device AI across all movable open tabs when
+ * `clusterMode === 'topic'`, `useAi === true`, and native tab groups are off.
+ *
+ * Never modifies `useOnDeviceAi` or `autoOrganizeMode`: if the model is unavailable, times
+ * out, or fails, falls back cleanly to local topic grouping and raises `aiFallbackNotice`
+ * so the user is informed while their settings stay intact.
+ */
+export async function organizeWindowsWithAi(
+  request: OrganizeWindowsWithAiOptions,
+): Promise<OrganizeWindowsResult> {
+  const organize = request.deps?.organize ?? organizeWindows;
+  aiFallbackNotice.value = false;
+
+  if (request.useTabGroups || request.clusterMode !== 'topic' || !request.useAi) {
+    return organize({
+      windowMode: request.windowMode,
+      clusterMode: request.clusterMode,
+      useTabGroups: request.useTabGroups,
+      focusedWindowId: request.focusedWindowId,
+    });
+  }
+
+  const currentAvailability = availability.value ?? (await (request.deps?.check ?? checkAi)());
+  if (currentAvailability !== 'available') {
+    return organize({
+      windowMode: request.windowMode,
+      clusterMode: request.clusterMode,
+      useTabGroups: request.useTabGroups,
+      focusedWindowId: request.focusedWindowId,
+    });
+  }
+
+  const movable = (panelData.value?.tabs ?? []).filter(
+    (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && isMovableTab(tab),
+  );
+  if (movable.length < 2) {
+    return organize({
+      windowMode: request.windowMode,
+      clusterMode: request.clusterMode,
+      useTabGroups: request.useTabGroups,
+      focusedWindowId: request.focusedWindowId,
+    });
+  }
+
+  // Group across every open window together by placing movable tabs in one virtual window.
+  const unified: TabInfo[] = movable.map((tab, index) => ({
+    ...tab,
+    windowId: 1,
+    index,
+    groupId: NO_GROUP_ID,
+  }));
+
+  // Supersede any previous in-flight AI grouping run so rapid clicks always win cleanly.
+  running?.abort();
+  const controller = new AbortController();
+  running = controller;
+  aiWorking.value = true;
+  let proposal: GroupProposal | undefined;
+
+  try {
+    const groupBy = request.deps?.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
+    const model = request.deps?.model ?? (await aiModel());
+    const result = await groupBy(unified, model, {
+      minSiteTabs: 2,
+      minClusterTabs: 2,
+      includePinned: false,
+      includeGrouped: true,
+      signal: controller.signal,
+    });
+    if (
+      running !== controller ||
+      controller.signal.aborted ||
+      result.fallbackReason === 'aborted'
+    ) {
+      return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
+    }
+    if (result.source === 'ai') {
+      proposal = result.proposal;
+      aiFallbackNotice.value = false;
+      void aiProposalItem.setValue(result.proposal).catch(() => undefined);
+    } else if (result.fallbackReason !== 'empty') {
+      aiFallbackNotice.value = true;
+    }
+  } catch (error: unknown) {
+    if (running !== controller || controller.signal.aborted) {
+      return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
+    }
+    console.error('TabDeclutter: organize windows with the model', error);
+    aiFallbackNotice.value = true;
+  } finally {
+    if (running === controller) {
+      running = null;
+      aiWorking.value = false;
+    }
+  }
+
+  return organize({
+    windowMode: request.windowMode,
+    clusterMode: request.clusterMode,
+    useTabGroups: request.useTabGroups,
+    focusedWindowId: request.focusedWindowId,
+    proposal,
+  });
+}
+
 /** "Annulla" in the spinner (§7.3): the run stops and §7.2's proposal stays on screen. */
 export function cancelAiGrouping(): void {
   running?.abort();
@@ -167,6 +313,7 @@ export function cancelAiGrouping(): void {
 export function resetAiGrouping(): void {
   running = null;
   aiWorking.value = false;
+  aiFallbackNotice.value = false;
   answer.value = null;
 }
 

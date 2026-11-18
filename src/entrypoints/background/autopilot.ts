@@ -16,6 +16,7 @@ import { caps, type Capabilities } from '@/platform/capabilities';
 import { applyGroups } from '@/platform/groups';
 import {
   activityItem,
+  aiProposalItem,
   duplicateWhitelistItem,
   keepsItem,
   protectedDomainsItem,
@@ -168,11 +169,16 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     }
 
     if (settings.autoOrganize) {
+      const aiProposal =
+        !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi
+          ? ((await aiProposalItem.getValue().catch(() => null)) ?? undefined)
+          : undefined;
       const winResult = await organizeWindows({
         windowMode: settings.autoWindowMode,
         clusterMode: settings.autoOrganizeMode,
         useTabGroups: settings.useTabGroups,
         focusedWindowId: focusedId,
+        proposal: aiProposal,
       });
       groupedWindows = winResult.windowsCount;
 
@@ -202,10 +208,22 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     if (change.status === 'complete') schedule();
   });
 
-  browser.storage.onChanged.addListener((changes: Record<string, unknown>, area: string) => {
-    if (area !== 'local') return;
-    if (WATCHED.some((key) => key in changes)) schedule();
-  });
+  browser.storage.onChanged.addListener(
+    (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
+      if (area !== 'local') return;
+      if (!WATCHED.some((key) => key in changes)) return;
+      // When only `useOnDeviceAi` changed, the side panel handles running the on-device model
+      // directly; avoid firing a competing heuristic sweep on top of it.
+      if (
+        Object.keys(changes).length === 1 &&
+        'settings' in changes &&
+        onlyAiToggleChanged(changes.settings)
+      ) {
+        return;
+      }
+      schedule();
+    },
+  );
 
   browser.alarms.onAlarm.addListener((alarm: { name: string }) => {
     if (alarm.name === ALARM_NAME) void run().catch(failed);
@@ -310,6 +328,32 @@ export function isSafeToAutoClose(
   // Every other page (articles, videos, searches, etc.) is only auto-closed in the background
   // once it has genuinely been untouched for at least the user's configured `staleDays`.
   return scored.idleMs >= staleMs;
+}
+
+function onlyAiToggleChanged(
+  change: { oldValue?: unknown; newValue?: unknown } | undefined,
+): boolean {
+  if (change === undefined) return false;
+  const oldVal = change.oldValue as Record<string, unknown> | undefined;
+  const newVal = change.newValue as Record<string, unknown> | undefined;
+  if (
+    oldVal === undefined ||
+    newVal === undefined ||
+    typeof oldVal !== 'object' ||
+    typeof newVal !== 'object'
+  ) {
+    return false;
+  }
+  const keys = new Set([...Object.keys(oldVal), ...Object.keys(newVal)]);
+  let aiChanged = false;
+  for (const key of keys) {
+    if (key === 'useOnDeviceAi') {
+      aiChanged = oldVal[key] !== newVal[key];
+      continue;
+    }
+    if (JSON.stringify(oldVal[key]) !== JSON.stringify(newVal[key])) return false;
+  }
+  return aiChanged;
 }
 
 function failed(error: unknown): void {

@@ -13,9 +13,10 @@
  * an answer to it.
  */
 
-import { signal } from '@preact/signals';
+import { computed, signal } from '@preact/signals';
 
 import type { ClusterMode } from '@/core/cluster';
+import { DEFAULT_SETTINGS } from '@/core/types';
 import {
   DEFAULT_ORGANIZE_OPTIONS,
   type Draft,
@@ -23,10 +24,25 @@ import {
   type OrganizeScope,
 } from '../organize';
 import { selectedIds } from './selection';
+import { panelData } from './tabs';
 import { showView } from './view';
 
 export const scope = signal<OrganizeScope>('window');
-export const mode = signal<ClusterMode>('site');
+
+/**
+ * In-memory override for `mode` during the current panel session (so `setMode` takes effect
+ * synchronously before `storage.local` finishes its round trip). When `null` (such as every
+ * time the side panel is opened), `mode` reads the persisted `settings.autoOrganizeMode`, so
+ * "By topic" / "By website" never resets when reopening the panel.
+ */
+const modeOverride = signal<ClusterMode | null>(null);
+
+export const mode = computed<ClusterMode>(
+  () =>
+    modeOverride.value ??
+    panelData.value?.settings.autoOrganizeMode ??
+    DEFAULT_SETTINGS.autoOrganizeMode,
+);
 export const options = signal<OrganizeOptions>(DEFAULT_ORGANIZE_OPTIONS);
 
 /** The ids §4.3's "Raggruppa" brought over, or `null` when it never ran. */
@@ -46,8 +62,18 @@ export function setScope(next: OrganizeScope): void {
 }
 
 export function setMode(next: ClusterMode): void {
-  mode.value = next;
+  modeOverride.value = next;
   resetEdits();
+}
+
+/** Drops the local override so `mode` follows persisted `settings.autoOrganizeMode` again. */
+export function clearModeOverride(): void {
+  modeOverride.value = null;
+}
+
+/** Drops the local override only if it still matches `expected`, preventing races on rapid clicks. */
+export function clearModeOverrideIf(expected: ClusterMode): void {
+  if (modeOverride.value === expected) modeOverride.value = null;
 }
 
 export function setOptions(change: Partial<OrganizeOptions>): void {

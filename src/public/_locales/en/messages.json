@@ -379,6 +379,14 @@
     "message": "The browser downloads the model once; it is several gigabytes.",
     "description": "Explains what turning on the on-device AI costs, next to the button that starts it."
   },
+  "organizeAiFallback": {
+    "message": "The on-device AI could not finish grouping, so local topic grouping was used instead. Your setting was kept.",
+    "description": "Warning shown in the Organize view when the on-device model fails or times out and local topic grouping is used without changing the user's AI preference."
+  },
+  "organizeAiUnavailable": {
+    "message": "Chrome's on-device AI is currently unavailable, so local topic grouping will be used instead. Your setting was kept.",
+    "description": "Warning shown in the Organize view when the user enabled on-device AI but the browser currently reports the model as unavailable or unsupported."
+  },
   "organizeAiDownloading": {
     "message": "Downloading the model… $1",
     "description": "Progress of the on-device model's download. $1 is the formatted percentage."

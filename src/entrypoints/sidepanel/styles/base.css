@@ -1019,6 +1019,10 @@ button {
   border-radius: var(--td-radius);
 }
 
+.td-ai .td-warning {
+  margin-top: var(--td-space-1);
+}
+
 /* The badge of §4.4.2, beside the heading it qualifies. */
 .td-ai-badge {
   margin-left: var(--td-space-2);

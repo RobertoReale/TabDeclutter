@@ -379,6 +379,14 @@
     "message": "Il browser scarica il modello una volta sola: sono diversi gigabyte.",
     "description": "Explains what turning on the on-device AI costs, next to the button that starts it."
   },
+  "organizeAiFallback": {
+    "message": "L'AI on-device non è riuscita a completare il raggruppamento: è stato usato il raggruppamento locale per argomento. La tua impostazione è rimasta attiva.",
+    "description": "Warning shown in the Organize view when the on-device model fails or times out and local topic grouping is used without changing the user's AI preference."
+  },
+  "organizeAiUnavailable": {
+    "message": "L'AI on-device di Chrome al momento non è disponibile: verrà usato il raggruppamento locale per argomento. La tua impostazione è rimasta attiva.",
+    "description": "Warning shown in the Organize view when the user enabled on-device AI but the browser currently reports the model as unavailable or unsupported."
+  },
   "organizeAiDownloading": {
     "message": "Scaricamento del modello… $1",
     "description": "Progress of the on-device model's download. $1 is the formatted percentage."

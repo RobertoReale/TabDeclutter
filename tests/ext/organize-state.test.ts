@@ -24,7 +24,7 @@ import {
   setOptions,
   setScope,
 } from '../../src/entrypoints/sidepanel/state/organize';
-import { brought } from '../../src/entrypoints/sidepanel/state/organize-request';
+import { brought, clearModeOverride } from '../../src/entrypoints/sidepanel/state/organize-request';
 import { panelData, type PanelData } from '../../src/entrypoints/sidepanel/state/tabs';
 import { view } from '../../src/entrypoints/sidepanel/state/view';
 
@@ -156,5 +156,15 @@ describe('the first edit', () => {
     setOptions({ collapse: true });
     expect(options.value.collapse).toBe(true);
     expect(draft.value.groups[0]?.title).toBe('GitHub');
+  });
+
+  it('restores the persisted autoOrganizeMode ("topic") when reopening the panel', () => {
+    panelData.value = {
+      ...data(tabs()),
+      settings: { ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic' },
+    };
+    clearModeOverride();
+
+    expect(mode.value).toBe('topic');
   });
 });

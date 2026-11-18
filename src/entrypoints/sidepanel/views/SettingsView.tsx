@@ -195,8 +195,8 @@ function MainSettings({ language }: { language: string }) {
             setSetting('showBadge', value);
           }}
         />
-        {/* §5.5: no switch where there is no Prompt API — and only probe availability when enabled. */}
-        {caps.promptApi && availability.value !== 'unsupported' && (
+        {/* §5.5: no switch where there is no Prompt API, unless the user already enabled it. */}
+        {((caps.promptApi && availability.value !== 'unsupported') || current.useOnDeviceAi) && (
           <CheckField
             label="settingsUseAi"
             value={current.useOnDeviceAi}
@@ -205,7 +205,19 @@ function MainSettings({ language }: { language: string }) {
             }}
           />
         )}
-        {current.useOnDeviceAi && aiState !== null && <p class="td-field-hint">{t(aiState)}</p>}
+        {current.useOnDeviceAi && aiState !== null && (
+          <p
+            class={
+              availability.value === 'unavailable' || availability.value === 'unsupported'
+                ? 'td-warning'
+                : 'td-field-hint'
+            }
+            role="status"
+            aria-live="polite"
+          >
+            {t(aiState)}
+          </p>
+        )}
       </div>
 
       <div class="td-settings-card">

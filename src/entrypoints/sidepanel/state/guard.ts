@@ -33,11 +33,11 @@ import {
   readGuardState,
   readSettings,
   resumeGuard,
-  saveSettings,
+  updateSettings,
 } from '@/platform/storage';
 import { closeTabs } from '@/platform/tabs';
 import type { GuardStatus } from '../guard-settings';
-import { panelData } from './tabs';
+import { applyLocalSettings, panelData } from './tabs';
 import { rememberClose } from './undo';
 
 /** How long §4.2's counter stays on screen. */
@@ -249,9 +249,10 @@ export function startGuardState(options: GuardStateOptions = {}): GuardStateHand
   };
 }
 
-/** Read, change, write: the panel never writes a settings snapshot it took earlier. */
+/** Serialized read-change-write: the panel never writes a settings snapshot it took earlier. */
 async function update(change: (settings: Settings) => Settings): Promise<void> {
-  await saveSettings(change(await readSettings()));
+  const next = await updateSettings(change);
+  applyLocalSettings(next);
 }
 
 async function pause(ms: number): Promise<void> {

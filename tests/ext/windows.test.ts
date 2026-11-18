@@ -176,6 +176,72 @@ describe('platform/windows', () => {
     // Tab 3 is active in focused window 1, so it must remain in window 1
     expect(tabs.find((t) => t.id === 3)?.windowId).toBe(1);
   });
+
+  it('applies a precomputed AI topic proposal while still protecting pinned, blank, loading and OAuth tabs', async () => {
+    const { api, moves, tabs } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://arxiv.org/abs/1',
+        title: 'Linear algebra notes',
+      },
+      {
+        id: 2,
+        windowId: 2,
+        index: 0,
+        url: 'https://youtube.com/watch?v=math',
+        title: 'Eigenvalues lecture',
+      },
+      { id: 3, windowId: 1, index: 1, url: 'https://booking.com/rome', title: 'Hotels in Rome' },
+      {
+        id: 4,
+        windowId: 2,
+        index: 1,
+        url: 'https://trenitalia.com/tickets',
+        title: 'Trains to Rome',
+      },
+      { id: 5, windowId: 3, index: 0, url: 'chrome://newtab/', title: 'New Tab' },
+      {
+        id: 6,
+        windowId: 4,
+        index: 0,
+        url: 'https://accounts.google.com/o/oauth2/auth',
+        title: 'Sign in',
+      },
+      {
+        id: 7,
+        windowId: 1,
+        index: 2,
+        url: 'https://mail.google.com/',
+        title: 'Gmail',
+        pinned: true,
+      },
+    ]);
+
+    await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      proposal: {
+        mode: 'topic',
+        groups: [
+          { key: 'math', title: 'Math', color: 'blue', windowId: 1, tabIds: [1, 2, 5, 7] },
+          { key: 'trip', title: 'Rome Trip', color: 'green', windowId: 1, tabIds: [3, 4, 6] },
+        ],
+        ungrouped: [],
+      },
+      api,
+    });
+
+    // AI cross-domain clusters are placed together in dedicated windows
+    expect(tabs.find((t) => t.id === 1)?.windowId).toBe(tabs.find((t) => t.id === 2)?.windowId);
+    expect(tabs.find((t) => t.id === 3)?.windowId).toBe(tabs.find((t) => t.id === 4)?.windowId);
+    expect(tabs.find((t) => t.id === 1)?.windowId).not.toBe(tabs.find((t) => t.id === 3)?.windowId);
+    // Protected tabs (blank, OAuth, pinned) were never moved even though the proposal named them
+    expect(moves.some((m) => m.tabId === 5 || m.tabId === 6 || m.tabId === 7)).toBe(false);
+  });
 });
 
 function makeTab(overrides: Partial<TabInfo> = {}): TabInfo {

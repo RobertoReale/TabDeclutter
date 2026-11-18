@@ -17,12 +17,12 @@
 
 import { computed, signal } from '@preact/signals';
 
-import { DEFAULT_SETTINGS, type Settings } from '@/core/types';
+import { DEFAULT_SETTINGS } from '@/core/types';
 import type { Llm } from '@/core/ai-grouping';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import type { AiAvailability, LlmModule } from '@/platform/llm';
-import { readSettings, saveSettings } from '@/platform/storage';
-import { panelData } from './tabs';
+import { updateSettings } from '@/platform/storage';
+import { applyLocalSettings, panelData } from './tabs';
 
 export type { AiAvailability } from '@/platform/llm';
 
@@ -100,11 +100,12 @@ export async function enableAi(deps: AiDeps = {}): Promise<AiAvailability> {
   return state;
 }
 
-/** The checkbox of §4.6 and §4.4.2. Read, change, write, like every other setting. */
+/** The checkbox of §4.6 and §4.4.2. Serialized read-change-write so rapid toggles never race. */
 export async function setUseAi(next: boolean): Promise<void> {
-  const settings: Settings = await readSettings();
-  if (settings.useOnDeviceAi === next) return;
-  await saveSettings({ ...settings, useOnDeviceAi: next });
+  const updated = await updateSettings((current) =>
+    current.useOnDeviceAi === next ? current : { ...current, useOnDeviceAi: next },
+  );
+  applyLocalSettings(updated);
 }
 
 /** The panel's session, created on the first prompt and reused (PLAN.md §7.3). */

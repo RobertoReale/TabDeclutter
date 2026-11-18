@@ -122,4 +122,70 @@ test.describe('in English', () => {
     // The preview is still a proposal: nothing has been grouped by opening the view.
     await expect(panel.getByRole('button', { name: message('en', 'organizeApply') })).toBeEnabled();
   });
+
+  test('keeps "By topic" and "Use the on-device AI" persisted after reopening the panel', async ({
+    context,
+    extensionId,
+    panel,
+  }) => {
+    await panel.getByRole('button', { name: message('en', 'navOrganize') }).click();
+    const modeSelect = panel.getByLabel(message('en', 'organizeMode'));
+    await modeSelect.selectOption('topic');
+    await expect(modeSelect).toHaveValue('topic');
+
+    // Also persist `useOnDeviceAi: true` (the way enabling it in Settings or Organize does)
+    // and ensure reopening the panel never resets either preference even without a model.
+    await panel.evaluate(async () => {
+      const storage = (
+        globalThis as unknown as {
+          chrome: {
+            storage: {
+              local: {
+                get(key: string): Promise<Record<string, Record<string, unknown>>>;
+                set(items: Record<string, unknown>): Promise<void>;
+              };
+            };
+          };
+        }
+      ).chrome.storage.local;
+      const current = (await storage.get('settings')).settings ?? {};
+      await storage.set({
+        settings: {
+          ...current,
+          useTabGroups: false,
+          autoOrganizeMode: 'topic',
+          useOnDeviceAi: true,
+        },
+      });
+    });
+
+    await panel.close();
+
+    const reopened = await context.newPage();
+    await reopened.goto(`chrome-extension://${extensionId}/sidepanel.html`);
+    await reopened.getByRole('button', { name: message('en', 'navOrganize') }).click();
+
+    await expect(reopened.getByLabel(message('en', 'organizeMode'))).toHaveValue('topic');
+    const aiToggle = reopened.getByRole('checkbox', { name: message('en', 'organizeAiUse') });
+    await expect(aiToggle).toBeVisible();
+    await expect(aiToggle).toBeChecked();
+    await expect(reopened.locator('.td-ai .td-warning')).toHaveText(
+      message('en', 'organizeAiUnavailable'),
+    );
+
+    const stored = await reopened.evaluate(async () => {
+      const storage = (
+        globalThis as unknown as {
+          chrome: {
+            storage: {
+              local: { get(key: string): Promise<Record<string, Record<string, unknown>>> };
+            };
+          };
+        }
+      ).chrome.storage.local;
+      return (await storage.get('settings')).settings ?? {};
+    });
+    expect(stored.autoOrganizeMode).toBe('topic');
+    expect(stored.useOnDeviceAi).toBe(true);
+  });
 });

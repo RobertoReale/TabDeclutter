@@ -29,6 +29,7 @@ import { storage } from 'wxt/utils/storage';
 import type { StorageItemKey } from 'wxt/utils/storage';
 
 import { pruneArchiveEntries, sweepActivity } from '../core/archive';
+import type { GroupProposal } from '../core/cluster';
 import { keepKey } from '../core/scoring';
 import type {
   ActivityStore,
@@ -112,6 +113,13 @@ export const guardStateItem = defineVersioned<GuardState>('session:guardState', 
 });
 
 /**
+ * The most recent on-device AI window proposal from the side panel, kept for this browser
+ * session so background autopilot preserves AI topic windows instead of overwriting them
+ * with the deterministic heuristic.
+ */
+export const aiProposalItem = defineVersioned<GroupProposal | null>('session:aiProposal', null);
+
+/**
  * One read-modify-write at a time per key.
  *
  * Two closes a few milliseconds apart would otherwise both read the same archive and the
@@ -150,9 +158,24 @@ export async function readSettings(): Promise<Settings> {
   };
 }
 
-/** Stores the settings as one value, which is how the panel edits them. */
-export async function saveSettings(next: Settings): Promise<void> {
-  await settingsItem.setValue(next);
+/** Stores the settings as one value, serialized so rapid updates never clobber each other. */
+export function saveSettings(next: Settings): Promise<void> {
+  return serialize(settingsItem.key, async () => {
+    await settingsItem.setValue(next);
+  });
+}
+
+/**
+ * Serialized read-modify-write for `local:settings`: two toggles clicked back to back
+ * (e.g. "By topic" and "Use the on-device AI") always observe each other's write.
+ */
+export function updateSettings(change: (current: Settings) => Settings): Promise<Settings> {
+  return serialize(settingsItem.key, async () => {
+    const current = await readSettings();
+    const next = change(current);
+    if (next !== current) await settingsItem.setValue(next);
+    return next;
+  });
 }
 
 /**
