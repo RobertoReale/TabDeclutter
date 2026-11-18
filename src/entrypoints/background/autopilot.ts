@@ -9,9 +9,9 @@
 
 import { proposeGroups } from '@/core/cluster';
 import { compile } from '@/core/patterns';
-import { scoreTabs } from '@/core/scoring';
+import { scoreTabs, type ScoredTab } from '@/core/scoring';
 import { DAY, HOUR } from '@/core/time';
-import { STARTUP_GRACE_MS, type ScoredTab, type Settings, type TabInfo } from '@/core/types';
+import { STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import { applyGroups } from '@/platform/groups';
 import {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ScoredTab } from '../../src/core/scoring';
 import { DAY, HOUR } from '../../src/core/time';
-import { DEFAULT_SETTINGS, NO_GROUP_ID, type ScoredTab, type TabInfo } from '../../src/core/types';
+import { DEFAULT_SETTINGS, NO_GROUP_ID, type TabInfo } from '../../src/core/types';
 import { isSafeToAutoClose } from '../../src/entrypoints/background/autopilot';
 import type { BrowserTab } from '../../src/platform/tabs';
 import {
