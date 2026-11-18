@@ -483,19 +483,56 @@ button {
 
 .td-settings-card > .td-settings-group:first-child {
   margin-top: 0;
+  margin-bottom: var(--td-space-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.td-settings-card > .td-field:last-child,
+.td-settings-card > .td-check:last-child {
+  margin-bottom: 0;
+}
+
+.td-settings-card .td-field + .td-check {
+  margin-top: var(--td-space-2);
+}
+
+.td-settings-card .td-field-hint + .td-check,
+.td-settings-card .td-field-hint + .td-action {
+  margin-top: var(--td-space-2);
+}
+
+.td-settings-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--td-space-2);
+  margin-bottom: var(--td-space-1);
+}
+
+.td-settings-card-head .td-settings-group {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.td-settings-status {
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
 }
 
 .td-advanced-details {
   margin-top: var(--td-space-3);
-  padding: var(--td-space-2) var(--td-space-3);
+  padding: var(--td-space-3);
   background: var(--td-raised);
   border: 1px solid var(--td-border);
   border-radius: var(--td-radius);
 }
 
 .td-advanced-summary {
-  font-weight: 500;
-  color: var(--td-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--td-text);
   cursor: pointer;
   user-select: none;
 }
@@ -504,16 +541,44 @@ button {
   margin-top: var(--td-space-2);
 }
 
+.td-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--td-space-1);
+  min-height: var(--td-target);
+  padding: 0 var(--td-space-2);
+  margin: 0 0 var(--td-space-2) calc(-1 * var(--td-space-2));
+  border-radius: var(--td-radius-pill);
+  color: var(--td-accent-text);
+  font-weight: 500;
+  transition: background-color var(--td-duration) var(--td-ease);
+}
+
+.td-link-button:hover {
+  background: var(--td-accent-subtle);
+}
+
 .td-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: var(--td-target);
   padding: 0 var(--td-space-2);
   border-radius: var(--td-radius-pill);
   color: var(--td-accent-text);
   font-weight: 500;
+  transition:
+    background-color var(--td-duration) var(--td-ease),
+    opacity var(--td-duration) var(--td-ease);
 }
 
-.td-action:hover {
+.td-action:hover:not(:disabled) {
   background: var(--td-accent-subtle);
+}
+
+.td-action:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /*
@@ -525,14 +590,21 @@ button {
  * the archive and the toast are — so it is the accent.
  */
 .td-action-primary {
+  min-height: 30px;
+  padding: 0 var(--td-space-3);
   background: var(--td-accent);
   color: var(--td-accent-contrast);
 }
 
-.td-action-primary:hover {
+.td-action-primary:hover:not(:disabled) {
   background: var(--td-accent);
   /* Darkened by the text colour's own shadow rather than a second token. */
   box-shadow: inset 0 0 0 999px var(--td-hover);
+}
+
+.td-button-block {
+  width: 100%;
+  min-height: 34px;
 }
 
 /* The section header's two actions keep their space, unlike a row's. */
@@ -685,16 +757,16 @@ button {
   margin-bottom: var(--td-space-3);
 }
 
-/* The search takes whatever the filters leave, and at least a readable line. */
+/* Full-width search bar on the first row; the two filters share the row below. */
 .td-search {
-  flex: 1 1 140px;
+  flex: 1 0 100%;
   min-width: 0;
 }
 
 .td-search,
 .td-filter {
-  min-height: var(--td-target);
-  padding: 0 var(--td-space-2);
+  min-height: 30px;
+  padding: var(--td-space-1) var(--td-space-2);
   font: inherit;
   color: inherit;
   background: var(--td-surface);
@@ -706,6 +778,15 @@ button {
   flex: none;
   max-width: 100%;
   font-size: var(--td-text-meta);
+}
+
+.td-tools > .td-filter {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.td-field > .td-filter {
+  width: 100%;
 }
 
 /*

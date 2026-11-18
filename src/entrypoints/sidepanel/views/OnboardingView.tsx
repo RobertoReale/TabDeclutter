@@ -28,49 +28,57 @@ export function OnboardingView({ language }: { language: string }) {
     <div class="td-panel">
       <main class="td-main td-onboarding">
         <h1 class="td-title">{t('extName')}</h1>
-        <p>{t('onboardingIntro')}</p>
+        <p class="td-view-intro">{t('onboardingIntro')}</p>
 
-        {/* The `<label>` wraps the control, which is what associates the two without an id. */}
-        <label class="td-field">
-          <span class="td-field-label">{t('onboardingThreshold')}</span>
-          <select
-            class="td-filter"
-            value={String(days)}
-            onChange={(event) => {
-              draftStaleDays.value = Number(event.currentTarget.value);
-            }}
-          >
-            {durationChoices(ONBOARDING_STALE_DAYS, days, IN_DAYS, language).map((choice) => (
-              <option key={choice.value} value={String(choice.value)}>
-                {choice.label}
-              </option>
+        <div class="td-settings-card">
+          {/* The `<label>` wraps the control, which is what associates the two without an id. */}
+          <label class="td-field">
+            <span class="td-field-label">{t('onboardingThreshold')}</span>
+            <select
+              class="td-filter"
+              value={String(days)}
+              onChange={(event) => {
+                draftStaleDays.value = Number(event.currentTarget.value);
+              }}
+            >
+              {durationChoices(ONBOARDING_STALE_DAYS, days, IN_DAYS, language).map((choice) => (
+                <option key={choice.value} value={String(choice.value)}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div class="td-settings-card">
+          {/* A `<fieldset>`, so the question is the group's name for a screen reader (§4.8). */}
+          <fieldset class="td-onboarding-group">
+            <legend class="td-field-label">{t('onboardingGuard')}</legend>
+            {ONBOARDING_MODE_CHOICES.map((choice) => (
+              <label key={choice.value} class="td-check">
+                <input
+                  type="radio"
+                  name="td-onboarding-guard"
+                  value={choice.value}
+                  checked={mode === choice.value}
+                  onChange={() => {
+                    draftGuardMode.value = choice.value;
+                  }}
+                />
+                <span>{t(choice.label)}</span>
+              </label>
             ))}
-          </select>
-        </label>
-
-        {/* A `<fieldset>`, so the question is the group's name for a screen reader (§4.8). */}
-        <fieldset class="td-onboarding-group">
-          <legend class="td-field-label">{t('onboardingGuard')}</legend>
-          {ONBOARDING_MODE_CHOICES.map((choice) => (
-            <label key={choice.value} class="td-check">
-              <input
-                type="radio"
-                name="td-onboarding-guard"
-                value={choice.value}
-                checked={mode === choice.value}
-                onChange={() => {
-                  draftGuardMode.value = choice.value;
-                }}
-              />
-              <span>{t(choice.label)}</span>
-            </label>
-          ))}
-        </fieldset>
+          </fieldset>
+        </div>
 
         <p class="td-note">{t('onboardingPartialData')}</p>
 
         <div class="td-onboarding-actions">
-          <button type="button" class="td-button" onClick={completeOnboarding}>
+          <button
+            type="button"
+            class="td-action td-action-primary td-button-block"
+            onClick={completeOnboarding}
+          >
             {t('onboardingStart')}
           </button>
         </div>

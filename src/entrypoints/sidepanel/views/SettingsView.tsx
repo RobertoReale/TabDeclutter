@@ -33,7 +33,8 @@ import {
 } from '../settings-fields';
 import type { Choice } from '../guard-settings';
 import { availability, checkAi } from '../state/ai';
-import { matchOptions, setMatchOption } from '../state/guard';
+import { guardSettings, matchOptions, setMatchOption } from '../state/guard';
+import { MODE_CHOICES } from '../guard-settings';
 import {
   bookmarksDenied,
   bookmarksGranted,
@@ -69,8 +70,11 @@ export function SettingsView({ language }: { language: string }) {
 
 function MainSettings({ language }: { language: string }) {
   const current = settings.value;
+  const guard = guardSettings.value;
   const match = matchOptions.value;
   const aiState = aiStateKey(availability.value);
+  const guardModeLabel =
+    MODE_CHOICES.find((choice) => choice.value === guard.mode)?.label ?? 'guardModeWarn';
 
   // The bookmarks question is asked when the page opens; the AI availability is only probed
   // once `useOnDeviceAi` is on, so Chrome does not log an extension warning when its built-in AI
@@ -86,6 +90,7 @@ function MainSettings({ language }: { language: string }) {
   return (
     <section class="td-settings">
       <h2 class="td-section-title">{t('navSettings')}</h2>
+      <p class="td-view-intro">{t('settingsIntro')}</p>
 
       <div class="td-settings-card">
         <h3 class="td-settings-group">{t('autopilotTitle')}</h3>
@@ -104,6 +109,23 @@ function MainSettings({ language }: { language: string }) {
             setSetting('autoOrganize', value);
           }}
         />
+      </div>
+
+      <div class="td-settings-card">
+        <div class="td-settings-card-head">
+          <h3 class="td-settings-group">{t('settingsDuplicates')}</h3>
+          <span class="td-chip td-settings-status">{t(guardModeLabel)}</span>
+        </div>
+        <p class="td-field-hint">{t('settingsDuplicatesHint')}</p>
+        <button
+          type="button"
+          class="td-action td-action-primary"
+          onClick={() => {
+            settingsPage.value = 'duplicates';
+          }}
+        >
+          {t('settingsOpenDuplicates')}
+        </button>
       </div>
 
       <div class="td-settings-card">
@@ -197,19 +219,6 @@ function MainSettings({ language }: { language: string }) {
         />
       </div>
 
-      <div class="td-settings-card">
-        <h3 class="td-settings-group">{t('settingsDuplicates')}</h3>
-        <button
-          type="button"
-          class="td-action td-action-primary"
-          onClick={() => {
-            settingsPage.value = 'duplicates';
-          }}
-        >
-          {t('settingsOpenDuplicates')}
-        </button>
-      </div>
-
       {/* §5.5: on-device AI is experimental, Chrome-only, and off by default; keep hidden unless supported or already enabled. */}
       {((caps.promptApi && availability.value !== 'unsupported') || current.useOnDeviceAi) && (
         <details class="td-advanced-details" open={current.useOnDeviceAi}>
@@ -284,9 +293,10 @@ function ProtectedSites() {
         onInput={(event) => {
           draft.value = event.currentTarget.value;
         }}
+        onChange={save}
       />
       <div class="td-pattern-actions">
-        <button type="button" class="td-button" disabled={!dirty} onClick={save}>
+        <button type="button" class="td-action td-action-primary" disabled={!dirty} onClick={save}>
           {t('whitelistSave')}
         </button>
       </div>

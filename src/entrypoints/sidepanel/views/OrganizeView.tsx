@@ -546,10 +546,10 @@ function AppliedToast({ language }: { language: string }) {
             {appliedGroupsText(message.groups, t, language)}
             {message.skipped !== null && ` · ${pairText(message.skipped, t, language)}`}
           </span>
-          <button type="button" class="td-toast-undo" onClick={undoApply}>
+          <button type="button" class="td-action td-toast-undo" onClick={undoApply}>
             {t('actionUndo')}
           </button>
-          <button type="button" class="td-toast-undo" onClick={dismissApplied}>
+          <button type="button" class="td-action td-toast-undo" onClick={dismissApplied}>
             {t('organizeDismiss')}
           </button>
         </div>
@@ -575,7 +575,7 @@ function WindowOrganizedToast({ language }: { language: string }) {
           </span>
           <button
             type="button"
-            class="td-toast-undo"
+            class="td-action td-toast-undo"
             disabled={windowWorking.value}
             onClick={() => {
               void undoWindowOrganize();
@@ -583,7 +583,7 @@ function WindowOrganizedToast({ language }: { language: string }) {
           >
             {t('actionUndo')}
           </button>
-          <button type="button" class="td-toast-undo" onClick={dismissWindowOrganized}>
+          <button type="button" class="td-action td-toast-undo" onClick={dismissWindowOrganized}>
             {t('organizeDismiss')}
           </button>
         </div>

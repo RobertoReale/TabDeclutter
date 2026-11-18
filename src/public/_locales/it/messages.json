@@ -284,11 +284,11 @@
     "description": "Accessible name of the Organize view's grouping mode chooser."
   },
   "organizeModeSite": {
-    "message": "Per sito web (es. tutte le schede di YouTube o GitHub insieme)",
-    "description": "Grouping mode: one group per site."
+    "message": "Per sito / app (YouTube, Gemini, GitHub…)",
+    "description": "Grouping mode: one group per site or web app."
   },
   "organizeModeTopic": {
-    "message": "Per argomento (schede sullo stesso tema anche di siti diversi)",
+    "message": "Per argomento (pagine sullo stesso tema)",
     "description": "Grouping mode: groups of tabs that are about the same thing."
   },
   "organizeOptions": {
@@ -747,6 +747,14 @@
     "message": "Protezione duplicati",
     "description": "Heading of the duplicate-protection settings page."
   },
+  "settingsDuplicatesHint": {
+    "message": "Scegli come gestire le schede duplicate, le regole sugli URL e i siti esclusi.",
+    "description": "Short explanation on the Duplicate protection card in the main Settings view."
+  },
+  "settingsIntro": {
+    "message": "Ogni modifica viene salvata in automatico.",
+    "description": "Brief reassurance under the Settings heading explaining that changes save immediately."
+  },
   "guardGroupBehaviour": {
     "message": "Comportamento",
     "description": "Heading of the first group of duplicate settings: what happens when a duplicate is found."
@@ -992,7 +1000,7 @@
     "description": "Toggle for automatic background decluttering."
   },
   "autopilotOrganize": {
-    "message": "Organizza in automatico le finestre e le schede di Chrome",
+    "message": "Organizza in automatico finestre e schede",
     "description": "Toggle for automatic background window and tab organization."
   },
   "windowModeHeading": {
@@ -1012,7 +1020,7 @@
     "description": "Option 2: place each topic/site cluster into its own dedicated window."
   },
   "windowModeSplitHint": {
-    "message": "Sposta le schede correlate nella stessa finestra così ogni finestra di Chrome è dedicata a un singolo tema o progetto (senza gruppi colorati).",
+    "message": "Sposta le schede correlate nella stessa finestra così ogni finestra è dedicata a un singolo tema o progetto (senza gruppi colorati).",
     "description": "Explanation of the split-windows mode."
   },
   "windowOrganizeNow": {
@@ -1048,7 +1056,7 @@
     "description": "Primary one-click button to close all tabs in the close bucket. $1 is the formatted count."
   },
   "organizeIntro": {
-    "message": "Mantieni le finestre di Chrome sempre ordinate in automatico, senza riempire la barra di gruppi colorati.",
+    "message": "Mantieni le finestre del browser ordinate in automatico, senza riempire la barra di gruppi colorati.",
     "description": "Introductory helper text at the top of the Organize view."
   },
   "archiveIntro": {

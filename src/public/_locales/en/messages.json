@@ -284,11 +284,11 @@
     "description": "Accessible name of the Organize view's grouping mode chooser."
   },
   "organizeModeSite": {
-    "message": "By website (e.g. keep all YouTube or GitHub tabs together)",
-    "description": "Grouping mode: one group per site."
+    "message": "By website / app (YouTube, Gemini, GitHub…)",
+    "description": "Grouping mode: one group per site or web app."
   },
   "organizeModeTopic": {
-    "message": "By topic (tabs about the same subject across different sites)",
+    "message": "By topic (related pages across sites)",
     "description": "Grouping mode: groups of tabs that are about the same thing."
   },
   "organizeOptions": {
@@ -747,6 +747,14 @@
     "message": "Duplicate protection",
     "description": "Heading of the duplicate-protection settings page."
   },
+  "settingsDuplicatesHint": {
+    "message": "Control how duplicate tabs are handled, URL matching rules, and allowed sites.",
+    "description": "Short explanation on the Duplicate protection card in the main Settings view."
+  },
+  "settingsIntro": {
+    "message": "Changes are saved automatically.",
+    "description": "Brief reassurance under the Settings heading explaining that changes save immediately."
+  },
   "guardGroupBehaviour": {
     "message": "Behaviour",
     "description": "Heading of the first group of duplicate settings: what happens when a duplicate is found."
@@ -992,7 +1000,7 @@
     "description": "Toggle for automatic background decluttering."
   },
   "autopilotOrganize": {
-    "message": "Auto-organize Chrome windows and tabs",
+    "message": "Auto-organize windows and tabs",
     "description": "Toggle for automatic background window and tab organization."
   },
   "windowModeHeading": {
@@ -1012,7 +1020,7 @@
     "description": "Option 2: place each topic/site cluster into its own dedicated window."
   },
   "windowModeSplitHint": {
-    "message": "Moves related tabs into dedicated windows so each Chrome window covers one coherent topic or project (without coloured tab groups).",
+    "message": "Moves related tabs into dedicated windows so each window covers one coherent topic or project (without coloured tab groups).",
     "description": "Explanation of the split-windows mode."
   },
   "windowOrganizeNow": {
@@ -1048,7 +1056,7 @@
     "description": "Primary one-click button to close all tabs in the close bucket. $1 is the formatted count."
   },
   "organizeIntro": {
-    "message": "Keep your Chrome windows tidy automatically without cluttering the tab bar with coloured groups.",
+    "message": "Keep your browser windows tidy automatically without cluttering the tab bar with coloured groups.",
     "description": "Introductory helper text at the top of the Organize view."
   },
   "archiveIntro": {
