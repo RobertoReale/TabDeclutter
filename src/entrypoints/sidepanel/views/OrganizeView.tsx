@@ -237,6 +237,30 @@ export function OrganizeView({ language }: { language: string }) {
         </label>
       </fieldset>
 
+      {currentSettings.useTabGroups && (
+        <label class="td-field">
+          <span class="td-field-label">{t('organizeScope')}</span>
+          <select
+            class="td-filter"
+            value={scope.value}
+            onChange={(event) => {
+              setScope(event.currentTarget.value as OrganizeScope);
+            }}
+          >
+            {SCOPES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {t(option.label)}
+              </option>
+            ))}
+            {carried !== null && (
+              <option value="selection">
+                {t('organizeScopeSelection', formatCount(carried.length, language))}
+              </option>
+            )}
+          </select>
+        </label>
+      )}
+
       <label class="td-field">
         <span class="td-field-label">{t('organizeMode')}</span>
         <select
@@ -264,28 +288,6 @@ export function OrganizeView({ language }: { language: string }) {
 
       {currentSettings.useTabGroups && (
         <>
-          <label class="td-field">
-            <span class="td-field-label">{t('organizeScope')}</span>
-            <select
-              class="td-filter"
-              value={scope.value}
-              onChange={(event) => {
-                setScope(event.currentTarget.value as OrganizeScope);
-              }}
-            >
-              {SCOPES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {t(option.label)}
-                </option>
-              ))}
-              {carried !== null && (
-                <option value="selection">
-                  {t('organizeScopeSelection', formatCount(carried.length, language))}
-                </option>
-              )}
-            </select>
-          </label>
-
           <label class="td-check">
             <input
               type="checkbox"
