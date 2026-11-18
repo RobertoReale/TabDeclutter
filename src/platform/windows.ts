@@ -40,6 +40,7 @@ export interface WindowsOrganizeApi {
   tabs: {
     query(query: Record<string, unknown>): Promise<BrowserTab[]>;
     move(tabId: number, properties: { windowId?: number; index: number }): Promise<unknown>;
+    update?(tabId: number, properties: { active?: boolean }): Promise<unknown>;
     ungroup?(tabIds: readonly number[]): Promise<unknown>;
   };
   windows: {
@@ -186,6 +187,17 @@ async function mergeAndSortIntoOneWindow(
       nextIndex += 1;
     }
   }
+
+  // If the user was looking at an active tab in a secondary window that just got merged into
+  // `targetWindowId`, keep that tab active in `targetWindowId` so their current page stays on screen.
+  const focusedActiveTab =
+    focusedWindowId !== undefined && focusedWindowId !== targetWindowId
+      ? movable.find((tab) => tab.windowId === focusedWindowId && tab.active)
+      : undefined;
+  if (focusedActiveTab !== undefined && typeof api.tabs.update === 'function') {
+    await attempt(() => api.tabs.update!(focusedActiveTab.id, { active: true }));
+  }
+
   return moved;
 }
 
@@ -218,21 +230,46 @@ async function splitIntoThematicWindows(
     includeGrouped: true,
   });
 
-  // Build desired window buckets: one per proposed group, plus one bucket for ungrouped tabs.
+  const byId = new Map(movable.map((tab) => [tab.id, tab]));
+
+  // Build desired window buckets: one per proposed group, plus one bucket for ungrouped tabs (sorted by site).
   const buckets: number[][] = proposal.groups.map((group) => [...group.tabIds]);
   if (proposal.ungrouped.length > 0) {
-    buckets.push([...proposal.ungrouped]);
+    const sortedUngrouped = [...proposal.ungrouped].sort((leftId, rightId) => {
+      const leftSite = siteKey(byId.get(leftId)?.url ?? '');
+      const rightSite = siteKey(byId.get(rightId)?.url ?? '');
+      if (leftSite !== rightSite) return leftSite.localeCompare(rightSite);
+      return leftId - rightId;
+    });
+    buckets.push(sortedUngrouped);
   }
   if (buckets.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
-  const byId = new Map(movable.map((tab) => [tab.id, tab]));
   const existingWindows = [...new Set(allTabs.map((tab) => tab.windowId))];
   const usedWindows = new Set<number>();
 
-  // Assign each bucket to the existing window that already holds most of its tabs,
+  // Reserve `focusedWindowId` first for whichever bucket holds the active tab of the focused window,
+  // so the topic/site cluster the user is currently working on stays in their active window.
+  const focusedBucketIndex =
+    focusedWindowId === undefined
+      ? -1
+      : buckets.findIndex((tabIds) =>
+          tabIds.some((id) => {
+            const tab = byId.get(id);
+            return tab !== undefined && tab.active && tab.windowId === focusedWindowId;
+          }),
+        );
+  if (focusedBucketIndex >= 0 && focusedWindowId !== undefined) {
+    usedWindows.add(focusedWindowId);
+  }
+
+  // Assign each remaining bucket to the existing window that already holds most of its tabs,
   // so tabs move as little as possible and windows stay stable.
   const assignments: { tabIds: readonly number[]; windowId: number | null }[] = buckets.map(
-    (tabIds) => {
+    (tabIds, index) => {
+      if (index === focusedBucketIndex && focusedWindowId !== undefined) {
+        return { tabIds, windowId: focusedWindowId };
+      }
       const counts = new Map<number, number>();
       for (const id of tabIds) {
         const w = byId.get(id)?.windowId;
