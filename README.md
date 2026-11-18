@@ -1,40 +1,121 @@
 # TabDeclutter
 
-A Chrome and Firefox extension (MV3) that keeps your browser tidy automatically: it closes old and
-temporary tabs in the background (always saving them to a local Archive first), organizes your
-browser windows automatically without cluttering the tab bar with coloured tab groups, and blocks
-duplicate tabs in real time.
+A **Set & Forget** Chrome and Firefox extension (Manifest V3) that keeps your browser tidy
+automatically: it organizes your browser windows without cluttering the tab strip with coloured tab
+groups, closes old and abandoned tabs in the background (always saving them to a local Archive
+first), and blocks duplicate tabs in real time by switching you back to the existing tab.
 
-Every suggestion comes with a plain reason, every closed tab is archived and can be restored at any
-time, and no data ever leaves your device: no network requests, no analytics.
+Every closed tab is archived locally and can be reopened at any time, active work is protected by
+strict safety guardrails, and no data ever leaves your device: zero network requests, zero
+analytics, zero cloud services.
 
-## What it does
+---
 
-- **Autopilot & Declutter**: automatically closes expired temporary pages, unused stale tabs, and
-  forgotten background windows (or lets you review and close them in one click). Pinned tabs,
-  audible tabs, active tabs, and protected domains are never touched, and every closed tab is
-  saved to the Archive first.
-- **Window Organization (two modes, no coloured tab groups)**: keeps your browser windows organized
-  automatically by website or by topic, with an instant switch between two modes:
-  - **Merge and tidy into a single window** _(default)_: removes coloured tab groups, consolidates
-    scattered windows into one clean window, and sorts related tabs side by side.
-  - **One window per topic or website**: removes coloured tab groups and places each website or
-    topic cluster into its own dedicated window.
-- **Duplicate protection**: warns you, or closes the duplicate automatically, the moment a tab
-  becomes a copy of another. Whitelist with `*` wildcards and `/regex/` patterns, URL comparison
-  rules, and pause controls.
-- **Archive and undo**: every tab closed manually or by Autopilot is kept in the local Archive and
-  can be searched, exported, or reopened anytime.
-- Badge with the number of suggestions, keyboard shortcuts (`Alt+Shift+D` opens the panel), light
-  and dark theme, Italian and English.
+## Key Features
 
-Works on Chrome 121 or later (also Edge, Brave, Vivaldi) and Firefox 140 or later. Incognito
-windows are not supported.
+### 1. Automatic Window Organization (Two Modes, No Coloured Tab Groups)
+
+Instead of filling your tab bar with coloured tab group badges, TabDeclutter organizes your **Chrome
+and Firefox windows** automatically in the background (or on demand with **"Organize windows
+now"**). In the **Organize** tab you can switch at any time between two clear modes:
+
+- **Merge and tidy into a single window** _(default)_
+  - Automatically dissolves any coloured tab groups on the tab bar.
+  - Consolidates tabs scattered across multiple windows into your primary window.
+  - Sorts tabs side by side **by website** (e.g. all YouTube tabs together, all GitHub tabs
+    together) or **by topic** (pages about the same subject across different websites).
+  - If you were reading a tab in a secondary window that gets merged into the primary window, that
+    tab stays active on screen so you never lose your place.
+- **One window per topic or website**
+  - Automatically dissolves any coloured tab groups.
+  - Groups related tabs **by website** or **by topic** and places each cluster into its own
+    dedicated browser window so every open window focuses on a single coherent topic or project.
+  - The cluster containing the tab you are currently viewing always stays in your active window.
+
+### 2. Autopilot & Declutter
+
+- **Background Autopilot** _(enabled by default)_: quietly archives and closes abandoned empty tabs
+  (untouched for over 1 hour), tabs you have not opened for more than your configured threshold
+  (default: **7 days**), and forgotten background windows.
+- **Manual Review & 1-Click Cleanup**: open the **Declutter** view to see tabs ranked by a readable
+  reason (_"Not opened in 12 days"_, _"Already open in another tab"_, _"Search results you already
+  looked at"_). Close all recommended tabs in one click, or **Go to**, **Keep**, or **Close**
+  individual tabs directly from each row.
+
+### 3. Real-Time Duplicate Protection
+
+- The moment you open or navigate to a page that is already open in another tab, TabDeclutter closes
+  the duplicate copy, keeps the older tab, and **automatically activates and focuses the existing
+  tab** (even if it is in another window).
+- **Smart URL comparison**: treats `http` and `https` as equivalent, ignores `www.`, ignores
+  tracking parameters (`utm_source`, `fbclid`, `gclid`, etc.), and ignores `#hash` anchors while
+  preserving SPA routes (`#/page`).
+- **Quick controls**: click the **`Duplicates: ON`** chip in the header (or right-click the toolbar
+  icon) to switch between _Close automatically_, _Warn only_, and _Off_, pause protection for 15
+  minutes / 1 hour / until restart, close all open duplicates at once, or reopen the last closed
+  duplicate.
+- **Exceptions whitelist**: allow duplicates on specific sites using `*` wildcards or `/regex/`
+  patterns.
+
+### 4. Strict Safety Guardrails (Never Interrupts Active Work)
+
+TabDeclutter is designed never to get in your way while you are working:
+
+- **Never closes or moves**:
+  - The **active tab** you are currently looking at
+  - **Pinned** tabs
+  - Tabs **playing audio or video** (`audible`)
+  - Tabs that are still **loading**
+  - **New Tab / blank pages** (`chrome://newtab`, `about:blank`) while you may be typing a URL or
+    search query in the address bar
+  - **Login, OAuth, and payment popups** (`accounts.google.com`, `/oauth/`, `/login`, `/signin`,
+    etc.), so authentication flows are never broken
+- **Never auto-closes in the background**:
+  - **Local files** (`file://`) and **extension document viewers** (`chrome-extension://`,
+    `moz-extension://`, such as Office `.xlsx`/`.docx` or PDF viewers)
+  - **Local development servers** (`localhost`, `127.0.0.1`, `[::1]`)
+  - **Newly opened tabs** within the grace period (default: **2 hours**)
+  - Any web page or search tab that has **not genuinely exceeded your configured inactivity
+    threshold** (e.g. 7 days)
+  - Any domain listed in **Protected sites** (e.g. `mail.google.com`, `*.github.com`)
+- **Startup grace period**: waits 15 seconds after browser startup so session restore is never
+  interrupted.
+
+### 5. Local Archive & Instant Undo
+
+- Every tab closed by you, by Autopilot, or by Duplicate Protection is saved in the **Archive**
+  before it closes (kept for **30 days** by default, configurable up to 365 days).
+- Search archived tabs by title or URL, filter by date (_Today_, _Last 7 days_, _Older_) or by who
+  closed them (_Closed by me_, _Duplicates closed automatically_), restore single tabs or bulk
+  selections, or export the filtered list to your clipboard as Markdown links.
+
+---
+
+## Side Panel & Shortcuts
+
+| Shortcut / Control | Action                                                                 |
+| ------------------ | ---------------------------------------------------------------------- |
+| `Alt+Shift+D`      | Open the TabDeclutter side panel                                       |
+| `Alt+Shift+M`      | Pause or resume Duplicate Protection                                   |
+| `Alt+Shift+X`      | Close all duplicate tabs now                                           |
+| `↑` / `↓`          | Navigate rows and sections in the Declutter list                       |
+| `Enter`            | Switch to the focused tab (or expand/collapse a section)               |
+| `Delete`           | Close the selected or focused tab(s) (saved to Archive, `Ctrl+Z` undo) |
+| `K`                | Mark the selected or focused tab(s) as **Keep**                        |
+
+Supports **Italian** and **English** (switchable live in **Settings → Extension language**) and
+automatically follows your system's **Light / Dark theme**. Works on Chrome 121+ (and Chromium
+browsers such as Edge, Brave, Vivaldi) and Firefox 140+. Incognito windows are never touched.
+
+---
 
 ## Privacy
 
-No data is collected or transmitted. See `docs/PRIVACY.md`. The permissions and why each is needed
-are in `docs/PERMISSIONS.md`.
+No data is ever collected or transmitted. Everything runs locally on your device using browser
+storage (`storage.local` and `storage.session`). See `docs/PRIVACY.md` for the full privacy policy
+and `docs/PERMISSIONS.md` for every browser permission and why it is needed.
+
+---
 
 ## Documents
 
@@ -53,6 +134,8 @@ are in `docs/PERMISSIONS.md`.
 | `docs/TEST-COVERAGE.md`     | Where each item of the test strategy is tested.                      |
 | `docs/MANUAL-CHECKS.md`     | The checks done by hand, and the ones left for publication.          |
 | `docs/CLUSTER-REVIEW.md`    | A review of the topic groups on the 300-tab fixture.                 |
+
+---
 
 ## Building from source
 
@@ -76,15 +159,15 @@ Release; nothing is submitted to the stores.
 
 ## Loading the build by hand
 
-- **Chrome**: `chrome://extensions`, turn on "Developer mode", "Load unpacked", pick
-  `.output/chrome-mv3`. On-device AI is off by default so Chrome does not log warnings on browsers
-  where Gemini Nano is disabled; if you enable "Use on-device AI when available" in TabDeclutter's
-  settings while Chrome's built-in AI is disabled, `chrome://extensions` may show two harmless
-  browser-level notices under "Errors" (`On-device AI is disabled in Chrome settings…` and `The
-feature flag gating model execution was disabled`). You can enable on-device AI at
+- **Chrome**: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and
+  pick `.output/chrome-mv3`. On-device AI is off by default so Chrome does not log warnings on
+  browsers where Gemini Nano is disabled; if you enable _"Use built-in on-device AI (optional)"_ in
+  TabDeclutter's settings while Chrome's built-in AI is disabled, `chrome://extensions` may show two
+  harmless browser-level notices under "Errors" (`On-device AI is disabled in Chrome settings…` and
+  `The feature flag gating model execution was disabled`). You can enable on-device AI at
   `chrome://settings/ai`.
-- **Firefox**: `about:debugging#/runtime/this-firefox`, "Load Temporary Add-on", pick
-  `.output/firefox-mv3/manifest.json`. A temporary add-on is removed when Firefox closes.
+- **Firefox**: open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**, and
+  pick `.output/firefox-mv3/manifest.json`. A temporary add-on is removed when Firefox closes.
 
 ## Development
 
@@ -93,7 +176,9 @@ pnpm dev             # Chrome, with hot reload
 pnpm dev:firefox     # Firefox
 pnpm lint            # eslint + prettier --check
 pnpm typecheck       # wxt prepare + tsc --noEmit
-pnpm test            # unit tests (vitest)
+pnpm test            # unit & extension tests (vitest)
+pnpm e2e             # Chromium E2E tests (Playwright)
+pnpm e2e:firefox     # Firefox E2E tests (Puppeteer WebDriver BiDi)
 pnpm perf            # the time budgets of PLAN.md §11, alone and without coverage
 pnpm lint:firefox    # web-ext lint on the Firefox build (run pnpm build:firefox first)
 ```
