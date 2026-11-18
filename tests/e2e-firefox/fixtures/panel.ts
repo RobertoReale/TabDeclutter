@@ -169,7 +169,7 @@ async function pastFirstRun(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await browser.storage.local.set({
       onboarded: true,
-      settings: { autoDeclutter: false, autoOrganize: false },
+      settings: { autoDeclutter: false, autoOrganize: false, useTabGroups: true },
     });
   });
   await navigate(page, PANEL_URL);

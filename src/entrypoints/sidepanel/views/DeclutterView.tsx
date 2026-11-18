@@ -352,36 +352,36 @@ export function DeclutterView({ language }: { language: string }) {
 
   return (
     <>
-      <p class="td-view-intro">{t('declutterIntro')}</p>
-
-      <div class="td-autopilot-card">
-        <label class="td-check">
-          <input
-            type="checkbox"
-            checked={settings.value.autoDeclutter}
-            onChange={(event) => {
-              setSetting('autoDeclutter', event.currentTarget.checked);
-            }}
-          />
-          <span>{t('autopilotDeclutter')}</span>
-        </label>
-        {closeTabIds.length > 0 && (
-          <button
-            type="button"
-            class="td-action td-action-primary"
-            onClick={() => {
-              requestClose(closeTabIds);
-            }}
-          >
-            {t('declutterCloseRecommended', formatCount(closeTabIds.length, language))}
-          </button>
-        )}
-      </div>
-
       {list.total === 0 && !hasGhosts ? (
         <EmptyState text={t('declutterEmpty')} />
       ) : (
         <>
+          <p class="td-view-intro">{t('declutterIntro')}</p>
+
+          <div class="td-autopilot-card">
+            <label class="td-check">
+              <input
+                type="checkbox"
+                checked={settings.value.autoDeclutter}
+                onChange={(event) => {
+                  setSetting('autoDeclutter', event.currentTarget.checked);
+                }}
+              />
+              <span>{t('autopilotDeclutter')}</span>
+            </label>
+            {closeTabIds.length > 0 && (
+              <button
+                type="button"
+                class="td-action td-action-primary"
+                onClick={() => {
+                  requestClose(closeTabIds);
+                }}
+              >
+                {t('declutterCloseRecommended', formatCount(closeTabIds.length, language))}
+              </button>
+            )}
+          </div>
+
           <HealthBar review={list.total} total={tabCount.value} language={language} />
 
           {list.windows.map((window) => (

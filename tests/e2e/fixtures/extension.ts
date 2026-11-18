@@ -97,7 +97,7 @@ async function markOnboarded(context: BrowserContext): Promise<void> {
   await worker.evaluate(() =>
     (globalThis as unknown as StorageApi).chrome.storage.local.set({
       onboarded: true,
-      settings: { autoDeclutter: false, autoOrganize: false },
+      settings: { autoDeclutter: false, autoOrganize: false, useTabGroups: true },
     }),
   );
 }

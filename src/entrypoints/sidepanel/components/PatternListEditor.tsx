@@ -32,7 +32,7 @@ export function PatternListEditor({ language }: { language: string }) {
   const dirty = text !== stored;
   const urls = tabs.value.map((tab) => tabUrl(tab));
   const lines = reviewPatterns(text, urls).filter(
-    (line) => !line.blank && (line.error !== undefined || line.matches > 0),
+    (line) => !line.blank && (dirty || line.error !== undefined || line.matches > 0),
   );
 
   function save(): void {
