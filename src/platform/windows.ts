@@ -16,9 +16,25 @@
  *      single coherent theme, consolidating stray single-tab windows.
  */
 
+import { isAuthUrl, isBlankUrl } from '../core/classify';
 import { proposeGroups, siteKey, type ClusterMode } from '../core/cluster';
+import { tabUrl } from '../core/duplicates';
 import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '../core/types';
 import { asTabInfos, attempt, NO_WINDOW, type BrowserTab } from './tabs';
+
+/**
+ * A tab that may be safely moved between windows or reordered:
+ * - never pinned tabs
+ * - never tabs that are still loading (`url === ''`)
+ * - never blank / New Tab pages (`chrome://newtab`, `about:blank`) while the user may be typing in the address bar
+ * - never OAuth / sign-in pages (`isAuthUrl`) which often open in dedicated popup windows
+ */
+function isMovableTab(tab: TabInfo): boolean {
+  if (tab.pinned) return false;
+  const url = tabUrl(tab);
+  if (url === '' || isBlankUrl(url) || isAuthUrl(url)) return false;
+  return true;
+}
 
 export interface WindowsOrganizeApi {
   tabs: {
@@ -127,22 +143,28 @@ async function mergeAndSortIntoOneWindow(
     windowCounts.set(tab.windowId, (windowCounts.get(tab.windowId) ?? 0) + 1);
   }
 
-  let targetWindowId = focusedWindowId;
-  if (targetWindowId === undefined || !windowCounts.has(targetWindowId)) {
-    targetWindowId = [...windowCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-  }
+  // Always merge into the primary window (the one with the most tabs, breaking ties in
+  // favour of `focusedWindowId`), so opening a small 1-tab window never pulls 20 tabs out
+  // of the main window into the small one.
+  const targetWindowId = [...windowCounts.entries()].sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    if (a[0] === focusedWindowId) return -1;
+    if (b[0] === focusedWindowId) return 1;
+    return a[0] - b[0];
+  })[0]?.[0];
   if (targetWindowId === undefined) return 0;
 
-  const movable = allTabs.filter((tab) => !tab.pinned);
-  const pinnedInTarget = allTabs.filter(
-    (tab) => tab.windowId === targetWindowId && tab.pinned,
+  const movable = allTabs.filter(isMovableTab);
+  if (movable.length === 0) return 0;
+  const unmovableInTarget = allTabs.filter(
+    (tab) => tab.windowId === targetWindowId && !isMovableTab(tab),
   ).length;
 
   const sortedIds = orderedTabIds(movable, clusterMode, targetWindowId);
 
   // Check if everything is already in targetWindowId in this exact order.
   const currentInTarget = allTabs
-    .filter((tab) => tab.windowId === targetWindowId && !tab.pinned)
+    .filter((tab) => tab.windowId === targetWindowId && isMovableTab(tab))
     .sort((a, b) => a.index - b.index)
     .map((tab) => tab.id);
 
@@ -154,7 +176,7 @@ async function mergeAndSortIntoOneWindow(
   }
 
   let moved = 0;
-  let nextIndex = pinnedInTarget;
+  let nextIndex = unmovableInTarget;
   for (const tabId of sortedIds) {
     const ok = await attempt(() =>
       api.tabs.move(tabId, { windowId: targetWindowId, index: nextIndex }),
@@ -177,7 +199,7 @@ async function splitIntoThematicWindows(
   focusedWindowId: number | undefined,
   api: WindowsOrganizeApi,
 ): Promise<{ readonly movedTabs: number; readonly windowsCount: number }> {
-  const movable = allTabs.filter((tab) => !tab.pinned);
+  const movable = allTabs.filter(isMovableTab);
   if (movable.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
   // Treat all movable tabs as a single pool (windowId: 1) so `proposeGroups` clusters
@@ -239,7 +261,22 @@ async function splitIntoThematicWindows(
 
   let movedTabs = 0;
   for (const slot of assignments) {
-    const [firstId, ...restIds] = slot.tabIds;
+    // Filter out the currently active tab of the focused window if this slot would move it
+    // into a different unfocused window, so we never yank a tab out from under the user.
+    const safeTabIds = slot.tabIds.filter((tabId) => {
+      const tab = byId.get(tabId);
+      if (tab === undefined) return false;
+      if (
+        tab.active &&
+        focusedWindowId !== undefined &&
+        tab.windowId === focusedWindowId &&
+        slot.windowId !== focusedWindowId
+      ) {
+        return false;
+      }
+      return true;
+    });
+    const [firstId, ...restIds] = safeTabIds;
     if (firstId === undefined) continue;
 
     let targetWindowId = slot.windowId;
@@ -266,31 +303,21 @@ async function splitIntoThematicWindows(
 
     // Check if the bucket's tabs are already in `existingWindowId` in order.
     const currentInWindow = allTabs
-      .filter((tab) => tab.windowId === existingWindowId && !tab.pinned)
+      .filter((tab) => tab.windowId === existingWindowId && isMovableTab(tab))
       .sort((a, b) => a.index - b.index)
       .map((tab) => tab.id);
     if (
-      currentInWindow.length === slot.tabIds.length &&
-      currentInWindow.every((id, i) => id === slot.tabIds[i])
+      currentInWindow.length === safeTabIds.length &&
+      currentInWindow.every((id, i) => id === safeTabIds[i])
     ) {
       continue;
     }
 
-    const pinnedCount = allTabs.filter(
-      (tab) => tab.windowId === existingWindowId && tab.pinned,
+    const unmovableCount = allTabs.filter(
+      (tab) => tab.windowId === existingWindowId && !isMovableTab(tab),
     ).length;
-    let idx = pinnedCount;
-    for (const tabId of slot.tabIds) {
-      // Do not steal the active tab of the focused window into another window while the user is looking at it.
-      const tab = byId.get(tabId);
-      if (
-        tab !== undefined &&
-        tab.active &&
-        tab.windowId === focusedWindowId &&
-        existingWindowId !== focusedWindowId
-      ) {
-        continue;
-      }
+    let idx = unmovableCount;
+    for (const tabId of safeTabIds) {
       const moved = await attempt(() =>
         api.tabs.move(tabId, { windowId: existingWindowId, index: idx }),
       );

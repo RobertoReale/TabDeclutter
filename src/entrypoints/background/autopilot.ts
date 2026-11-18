@@ -10,7 +10,8 @@
 import { proposeGroups } from '@/core/cluster';
 import { compile } from '@/core/patterns';
 import { scoreTabs } from '@/core/scoring';
-import { STARTUP_GRACE_MS } from '@/core/types';
+import { DAY, HOUR } from '@/core/time';
+import { STARTUP_GRACE_MS, type ScoredTab, type Settings, type TabInfo } from '@/core/types';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import { applyGroups } from '@/platform/groups';
 import {
@@ -132,9 +133,13 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       }
 
       const byId = new Map(tabs.map((tab) => [tab.id, tab]));
-      const closeCandidates = scoring.tabs.filter(
-        (scored) => scored.bucket === 'close' && !forgottenIds.has(scored.windowId),
-      );
+      const staleMs = Math.max(1, settings.staleDays) * DAY;
+      const closeCandidates = scoring.tabs.filter((scored) => {
+        if (scored.bucket !== 'close' || forgottenIds.has(scored.windowId)) return false;
+        const tab = byId.get(scored.tabId);
+        if (tab === undefined) return false;
+        return isSafeToAutoClose(tab, scored, settings, staleMs);
+      });
       const toClose = closeCandidates
         .map((scored) => byId.get(scored.tabId))
         .filter((tab) => tab !== undefined);
@@ -193,13 +198,9 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   }
 
   browser.tabs.onCreated.addListener(schedule);
-  browser.tabs.onUpdated.addListener(
-    (_tabId: number, change: { status?: string; url?: string }) => {
-      if (change.status === 'complete' || change.url !== undefined) schedule();
-    },
-  );
-  browser.tabs.onActivated.addListener(schedule);
-  browser.windows.onFocusChanged.addListener(schedule);
+  browser.tabs.onUpdated.addListener((_tabId: number, change: { status?: string }) => {
+    if (change.status === 'complete') schedule();
+  });
 
   browser.storage.onChanged.addListener((changes: Record<string, unknown>, area: string) => {
     if (area !== 'local') return;
@@ -252,6 +253,63 @@ interface AutopilotApi {
 
 function api(): AutopilotApi {
   return browser as unknown as AutopilotApi;
+}
+
+/**
+ * Guardrails for background automatic tab closing (`autoDeclutter`):
+ * ensures Autopilot never closes a tab the user may still be working on.
+ */
+export function isSafeToAutoClose(
+  tab: TabInfo,
+  scored: ScoredTab,
+  settings: Settings,
+  staleMs: number,
+): boolean {
+  if (tab.active || tab.pinned || tab.audible || tab.hidden || tab.incognito) return false;
+  const rawUrl = tab.url.trim();
+  if (rawUrl === '') return false;
+
+  const lower = rawUrl.toLowerCase();
+  // Never auto-close local files or extension document viewers (Office / PDF viewers).
+  if (
+    lower.startsWith('file:') ||
+    lower.startsWith('chrome-extension:') ||
+    lower.startsWith('moz-extension:')
+  ) {
+    return false;
+  }
+
+  // Never auto-close OAuth / sign-in pages in the background while a login might be in progress.
+  if (scored.pageType === 'auth') return false;
+
+  // Never auto-close local development servers (localhost / 127.0.0.1 / [::1]).
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host === '127.0.0.1' ||
+      host === '[::1]'
+    ) {
+      return false;
+    }
+  } catch {
+    // Non-standard URL (e.g. about:blank), handled below.
+  }
+
+  // Abandoned empty tabs (`about:blank`, `chrome://newtab`) idle for over 1 hour are safe to close.
+  if (scored.primaryReason === 'blank') {
+    return scored.idleMs > HOUR;
+  }
+
+  // Exact duplicates are only auto-closed when duplicate protection is set to automatic mode.
+  if (scored.primaryReason === 'duplicate') {
+    return settings.guard.mode === 'auto';
+  }
+
+  // Every other page (articles, videos, searches, etc.) is only auto-closed in the background
+  // once it has genuinely been untouched for at least the user's configured `staleDays`.
+  return scored.idleMs >= staleMs;
 }
 
 function failed(error: unknown): void {
