@@ -458,11 +458,50 @@ button {
   border: 1px solid var(--td-border);
   border-radius: var(--td-radius);
   cursor: pointer;
+  transition:
+    border-color var(--td-duration) var(--td-ease),
+    background-color var(--td-duration) var(--td-ease);
+}
+
+.td-mode-card:has(input:checked) {
+  border-color: var(--td-accent);
+  background: var(--td-accent-subtle);
 }
 
 .td-mode-card input {
   margin-top: 3px;
   accent-color: var(--td-accent);
+}
+
+.td-settings-card {
+  margin-top: var(--td-space-3);
+  padding: var(--td-space-3);
+  background: var(--td-raised);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+}
+
+.td-settings-card > .td-settings-group:first-child {
+  margin-top: 0;
+}
+
+.td-advanced-details {
+  margin-top: var(--td-space-3);
+  padding: var(--td-space-2) var(--td-space-3);
+  background: var(--td-raised);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+}
+
+.td-advanced-summary {
+  font-weight: 500;
+  color: var(--td-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.td-advanced-body {
+  margin-top: var(--td-space-2);
 }
 
 .td-action {

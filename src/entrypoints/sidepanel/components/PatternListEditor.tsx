@@ -31,7 +31,9 @@ export function PatternListEditor({ language }: { language: string }) {
   const text = draft.value ?? stored;
   const dirty = text !== stored;
   const urls = tabs.value.map((tab) => tabUrl(tab));
-  const lines = reviewPatterns(text, urls).filter((line) => !line.blank);
+  const lines = reviewPatterns(text, urls).filter(
+    (line) => !line.blank && (line.error !== undefined || line.matches > 0),
+  );
 
   function save(): void {
     if (!dirty) return;
@@ -83,22 +85,28 @@ export function PatternListEditor({ language }: { language: string }) {
         </button>
       </div>
 
-      {/* The validation and the preview, live as the lines are typed. */}
-      <ul class="td-pattern-lines" aria-live="polite">
-        {lines.map((line) => (
-          <li
-            key={line.number}
-            class={line.error === undefined ? 'td-pattern-line' : 'td-pattern-line td-pattern-bad'}
-          >
-            <span class="td-pattern-line-number">{t('whitelistLine', String(line.number))}</span>{' '}
-            <span class="td-pattern-line-note">
-              {line.error === undefined
-                ? matchesText(line.matches, t, language)
-                : t('whitelistIgnored', patternErrorText(line.error.code, t))}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {/* Only show lines that have a syntax error or actually match open tabs. */}
+      {lines.length > 0 && (
+        <ul class="td-pattern-lines" aria-live="polite">
+          {lines.map((line) => (
+            <li
+              key={line.number}
+              class={
+                line.error === undefined ? 'td-pattern-line' : 'td-pattern-line td-pattern-bad'
+              }
+            >
+              <span class="td-pattern-line-number">
+                {t('whitelistLine', String(line.number))} ({line.text}):
+              </span>{' '}
+              <span class="td-pattern-line-note">
+                {line.error === undefined
+                  ? matchesText(line.matches, t, language)
+                  : t('whitelistIgnored', patternErrorText(line.error.code, t))}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -38,65 +38,33 @@ export function DuplicateSettingsView({ language }: { language: string }) {
     <section class="td-settings">
       <h2 class="td-section-title">{t('settingsDuplicates')}</h2>
 
-      <h3 class="td-settings-group">{t('guardGroupBehaviour')}</h3>
-      <ChoiceField
-        label="guardFieldMode"
-        choices={MODE_CHOICES}
-        value={guard.mode}
-        onPick={(value) => {
-          setGuardOption('mode', value);
-        }}
-      />
-      <ChoiceField
-        label="guardFieldAfter"
-        choices={AFTER_CHOICES}
-        value={guard.after}
-        onPick={(value) => {
-          setGuardOption('after', value);
-        }}
-      />
-      <ChoiceField
-        label="guardFieldScope"
-        choices={SCOPE_CHOICES}
-        value={guard.scope}
-        onPick={(value) => {
-          setGuardOption('scope', value);
-        }}
-      />
-
-      <h3 class="td-settings-group">{t('guardGroupPriority')}</h3>
-      <p class="td-field-hint">{t('guardGroupPriorityHint')}</p>
-      <ChoiceField
-        label="guardFieldKeep"
-        choices={KEEP_CHOICES}
-        value={guard.keep}
-        onPick={(value) => {
-          setGuardOption('keep', value);
-        }}
-      />
-      {visibleGuardToggles(caps).map((row) => (
-        <CheckField
-          key={row.id}
-          label={row.label}
-          value={guard[row.id]}
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('guardGroupBehaviour')}</h3>
+        <ChoiceField
+          label="guardFieldMode"
+          choices={MODE_CHOICES}
+          value={guard.mode}
           onPick={(value) => {
-            setGuardOption(row.id, value);
+            setGuardOption('mode', value);
           }}
         />
-      ))}
-
-      <h3 class="td-settings-group">{t('guardGroupMatch')}</h3>
-      <p class="td-field-hint">{t('guardGroupMatchHint')}</p>
-      {MATCH_TOGGLES.map((row) => (
-        <CheckField
-          key={row.id}
-          label={row.label}
-          value={match[row.id]}
+        <ChoiceField
+          label="guardFieldScope"
+          choices={SCOPE_CHOICES}
+          value={guard.scope}
           onPick={(value) => {
-            setMatchOption(row.id, value);
+            setGuardOption('scope', value);
           }}
         />
-      ))}
+        <ChoiceField
+          label="guardFieldKeep"
+          choices={KEEP_CHOICES}
+          value={guard.keep}
+          onPick={(value) => {
+            setGuardOption('keep', value);
+          }}
+        />
+      </div>
 
       {/* §8.6. A live region: a warning that appears because of the change just made. */}
       <div class="td-warnings" role="status" aria-live="polite">
@@ -107,9 +75,53 @@ export function DuplicateSettingsView({ language }: { language: string }) {
         ))}
       </div>
 
-      <h3 class="td-settings-group">{t('guardGroupWhitelist')}</h3>
-      <p class="td-field-hint">{t('guardGroupWhitelistHint')}</p>
-      <PatternListEditor language={language} />
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('guardGroupWhitelist')}</h3>
+        <p class="td-field-hint">{t('guardGroupWhitelistHint')}</p>
+        <PatternListEditor language={language} />
+      </div>
+
+      <details class="td-advanced-details">
+        <summary class="td-advanced-summary">
+          {t('guardGroupPriority')} · {t('guardGroupMatch')}
+        </summary>
+        <div class="td-advanced-body">
+          <ChoiceField
+            label="guardFieldAfter"
+            choices={AFTER_CHOICES}
+            value={guard.after}
+            onPick={(value) => {
+              setGuardOption('after', value);
+            }}
+          />
+
+          <h3 class="td-settings-group">{t('guardGroupPriority')}</h3>
+          <p class="td-field-hint">{t('guardGroupPriorityHint')}</p>
+          {visibleGuardToggles(caps).map((row) => (
+            <CheckField
+              key={row.id}
+              label={row.label}
+              value={guard[row.id]}
+              onPick={(value) => {
+                setGuardOption(row.id, value);
+              }}
+            />
+          ))}
+
+          <h3 class="td-settings-group">{t('guardGroupMatch')}</h3>
+          <p class="td-field-hint">{t('guardGroupMatchHint')}</p>
+          {MATCH_TOGGLES.map((row) => (
+            <CheckField
+              key={row.id}
+              label={row.label}
+              value={match[row.id]}
+              onPick={(value) => {
+                setMatchOption(row.id, value);
+              }}
+            />
+          ))}
+        </div>
+      </details>
     </section>
   );
 }

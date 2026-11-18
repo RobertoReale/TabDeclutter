@@ -87,129 +87,139 @@ function MainSettings({ language }: { language: string }) {
     <section class="td-settings">
       <h2 class="td-section-title">{t('navSettings')}</h2>
 
-      <h3 class="td-settings-group">{t('autopilotTitle')}</h3>
-      <p class="td-field-hint">{t('autopilotHint')}</p>
-      <CheckField
-        label="autopilotDeclutter"
-        value={current.autoDeclutter}
-        onPick={(value) => {
-          setSetting('autoDeclutter', value);
-        }}
-      />
-      <CheckField
-        label="autopilotOrganize"
-        value={current.autoOrganize}
-        onPick={(value) => {
-          setSetting('autoOrganize', value);
-        }}
-      />
-
-      <h3 class="td-settings-group">{t('settingsGroupSuggestions')}</h3>
-      <NumberField
-        label="settingsFieldStale"
-        choices={durationChoices(STALE_DAYS, current.staleDays, IN_DAYS, language)}
-        value={current.staleDays}
-        onPick={(value) => {
-          setSetting('staleDays', value);
-        }}
-      />
-      <NumberField
-        label="settingsFieldGrace"
-        choices={durationChoices(GRACE_MS, current.graceMs, IN_MS, language)}
-        value={current.graceMs}
-        onPick={(value) => {
-          setSetting('graceMs', value);
-        }}
-      />
-      <CheckField
-        label="settingsBookmarks"
-        hint="settingsBookmarksHint"
-        value={current.useBookmarks && bookmarksGranted.value}
-        onPick={setUseBookmarks}
-      />
-      {current.useTabGroups && (
-        <>
-          <CheckField
-            label="windowUseTabGroups"
-            hint="windowUseTabGroupsHint"
-            value={current.useTabGroups}
-            onPick={(value) => {
-              setSetting('useTabGroups', value);
-            }}
-          />
-          <CheckField
-            label="settingsIncludeGrouped"
-            hint="settingsIncludeGroupedHint"
-            value={current.includeGroupedTabs}
-            onPick={(value) => {
-              setSetting('includeGroupedTabs', value);
-            }}
-          />
-          <CheckField
-            label="matchIgnoreHash"
-            hint="settingsIgnoreHashHint"
-            value={match.ignoreHash}
-            onPick={(value) => {
-              setMatchOption('ignoreHash', value);
-            }}
-          />
-        </>
-      )}
-      {/* A refusal is the browser's answer, so the page says what became of the choice. */}
-      <div class="td-warnings" role="status" aria-live="polite">
-        {bookmarksDenied.value && <p class="td-warning">{t('settingsBookmarksDenied')}</p>}
-      </div>
-
-      <h3 class="td-settings-group">{t('settingsGroupProtected')}</h3>
-      <p class="td-field-hint">{t('settingsProtectedHint')}</p>
-      <ProtectedSites />
-
-      <h3 class="td-settings-group">{t('settingsGroupGeneral')}</h3>
-      <ChoiceField
-        label="settingsFieldLanguage"
-        choices={LANGUAGE_CHOICES}
-        value={current.language}
-        onPick={(value: LanguageSetting) => {
-          setSetting('language', value);
-        }}
-      />
-      <NumberField
-        label="settingsFieldRetention"
-        choices={durationChoices(RETENTION_DAYS, current.archiveRetentionDays, IN_DAYS, language)}
-        value={current.archiveRetentionDays}
-        onPick={(value) => {
-          setSetting('archiveRetentionDays', value);
-        }}
-      />
-      <CheckField
-        label="settingsShowBadge"
-        value={current.showBadge}
-        onPick={(value) => {
-          setSetting('showBadge', value);
-        }}
-      />
-      {/* §5.5: no switch where there is no Prompt API — and only probe availability when enabled. */}
-      {caps.promptApi && availability.value !== 'unsupported' && (
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('autopilotTitle')}</h3>
+        <p class="td-field-hint">{t('autopilotHint')}</p>
         <CheckField
-          label="settingsUseAi"
-          value={current.useOnDeviceAi}
+          label="autopilotDeclutter"
+          value={current.autoDeclutter}
           onPick={(value) => {
-            setSetting('useOnDeviceAi', value);
+            setSetting('autoDeclutter', value);
           }}
         />
-      )}
-      {current.useOnDeviceAi && aiState !== null && <p class="td-field-hint">{t(aiState)}</p>}
+        <CheckField
+          label="autopilotOrganize"
+          value={current.autoOrganize}
+          onPick={(value) => {
+            setSetting('autoOrganize', value);
+          }}
+        />
+      </div>
 
-      <h3 class="td-settings-group">{t('settingsDuplicates')}</h3>
-      <button
-        type="button"
-        class="td-link-button"
-        onClick={() => {
-          settingsPage.value = 'duplicates';
-        }}
-      >
-        {t('settingsOpenDuplicates')}
-      </button>
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('settingsGroupSuggestions')}</h3>
+        <NumberField
+          label="settingsFieldStale"
+          choices={durationChoices(STALE_DAYS, current.staleDays, IN_DAYS, language)}
+          value={current.staleDays}
+          onPick={(value) => {
+            setSetting('staleDays', value);
+          }}
+        />
+        <NumberField
+          label="settingsFieldGrace"
+          choices={durationChoices(GRACE_MS, current.graceMs, IN_MS, language)}
+          value={current.graceMs}
+          onPick={(value) => {
+            setSetting('graceMs', value);
+          }}
+        />
+        <CheckField
+          label="settingsBookmarks"
+          hint="settingsBookmarksHint"
+          value={current.useBookmarks && bookmarksGranted.value}
+          onPick={setUseBookmarks}
+        />
+        {current.useTabGroups && (
+          <>
+            <CheckField
+              label="windowUseTabGroups"
+              hint="windowUseTabGroupsHint"
+              value={current.useTabGroups}
+              onPick={(value) => {
+                setSetting('useTabGroups', value);
+              }}
+            />
+            <CheckField
+              label="settingsIncludeGrouped"
+              hint="settingsIncludeGroupedHint"
+              value={current.includeGroupedTabs}
+              onPick={(value) => {
+                setSetting('includeGroupedTabs', value);
+              }}
+            />
+            <CheckField
+              label="matchIgnoreHash"
+              hint="settingsIgnoreHashHint"
+              value={match.ignoreHash}
+              onPick={(value) => {
+                setMatchOption('ignoreHash', value);
+              }}
+            />
+          </>
+        )}
+        {/* A refusal is the browser's answer, so the page says what became of the choice. */}
+        <div class="td-warnings" role="status" aria-live="polite">
+          {bookmarksDenied.value && <p class="td-warning">{t('settingsBookmarksDenied')}</p>}
+        </div>
+      </div>
+
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('settingsGroupProtected')}</h3>
+        <p class="td-field-hint">{t('settingsProtectedHint')}</p>
+        <ProtectedSites />
+      </div>
+
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('settingsGroupGeneral')}</h3>
+        <ChoiceField
+          label="settingsFieldLanguage"
+          choices={LANGUAGE_CHOICES}
+          value={current.language}
+          onPick={(value: LanguageSetting) => {
+            setSetting('language', value);
+          }}
+        />
+        <NumberField
+          label="settingsFieldRetention"
+          choices={durationChoices(RETENTION_DAYS, current.archiveRetentionDays, IN_DAYS, language)}
+          value={current.archiveRetentionDays}
+          onPick={(value) => {
+            setSetting('archiveRetentionDays', value);
+          }}
+        />
+        <CheckField
+          label="settingsShowBadge"
+          value={current.showBadge}
+          onPick={(value) => {
+            setSetting('showBadge', value);
+          }}
+        />
+        {/* §5.5: no switch where there is no Prompt API — and only probe availability when enabled. */}
+        {caps.promptApi && availability.value !== 'unsupported' && (
+          <CheckField
+            label="settingsUseAi"
+            value={current.useOnDeviceAi}
+            onPick={(value) => {
+              setSetting('useOnDeviceAi', value);
+            }}
+          />
+        )}
+        {current.useOnDeviceAi && aiState !== null && <p class="td-field-hint">{t(aiState)}</p>}
+      </div>
+
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('settingsDuplicates')}</h3>
+        <button
+          type="button"
+          class="td-action td-action-primary"
+          onClick={() => {
+            settingsPage.value = 'duplicates';
+          }}
+        >
+          {t('settingsOpenDuplicates')}
+        </button>
+      </div>
     </section>
   );
 }
