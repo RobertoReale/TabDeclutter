@@ -23,7 +23,7 @@ import {
   readSettings,
   settingsItem,
 } from '@/platform/storage';
-import { closeTabs, closeWindow, queryTabs } from '@/platform/tabs';
+import { activateTab, closeTabs, closeWindow, queryTabs } from '@/platform/tabs';
 import { organizeWindows } from '@/platform/windows';
 
 const AUTOPILOT_DEBOUNCE_MS = 2_500;
@@ -132,14 +132,29 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       }
 
       const byId = new Map(tabs.map((tab) => [tab.id, tab]));
-      const toClose = scoring.tabs
-        .filter((scored) => scored.bucket === 'close' && !forgottenIds.has(scored.windowId))
+      const closeCandidates = scoring.tabs.filter(
+        (scored) => scored.bucket === 'close' && !forgottenIds.has(scored.windowId),
+      );
+      const toClose = closeCandidates
         .map((scored) => byId.get(scored.tabId))
         .filter((tab) => tab !== undefined);
 
       if (toClose.length > 0) {
+        const closingIds = new Set(toClose.map((tab) => tab.id));
+        let keptToActivate: { readonly id: number; readonly windowId: number } | undefined;
+        for (const scored of closeCandidates) {
+          for (const reason of scored.reasons) {
+            if (reason.code === 'duplicate' && !closingIds.has(reason.keptTabId)) {
+              const kept = byId.get(reason.keptTabId);
+              if (kept !== undefined) keptToActivate = kept;
+            }
+          }
+        }
         const archived = await closeTabs(toClose, at, { reason: 'manual', capabilities });
         closedTabs = archived.length;
+        if (keptToActivate !== undefined) {
+          await activateTab(keptToActivate.id, keptToActivate.windowId).catch(ignore);
+        }
       }
 
       if ((closedTabs > 0 || closedWindows > 0) && flash !== undefined) {

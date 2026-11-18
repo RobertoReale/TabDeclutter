@@ -20,9 +20,16 @@ import { computed, signal } from '@preact/signals';
 import type { Safeguards } from '@/core/actions';
 import { safeguardsFor } from '@/core/actions';
 import type { TabInfo } from '@/core/types';
-import { closeTabs, closeWindow, discardTab, keepTab, restoreTabs } from '@/platform/tabs';
+import {
+  activateTab,
+  closeTabs,
+  closeWindow,
+  discardTab,
+  keepTab,
+  restoreTabs,
+} from '@/platform/tabs';
 import { deselectTabs, selectTabs, selectedIds } from './selection';
-import { panelData } from './tabs';
+import { panelData, scoring } from './tabs';
 import { rememberClose, takeClose } from './undo';
 
 /** A close, with what §9 says about it. */
@@ -123,10 +130,31 @@ export function cancelClose(): void {
 async function close(pending: PendingClose): Promise<void> {
   const { safeguards, windowId } = pending;
   const at = Date.now();
+  const openTabs = panelData.value?.tabs ?? [];
+  const byId = new Map(openTabs.map((tab) => [tab.id, tab]));
+  const closingIds = new Set(safeguards.tabs.map((tab) => tab.id));
+
+  let keptToActivate: TabInfo | undefined;
+  if (windowId === undefined) {
+    for (const scored of scoring.value.tabs) {
+      if (!closingIds.has(scored.tabId)) continue;
+      for (const reason of scored.reasons) {
+        if (reason.code === 'duplicate' && !closingIds.has(reason.keptTabId)) {
+          const kept = byId.get(reason.keptTabId);
+          if (kept !== undefined) keptToActivate = kept;
+        }
+      }
+    }
+  }
+
   const entries =
     windowId === undefined
       ? await closeTabs(safeguards.tabs, at)
-      : await closeWindow(windowId, panelData.value?.tabs ?? [], at);
+      : await closeWindow(windowId, openTabs, at);
+
+  if (keptToActivate !== undefined) {
+    await activateTab(keptToActivate.id, keptToActivate.windowId).catch(() => undefined);
+  }
 
   deselectTabs(ids(safeguards.tabs));
   // Even an empty close arms the toast, so a close that archived nothing still says so

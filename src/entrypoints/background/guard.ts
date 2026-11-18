@@ -193,10 +193,12 @@ function createIndex(tabs: readonly TabInfo[], keyOptions: DuplicateOptions): Gu
   for (const tab of tabs) {
     index.put(tab);
     // A tab found by `tabs.query` rather than watched into existence has had its URL for as
-    // long as this worker knows anything, which is what §8.4.3.2 means by navigated. The
-    // event being handled corrects this for its own tab, so a tab created while the worker
-    // was down still keeps the background-opening exception.
-    navigated.add(tab.id);
+    // long as this worker knows anything, unless it is still on a blank / new-tab page.
+    if (isBlankUrl(tabUrl(tab))) {
+      awaiting.add(tab.id);
+    } else {
+      navigated.add(tab.id);
+    }
   }
   return index;
 }
@@ -400,7 +402,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     }
 
     const blank = isBlankUrl(tabUrl(tab));
-    remember(current, tab, origin, blank);
+    remember(current, tab, origin, blank, loaded.keyOptions);
     // §8.2: a tab with no address of its own is nobody's duplicate yet, and the first
     // `onUpdated` with a URL will bring it back here. Only when the user left "Ignora
     // schede vuote" on, which is what decides whether an empty tab can be closed at all.
@@ -415,7 +417,13 @@ export function registerGuard(options: GuardOptions = {}): Guard {
    * Updates what the index knows about the tab the event is about, including the one thing
    * the browser never says: whether the tab reached this URL by navigating (§8.4.3.2).
    */
-  function remember(current: GuardIndex, tab: TabInfo, origin: Origin, blank: boolean): void {
+  function remember(
+    current: GuardIndex,
+    tab: TabInfo,
+    origin: Origin,
+    blank: boolean,
+    keyOptions: DuplicateOptions,
+  ): void {
     const url = tabUrl(tab);
     // What the browser said about this tab last time, read before `put` overwrites it.
     const before = current.knownUrl(tab.id);
@@ -423,18 +431,21 @@ export function registerGuard(options: GuardOptions = {}): Guard {
 
     // Firefox has no `pendingUrl` (PLAN.md §5.5): every tab is created on `about:blank` and
     // its address arrives with the first `onUpdated`, so that URL is the creation finishing
-    // rather than a navigation. Counting it as one would make a link opened in the
-    // foreground close the tab it came from — the unintuitive behaviour §8.4.3.2 names.
-    const arriving = current.awaiting.has(tab.id);
+    // rather than a navigation. On Chrome too, navigating away from `chrome://newtab` is the
+    // initial opening of a page in a new tab.
+    const arriving = current.awaiting.has(tab.id) || (before !== undefined && isBlankUrl(before));
     if (blank) current.awaiting.add(tab.id);
     else current.awaiting.delete(tab.id);
 
-    // An `onUpdated` carrying the URL the tab already had is the same thing one step later:
-    // the load of the page it was created on finishing. Chrome reports a duplicated tab
-    // that way — created with its URL, then `loading` and `complete` on that same URL — and
-    // counting it as a navigation would both lose §8.6's exemption and, if the copy is the
-    // active tab, make rule 2 close the tab it was copied from (`docs/DECISIONS.md`, M3b.5).
-    const moved = url !== before;
+    // An `onUpdated` carrying the URL the tab already had (or a canonical redirect of the
+    // same duplicateKey, such as http -> https or adding www.) is the load of the page it
+    // was created on finishing.
+    const samePage =
+      before !== undefined &&
+      !isBlankUrl(before) &&
+      duplicateKey(url, keyOptions, tab.cookieStoreId) ===
+        duplicateKey(before, keyOptions, tab.cookieStoreId);
+    const moved = url !== before && !samePage;
 
     if (origin === 'created') current.navigated.delete(tab.id);
     else if (origin === 'navigated' && !arriving && moved) current.navigated.add(tab.id);
@@ -457,9 +468,16 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     ]);
 
     const createdAt: Record<number, number> = {};
+    const hasActivity = Object.keys(activity).length > 0;
     for (const known of [tab, ...candidates]) {
       const record = activity[known.id];
-      if (record !== undefined) createdAt[known.id] = record.createdAt;
+      if (record !== undefined) {
+        createdAt[known.id] = record.createdAt;
+      } else if (hasActivity) {
+        // The activity tracker debounces storage writes by 1 s, so a newly created tab is
+        // not in `local:activity` yet when the guard runs: its creation timestamp is `at`.
+        createdAt[known.id] = at;
+      }
     }
 
     const ctx: GuardContext = {
@@ -579,7 +597,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
       kept = { ...kept, windowId: closed.windowId, index: closed.index };
     }
 
-    if (resolution.after !== 'none') {
+    if (resolution.after !== 'none' || closed.active) {
       await activate(kept);
       kept = { ...kept, active: true };
     }
@@ -666,6 +684,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     const byId = new Map(tabs.map((tab) => [tab.id, tab]));
     const targets: TabInfo[] = [];
     const duplicateOfUrl = new Map<number, string>();
+    let keptToActivate: TabInfo | undefined;
     for (const close of closes) {
       const target = byId.get(close.closeTabId);
       const keep = byId.get(close.keepTabId);
@@ -673,6 +692,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
       if (target === undefined || keep === undefined) continue;
       targets.push(target);
       duplicateOfUrl.set(target.id, tabUrl(keep));
+      if (target.active || keptToActivate === undefined) keptToActivate = keep;
     }
 
     const entries = await closeTabs(targets, at, {
@@ -682,6 +702,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
       capabilities,
     });
     for (const target of targets) current.drop(target.id);
+    if (keptToActivate !== undefined) await activate(keptToActivate);
     // §8.7: "undo goes through the icon menu", which reopens one tab — the last one closed.
     // Everything else stays reachable from the panel's "Annulla" and the Archive view.
     const last = entries.at(-1);
