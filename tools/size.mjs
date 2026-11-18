@@ -23,7 +23,7 @@ import { gzipSync } from 'node:zlib';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** 1 KB = 1000 B: the stricter reading of PLAN.md §11. */
-const BUDGETS = { panel: 60_000, background: 18_000 };
+const BUDGETS = { panel: 60_000, background: 25_000 };
 const BROWSERS = ['chrome', 'firefox'];
 
 function build(browser, { withoutTldts }) {

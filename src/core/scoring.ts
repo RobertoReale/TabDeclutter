@@ -427,8 +427,17 @@ function transientReason(fact: TabFacts, config: ScoringConfig): Reason | undefi
   switch (fact.type) {
     case 'search':
     case 'auth':
-    case 'browser-internal':
       return { code: fact.type, points: config.transientPoints };
+    case 'browser-internal':
+      // Extension document viewers (`chrome-extension://…` / `moz-extension://…`, e.g. Office
+      // or PDF viewers) are not browser settings pages and should not be treated as transient.
+      if (
+        fact.url.toLowerCase().startsWith('chrome-extension:') ||
+        fact.url.toLowerCase().startsWith('moz-extension:')
+      ) {
+        return undefined;
+      }
+      return { code: 'browser-internal', points: config.transientPoints };
     case 'error':
       return { code: 'error', points: config.errorPoints };
     default:

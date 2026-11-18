@@ -98,24 +98,23 @@ button {
 
 .td-header-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--td-space-2);
+  gap: var(--td-space-1) var(--td-space-2);
 }
 
 .td-title {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 100%;
   font-size: var(--td-text-section);
-  font-weight: 500;
-  /* The product name never wraps; the panel is never narrow enough to need it. */
+  font-weight: 600;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .td-counts {
+  flex: 1 0 auto;
   font-size: var(--td-text-meta);
   color: var(--td-text-muted);
+  white-space: nowrap;
 }
 
 .td-icon-button {
@@ -414,19 +413,56 @@ button {
 }
 
 /*
- * §4.3: the actions appear on hover or focus. They keep their space either way,
- * so a row does not reflow under the pointer, and `:focus-within` is what makes
- * them reachable with the keyboard alone.
+ * §4.3: row actions are always visible with subtle emphasis and full emphasis on hover/focus,
+ * so the user immediately sees Go, Keep and Close without having to hunt with the mouse.
  */
 .td-row-actions {
   margin-left: auto;
-  opacity: 0;
-  transition: opacity var(--td-duration) var(--td-ease);
+  opacity: 1;
+  display: inline-flex;
+  gap: var(--td-space-1);
 }
 
-.td-row:hover .td-row-actions,
-.td-row:focus-within .td-row-actions {
-  opacity: 1;
+.td-view-intro {
+  margin-bottom: var(--td-space-2);
+  font-size: var(--td-text-meta);
+  color: var(--td-text-muted);
+}
+
+.td-autopilot-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--td-space-2);
+  margin-bottom: var(--td-space-3);
+  padding: var(--td-space-2) var(--td-space-3);
+  background: var(--td-raised);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+}
+
+.td-window-modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--td-space-2);
+  margin-bottom: var(--td-space-3);
+}
+
+.td-mode-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--td-space-2);
+  padding: var(--td-space-2) var(--td-space-3);
+  background: var(--td-raised);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+  cursor: pointer;
+}
+
+.td-mode-card input {
+  margin-top: 3px;
+  accent-color: var(--td-accent);
 }
 
 .td-action {
@@ -673,6 +709,7 @@ button {
 .td-guard {
   position: relative;
   flex: none;
+  margin-left: auto;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -900,12 +937,6 @@ button {
   flex-wrap: wrap;
   gap: var(--td-space-2);
   margin-top: var(--td-space-2);
-}
-
-.td-pattern-import {
-  display: block;
-  margin-top: var(--td-space-1);
-  padding-left: 0;
 }
 
 .td-pattern-lines {

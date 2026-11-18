@@ -38,8 +38,6 @@ export function DuplicateSettingsView({ language }: { language: string }) {
     <section class="td-settings">
       <h2 class="td-section-title">{t('settingsDuplicates')}</h2>
 
-      <p class="td-note">{t('guardCoexistence')}</p>
-
       <h3 class="td-settings-group">{t('guardGroupBehaviour')}</h3>
       <ChoiceField
         label="guardFieldMode"

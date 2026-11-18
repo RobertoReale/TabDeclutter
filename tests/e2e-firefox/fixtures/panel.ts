@@ -167,7 +167,10 @@ async function navigate(page: Page, url: string): Promise<void> {
  */
 async function pastFirstRun(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    await browser.storage.local.set({ onboarded: true });
+    await browser.storage.local.set({
+      onboarded: true,
+      settings: { autoDeclutter: false, autoOrganize: false },
+    });
   });
   await navigate(page, PANEL_URL);
 }

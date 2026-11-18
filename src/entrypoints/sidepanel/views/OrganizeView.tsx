@@ -17,11 +17,13 @@
  * explains is better than one that is missing.
  */
 
-import { useEffect } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 
 import { caps } from '@/platform/capabilities';
 import { t, type MessageKey } from '@/platform/i18n';
+import { organizeWindows, ungroupAllOpenTabs } from '@/platform/windows';
 import type { ClusterMode } from '@/core/cluster';
+import { NO_GROUP_ID, type AutoWindowMode } from '@/core/types';
 import { EmptyState } from '../components/EmptyState';
 import { GroupPreview } from '../components/GroupPreview';
 import { appliedGroupsText, formatCount, formatPercent, pairText } from '../format';
@@ -57,6 +59,7 @@ import {
   undoApply,
   working,
 } from '../state/organize';
+import { setSetting, settings } from '../state/settings';
 import { tabs } from '../state/tabs';
 
 /** §4.4.1's scope, without "Selezione", which only exists once something was brought in. */
@@ -113,6 +116,44 @@ export function OrganizeView({ language }: { language: string }) {
   const current = draft.value;
   const chosen = options.value;
   const carried = brought.value;
+  const currentSettings = settings.value;
+  const isAuto = currentSettings.autoOrganize;
+  const hasGroupedTabs = tabs.value.some((tab) => tab.groupId !== NO_GROUP_ID);
+
+  function runWindowOrganizeNow(
+    nextWindowMode: AutoWindowMode = currentSettings.autoWindowMode,
+    nextClusterMode: ClusterMode = mode.value,
+    nextUseTabGroups: boolean = currentSettings.useTabGroups,
+  ): void {
+    void organizeWindows({
+      windowMode: nextWindowMode,
+      clusterMode: nextClusterMode,
+      useTabGroups: nextUseTabGroups,
+    }).catch(report);
+  }
+
+  // When autoOrganize and useTabGroups are enabled, apply any proposed groups automatically.
+  const lastAutoApplied = useRef<string>('');
+  const autoProposalKey = JSON.stringify([
+    chosen,
+    current.groups.filter((g) => g.selected).map((g) => [g.key, g.title, g.color, g.tabIds]),
+  ]);
+  useEffect(() => {
+    if (!isAuto || !currentSettings.useTabGroups) {
+      lastAutoApplied.current = '';
+      return;
+    }
+    if (working.value || plannedTabs.value === 0) return;
+    if (lastAutoApplied.current === autoProposalKey) return;
+    const timer = setTimeout(() => {
+      if (working.value || plannedTabs.value === 0) return;
+      lastAutoApplied.current = autoProposalKey;
+      applyDraft();
+    }, 600);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [isAuto, currentSettings.useTabGroups, autoProposalKey]);
 
   // The titles the preview shows, by id. Built here and not in the preview: the draft holds
   // ids only, which is what lets the edits be pure functions over numbers.
@@ -120,31 +161,81 @@ export function OrganizeView({ language }: { language: string }) {
 
   return (
     <section class="td-organize">
-      <label class="td-field">
-        <span class="td-field-label">{t('organizeScope')}</span>
-        <select
-          class="td-filter"
-          value={scope.value}
-          onChange={(event) => {
-            setScope(event.currentTarget.value as OrganizeScope);
-          }}
-        >
-          {SCOPES.map((option) => (
-            <option key={option.value} value={option.value}>
-              {t(option.label)}
-            </option>
-          ))}
-          {/*
-           * Only once Declutter has sent a selection over: the option is what that
-           * selection *is*, so without one there is nothing for it to mean.
-           */}
-          {carried !== null && (
-            <option value="selection">
-              {t('organizeScopeSelection', formatCount(carried.length, language))}
-            </option>
+      <p class="td-view-intro">{t('organizeIntro')}</p>
+
+      <div class="td-autopilot-card">
+        <label class="td-check">
+          <input
+            type="checkbox"
+            checked={currentSettings.autoOrganize}
+            onChange={(event) => {
+              const checked = event.currentTarget.checked;
+              setSetting('autoOrganize', checked);
+              if (checked) runWindowOrganizeNow();
+            }}
+          />
+          <span>{t('autopilotOrganize')}</span>
+        </label>
+        <div class="td-pattern-actions">
+          <button
+            type="button"
+            class="td-action td-action-primary"
+            onClick={() => {
+              runWindowOrganizeNow();
+            }}
+          >
+            {t('windowOrganizeNow')}
+          </button>
+          {hasGroupedTabs && (
+            <button
+              type="button"
+              class="td-action"
+              onClick={() => {
+                void ungroupAllOpenTabs().catch(report);
+              }}
+            >
+              {t('windowUngroupAll')}
+            </button>
           )}
-        </select>
-      </label>
+        </div>
+      </div>
+
+      <fieldset class="td-onboarding-group td-window-modes">
+        <legend class="td-field-label">{t('windowModeHeading')}</legend>
+        <label class="td-mode-card">
+          <input
+            type="radio"
+            name="td-window-mode"
+            value="merge-windows"
+            checked={currentSettings.autoWindowMode === 'merge-windows'}
+            onChange={() => {
+              setSetting('autoWindowMode', 'merge-windows');
+              runWindowOrganizeNow('merge-windows');
+            }}
+          />
+          <div>
+            <div class="td-field-label">{t('windowModeMergeTitle')}</div>
+            <p class="td-field-hint">{t('windowModeMergeHint')}</p>
+          </div>
+        </label>
+
+        <label class="td-mode-card">
+          <input
+            type="radio"
+            name="td-window-mode"
+            value="split-windows"
+            checked={currentSettings.autoWindowMode === 'split-windows'}
+            onChange={() => {
+              setSetting('autoWindowMode', 'split-windows');
+              runWindowOrganizeNow('split-windows');
+            }}
+          />
+          <div>
+            <div class="td-field-label">{t('windowModeSplitTitle')}</div>
+            <p class="td-field-hint">{t('windowModeSplitHint')}</p>
+          </div>
+        </label>
+      </fieldset>
 
       <label class="td-field">
         <span class="td-field-label">{t('organizeMode')}</span>
@@ -152,7 +243,12 @@ export function OrganizeView({ language }: { language: string }) {
           class="td-filter"
           value={mode.value}
           onChange={(event) => {
-            setMode(event.currentTarget.value as ClusterMode);
+            const nextMode = event.currentTarget.value as ClusterMode;
+            setMode(nextMode);
+            setSetting('autoOrganizeMode', nextMode);
+            if (currentSettings.autoOrganize) {
+              runWindowOrganizeNow(currentSettings.autoWindowMode, nextMode);
+            }
           }}
         >
           {MODES.map((option) => (
@@ -162,53 +258,94 @@ export function OrganizeView({ language }: { language: string }) {
           ))}
         </select>
       </label>
+      <p class="td-field-hint">{t('windowUseTabGroupsHint')}</p>
 
       {mode.value === 'topic' && <AiPanel language={language} />}
 
-      <h3 class="td-settings-group">{t('organizeOptions')}</h3>
-      {OPTIONS.map((option) => (
-        <label key={option.id} class="td-check">
-          <input
-            type="checkbox"
-            checked={chosen[option.id]}
-            onChange={(event) => {
-              setOptions(option.pick(event.currentTarget.checked));
-            }}
-          />
-          <span>{t(option.label)}</span>
-        </label>
-      ))}
-
-      {current.groups.length === 0 ? (
-        <EmptyState text={t('organizeEmpty')} />
-      ) : (
+      {currentSettings.useTabGroups && (
         <>
-          <h3 class="td-settings-group">
-            {t('organizePreview')}
-            {/* §4.4.2: the badge says who proposed what is on screen, and nothing more. */}
-            {aiBadge.value && <span class="td-chip td-ai-badge">{t('organizeAiBadge')}</span>}
-          </h3>
-          <GroupPreview draft={current} titles={titles} language={language} />
+          <label class="td-field">
+            <span class="td-field-label">{t('organizeScope')}</span>
+            <select
+              class="td-filter"
+              value={scope.value}
+              onChange={(event) => {
+                setScope(event.currentTarget.value as OrganizeScope);
+              }}
+            >
+              {SCOPES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {t(option.label)}
+                </option>
+              ))}
+              {carried !== null && (
+                <option value="selection">
+                  {t('organizeScopeSelection', formatCount(carried.length, language))}
+                </option>
+              )}
+            </select>
+          </label>
+
+          <label class="td-check">
+            <input
+              type="checkbox"
+              checked={currentSettings.useTabGroups}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked;
+                setSetting('useTabGroups', checked);
+                if (!checked) void ungroupAllOpenTabs().catch(report);
+              }}
+            />
+            <span>{t('windowUseTabGroups')}</span>
+          </label>
+
+          <h3 class="td-settings-group">{t('organizeOptions')}</h3>
+          {OPTIONS.map((option) => (
+            <label key={option.id} class="td-check">
+              <input
+                type="checkbox"
+                checked={chosen[option.id]}
+                onChange={(event) => {
+                  setOptions(option.pick(event.currentTarget.checked));
+                }}
+              />
+              <span>{t(option.label)}</span>
+            </label>
+          ))}
+
+          {current.groups.length === 0 ? (
+            <EmptyState text={t('organizeEmpty')} />
+          ) : (
+            <>
+              <h3 class="td-settings-group">
+                {t('organizePreview')}
+                {aiBadge.value && <span class="td-chip td-ai-badge">{t('organizeAiBadge')}</span>}
+              </h3>
+              <GroupPreview draft={current} titles={titles} language={language} />
+            </>
+          )}
+
+          <div class="td-footer">
+            <AppliedToast language={language} />
+            {current.groups.length > 0 && (
+              <div
+                class="td-bar td-organize-actions"
+                role="group"
+                aria-label={t('organizePreview')}
+              >
+                <button
+                  type="button"
+                  class="td-action td-action-primary"
+                  disabled={working.value || plannedTabs.value === 0}
+                  onClick={applyDraft}
+                >
+                  {t('organizeApply')}
+                </button>
+              </div>
+            )}
+          </div>
         </>
       )}
-
-      <div class="td-footer">
-        <AppliedToast language={language} />
-        {current.groups.length > 0 && (
-          <div class="td-bar td-organize-actions" role="group" aria-label={t('organizePreview')}>
-            <button
-              type="button"
-              class="td-action td-action-primary"
-              // Nothing to apply is not an error to report: the button simply cannot be
-              // pressed while every group is deselected, or while one apply is in flight.
-              disabled={working.value || plannedTabs.value === 0}
-              onClick={applyDraft}
-            >
-              {t('organizeApply')}
-            </button>
-          </div>
-        )}
-      </div>
     </section>
   );
 }
@@ -228,9 +365,10 @@ export function OrganizeView({ language }: { language: string }) {
  * asks for the one feature that can use it (§11).
  */
 function AiPanel({ language }: { language: string }) {
+  const wanted = useAi.value;
   useEffect(() => {
-    void checkAi().catch(report);
-  }, []);
+    if (wanted) void checkAi().catch(report);
+  }, [wanted]);
 
   // Asked again whenever the question changes, and never while the model is not active:
   // `startAiGrouping` decides for itself, so the effect only has to tell it that

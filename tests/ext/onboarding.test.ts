@@ -17,7 +17,6 @@ import {
   draftStaleDays,
   finishOnboarding,
   onboardingNeeded,
-  openWhitelistFromOnboarding,
   startOnboarding,
 } from '../../src/entrypoints/sidepanel/state/onboarding';
 import { settingsOpen, settingsPage } from '../../src/entrypoints/sidepanel/state/view';
@@ -92,25 +91,5 @@ describe('"Inizia" (§17.5)', () => {
     await vi.waitFor(() => {
       expect(onboardingNeeded.value).toBe(false);
     });
-  });
-});
-
-describe('the whitelist link (§17.3)', () => {
-  it('saves the answers so far and opens the duplicates settings', async () => {
-    onboardingNeeded.value = true;
-    draftStaleDays.value = 3;
-    draftGuardMode.value = 'warn';
-
-    openWhitelistFromOnboarding();
-
-    await vi.waitFor(() => {
-      expect(settingsOpen.value).toBe(true);
-    });
-    expect(settingsPage.value).toBe('duplicates');
-    const stored = await readSettings();
-    expect(stored.staleDays).toBe(3);
-    expect(stored.guard.mode).toBe('warn');
-    expect(await onboardedItem.getValue()).toBe(true);
-    expect(onboardingNeeded.value).toBe(false);
   });
 });

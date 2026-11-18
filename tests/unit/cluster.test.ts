@@ -97,6 +97,8 @@ describe('the site of a tab', () => {
   it('is empty when the URL has no host at all', () => {
     expect(siteKey('about:blank')).toBe('');
     expect(siteKey('')).toBe('');
+    expect(siteKey('chrome-extension://bbomjaikkcabgmfaomdich/index.html')).toBe('');
+    expect(siteKey('chrome://extensions')).toBe('');
   });
 });
 

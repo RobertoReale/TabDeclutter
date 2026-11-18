@@ -3,6 +3,7 @@
 // and Firefox only allows `sidebarAction.toggle()` inside the user gesture.
 import { registerPanelOpening } from '@/platform/panel';
 
+import { registerAutopilot } from './autopilot';
 import { registerBadge } from './badge';
 import { registerCleanup } from './cleanup';
 import { registerCommands } from './commands';
@@ -15,6 +16,7 @@ export default defineBackground(() => {
   registerTracker();
   const badge = registerBadge();
   registerCleanup();
+  registerAutopilot({ flash: badge.flash });
   // The flash of PLAN.md §8.5 is the badge's; the guard is handed it so it does not have to
   // know there is a badge at all.
   const guard = registerGuard({ flash: badge.flash });

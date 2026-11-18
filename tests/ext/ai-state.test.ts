@@ -214,14 +214,15 @@ describe('what the browser can do (§7.3, §5.5)', () => {
 
   it('is active only when there is a model and the user wants it', async () => {
     await checkAi({ capabilities: CHROME, llm });
-    expect(useAi.value).toBe(true);
-    expect(aiActive.value).toBe(true);
+    expect(useAi.value).toBe(false);
+    expect(aiActive.value).toBe(false);
 
     panelData.value = {
       ...data(),
-      settings: { ...DEFAULT_SETTINGS, useOnDeviceAi: false },
+      settings: { ...DEFAULT_SETTINGS, useOnDeviceAi: true },
     };
-    expect(aiActive.value).toBe(false);
+    expect(useAi.value).toBe(true);
+    expect(aiActive.value).toBe(true);
   });
 });
 
@@ -297,6 +298,10 @@ describe('grouping by topic with the model (§7.3)', () => {
   let heuristic: readonly string[];
 
   beforeEach(async () => {
+    panelData.value = {
+      ...data(),
+      settings: { ...DEFAULT_SETTINGS, useOnDeviceAi: true },
+    };
     await checkAi({ capabilities: CHROME, llm });
     heuristic = draft.value.groups.map((group) => group.key);
     expect(heuristic.length).toBeGreaterThan(0);

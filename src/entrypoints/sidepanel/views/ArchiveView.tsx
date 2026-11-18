@@ -113,6 +113,8 @@ export function ArchiveView({ language }: { language: string }) {
 
   return (
     <>
+      <p class="td-view-intro">{t('archiveIntro')}</p>
+
       <div class="td-tools" role="group" aria-label={t('archiveTools')}>
         <input
           type="search"

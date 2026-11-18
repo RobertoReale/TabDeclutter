@@ -15,6 +15,7 @@
 import { useSignal } from '@preact/signals';
 import { useEffect } from 'preact/hooks';
 
+import { caps } from '@/platform/capabilities';
 import type { LanguageSetting } from '@/core/types';
 import { t, type MessageKey } from '@/platform/i18n';
 import {
@@ -71,17 +72,37 @@ function MainSettings({ language }: { language: string }) {
   const match = matchOptions.value;
   const aiState = aiStateKey(availability.value);
 
-  // Two questions only the browser can answer, asked when the page opens and not before: a
-  // panel that never shows the settings asks for neither, and the AI module of §7.3 is only
-  // fetched here (PLAN.md §11).
+  // The bookmarks question is asked when the page opens; the AI availability is only probed
+  // once `useOnDeviceAi` is on, so Chrome does not log an extension warning when its built-in AI
+  // is disabled in chrome://settings/ai.
   useEffect(() => {
     checkBookmarksPermission();
-    void checkAi();
   }, []);
+
+  useEffect(() => {
+    if (current.useOnDeviceAi) void checkAi();
+  }, [current.useOnDeviceAi]);
 
   return (
     <section class="td-settings">
       <h2 class="td-section-title">{t('navSettings')}</h2>
+
+      <h3 class="td-settings-group">{t('autopilotTitle')}</h3>
+      <p class="td-field-hint">{t('autopilotHint')}</p>
+      <CheckField
+        label="autopilotDeclutter"
+        value={current.autoDeclutter}
+        onPick={(value) => {
+          setSetting('autoDeclutter', value);
+        }}
+      />
+      <CheckField
+        label="autopilotOrganize"
+        value={current.autoOrganize}
+        onPick={(value) => {
+          setSetting('autoOrganize', value);
+        }}
+      />
 
       <h3 class="td-settings-group">{t('settingsGroupSuggestions')}</h3>
       <NumberField
@@ -101,28 +122,39 @@ function MainSettings({ language }: { language: string }) {
         }}
       />
       <CheckField
-        label="settingsIncludeGrouped"
-        hint="settingsIncludeGroupedHint"
-        value={current.includeGroupedTabs}
-        onPick={(value) => {
-          setSetting('includeGroupedTabs', value);
-        }}
-      />
-      {/* §4.6 lists it here and §8.3 lists it there: one stored value, shown in both places. */}
-      <CheckField
-        label="matchIgnoreHash"
-        hint="settingsIgnoreHashHint"
-        value={match.ignoreHash}
-        onPick={(value) => {
-          setMatchOption('ignoreHash', value);
-        }}
-      />
-      <CheckField
         label="settingsBookmarks"
         hint="settingsBookmarksHint"
         value={current.useBookmarks && bookmarksGranted.value}
         onPick={setUseBookmarks}
       />
+      {current.useTabGroups && (
+        <>
+          <CheckField
+            label="windowUseTabGroups"
+            hint="windowUseTabGroupsHint"
+            value={current.useTabGroups}
+            onPick={(value) => {
+              setSetting('useTabGroups', value);
+            }}
+          />
+          <CheckField
+            label="settingsIncludeGrouped"
+            hint="settingsIncludeGroupedHint"
+            value={current.includeGroupedTabs}
+            onPick={(value) => {
+              setSetting('includeGroupedTabs', value);
+            }}
+          />
+          <CheckField
+            label="matchIgnoreHash"
+            hint="settingsIgnoreHashHint"
+            value={match.ignoreHash}
+            onPick={(value) => {
+              setMatchOption('ignoreHash', value);
+            }}
+          />
+        </>
+      )}
       {/* A refusal is the browser's answer, so the page says what became of the choice. */}
       <div class="td-warnings" role="status" aria-live="polite">
         {bookmarksDenied.value && <p class="td-warning">{t('settingsBookmarksDenied')}</p>}
@@ -133,32 +165,6 @@ function MainSettings({ language }: { language: string }) {
       <ProtectedSites />
 
       <h3 class="td-settings-group">{t('settingsGroupGeneral')}</h3>
-      <CheckField
-        label="settingsShowBadge"
-        value={current.showBadge}
-        onPick={(value) => {
-          setSetting('showBadge', value);
-        }}
-      />
-      {/* §5.5: no switch where there is no model — only the state, which §4.6 asks for. */}
-      {availability.value !== null && availability.value !== 'unsupported' && (
-        <CheckField
-          label="settingsUseAi"
-          value={current.useOnDeviceAi}
-          onPick={(value) => {
-            setSetting('useOnDeviceAi', value);
-          }}
-        />
-      )}
-      {aiState !== null && <p class="td-field-hint">{t(aiState)}</p>}
-      <NumberField
-        label="settingsFieldRetention"
-        choices={durationChoices(RETENTION_DAYS, current.archiveRetentionDays, IN_DAYS, language)}
-        value={current.archiveRetentionDays}
-        onPick={(value) => {
-          setSetting('archiveRetentionDays', value);
-        }}
-      />
       <ChoiceField
         label="settingsFieldLanguage"
         choices={LANGUAGE_CHOICES}
@@ -167,6 +173,32 @@ function MainSettings({ language }: { language: string }) {
           setSetting('language', value);
         }}
       />
+      <NumberField
+        label="settingsFieldRetention"
+        choices={durationChoices(RETENTION_DAYS, current.archiveRetentionDays, IN_DAYS, language)}
+        value={current.archiveRetentionDays}
+        onPick={(value) => {
+          setSetting('archiveRetentionDays', value);
+        }}
+      />
+      <CheckField
+        label="settingsShowBadge"
+        value={current.showBadge}
+        onPick={(value) => {
+          setSetting('showBadge', value);
+        }}
+      />
+      {/* §5.5: no switch where there is no Prompt API — and only probe availability when enabled. */}
+      {caps.promptApi && availability.value !== 'unsupported' && (
+        <CheckField
+          label="settingsUseAi"
+          value={current.useOnDeviceAi}
+          onPick={(value) => {
+            setSetting('useOnDeviceAi', value);
+          }}
+        />
+      )}
+      {current.useOnDeviceAi && aiState !== null && <p class="td-field-hint">{t(aiState)}</p>}
 
       <h3 class="td-settings-group">{t('settingsDuplicates')}</h3>
       <button

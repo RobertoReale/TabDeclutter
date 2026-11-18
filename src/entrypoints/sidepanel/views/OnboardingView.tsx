@@ -18,12 +18,7 @@ import {
   ONBOARDING_MODE_CHOICES,
   ONBOARDING_STALE_DAYS,
 } from '../settings-fields';
-import {
-  completeOnboarding,
-  draftGuardMode,
-  draftStaleDays,
-  openWhitelistFromOnboarding,
-} from '../state/onboarding';
+import { completeOnboarding, draftGuardMode, draftStaleDays } from '../state/onboarding';
 
 export function OnboardingView({ language }: { language: string }) {
   const days = draftStaleDays.value;
@@ -71,12 +66,6 @@ export function OnboardingView({ language }: { language: string }) {
             </label>
           ))}
         </fieldset>
-
-        <button type="button" class="td-link-button" onClick={openWhitelistFromOnboarding}>
-          {t('onboardingWhitelist')}
-        </button>
-        {/* §17.3's "Se usi Duplicate Tabs Closer, disattivalo", in the words §8.3 already has. */}
-        <p class="td-note">{t('guardCoexistence')}</p>
 
         <p class="td-note">{t('onboardingPartialData')}</p>
 

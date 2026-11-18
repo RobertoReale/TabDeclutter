@@ -1,22 +1,30 @@
 # TabDeclutter
 
-A Chrome and Firefox extension (MV3) that suggests which tabs to close, organizes the rest into
-native tab groups, and blocks duplicate tabs in real time.
+A Chrome and Firefox extension (MV3) that keeps your browser tidy automatically: it closes old and
+temporary tabs in the background (always saving them to a local Archive first), organizes your
+browser windows automatically without cluttering the tab bar with coloured tab groups, and blocks
+duplicate tabs in real time.
 
-Nothing is closed without an explicit gesture, every suggestion comes with a readable reason, every
-close can be undone, and no data ever leaves the device: no network requests, no analytics. The
-optional on-device AI only improves group names.
+Every suggestion comes with a plain reason, every closed tab is archived and can be restored at any
+time, and no data ever leaves your device: no network requests, no analytics.
 
 ## What it does
 
-- **Declutter**: the open tabs ranked by how likely you are to be done with them, each with a
-  plain reason. Close, keep, discard or protect a site, one by one or in bulk.
-- **Organize**: native tab groups by site or by topic; on Chrome, the on-device model can improve
-  the group names (optional).
-- **Duplicate protection**: warns you, or closes the duplicate, the moment a tab becomes a copy of
-  another. Whitelist, URL comparison rules and pause; it understands the pattern list of
-  Duplicate Tabs Closer. If you still use that extension, turn it off to avoid conflicts.
-- **Archive and undo**: closed tabs are kept for a while and can be restored.
+- **Autopilot & Declutter**: automatically closes expired temporary pages, unused stale tabs, and
+  forgotten background windows (or lets you review and close them in one click). Pinned tabs,
+  audible tabs, active tabs, and protected domains are never touched, and every closed tab is
+  saved to the Archive first.
+- **Window Organization (two modes, no coloured tab groups)**: keeps your browser windows organized
+  automatically by website or by topic, with an instant switch between two modes:
+  - **Merge and tidy into a single window** _(default)_: removes coloured tab groups, consolidates
+    scattered windows into one clean window, and sorts related tabs side by side.
+  - **One window per topic or website**: removes coloured tab groups and places each website or
+    topic cluster into its own dedicated window.
+- **Duplicate protection**: warns you, or closes the duplicate automatically, the moment a tab
+  becomes a copy of another. Whitelist with `*` wildcards and `/regex/` patterns, URL comparison
+  rules, and pause controls.
+- **Archive and undo**: every tab closed manually or by Autopilot is kept in the local Archive and
+  can be searched, exported, or reopened anytime.
 - Badge with the number of suggestions, keyboard shortcuts (`Alt+Shift+D` opens the panel), light
   and dark theme, Italian and English.
 
@@ -69,7 +77,12 @@ Release; nothing is submitted to the stores.
 ## Loading the build by hand
 
 - **Chrome**: `chrome://extensions`, turn on "Developer mode", "Load unpacked", pick
-  `.output/chrome-mv3`.
+  `.output/chrome-mv3`. On-device AI is off by default so Chrome does not log warnings on browsers
+  where Gemini Nano is disabled; if you enable "Use on-device AI when available" in TabDeclutter's
+  settings while Chrome's built-in AI is disabled, `chrome://extensions` may show two harmless
+  browser-level notices under "Errors" (`On-device AI is disabled in Chrome settings…` and `The
+feature flag gating model execution was disabled`). You can enable on-device AI at
+  `chrome://settings/ai`.
 - **Firefox**: `about:debugging#/runtime/this-firefox`, "Load Temporary Add-on", pick
   `.output/firefox-mv3/manifest.json`. A temporary add-on is removed when Firefox closes.
 

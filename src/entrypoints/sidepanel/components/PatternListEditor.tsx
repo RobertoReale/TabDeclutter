@@ -26,7 +26,6 @@ import { tabs } from '../state/tabs';
 export function PatternListEditor({ language }: { language: string }) {
   /** `null` while the editor is simply showing what is stored. */
   const draft = useSignal<string | null>(null);
-  const help = useSignal(false);
 
   const stored = editorText(whitelist.value);
   const text = draft.value ?? stored;
@@ -83,22 +82,6 @@ export function PatternListEditor({ language }: { language: string }) {
           {t('whitelistDefaults')}
         </button>
       </div>
-
-      {/*
-       * §8.3's "Importa da Duplicate Tabs Closer": an extension cannot read another
-       * extension's storage, so the only honest import is an explanation of how to paste.
-       */}
-      <button
-        type="button"
-        class="td-action td-pattern-import"
-        aria-expanded={help.value}
-        onClick={() => {
-          help.value = !help.value;
-        }}
-      >
-        {t('whitelistImport')}
-      </button>
-      {help.value && <p class="td-field-hint">{t('whitelistImportHow')}</p>}
 
       {/* The validation and the preview, live as the lines are typed. */}
       <ul class="td-pattern-lines" aria-live="polite">

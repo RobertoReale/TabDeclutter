@@ -159,6 +159,9 @@ export const DEFAULT_GUARD_SETTINGS: GuardSettings = {
 /** The language of the panel: `auto` follows the browser's UI language. */
 export type LanguageSetting = 'auto' | 'en' | 'it';
 
+/** How windows and tabs are organized automatically in the background. */
+export type AutoWindowMode = 'merge-windows' | 'split-windows';
+
 /**
  * `local:settings` (PLAN.md §10). The protected sites, the keeps and the duplicate
  * whitelist are storage keys of their own, so they are not repeated here.
@@ -171,6 +174,16 @@ export interface Settings {
   /** Include tabs that are in a group, with a reduced weight. */
   includeGroupedTabs: boolean;
   showBadge: boolean;
+  /** Automatically close and archive tabs that enter the `close` bucket, and forgotten windows. */
+  autoDeclutter: boolean;
+  /** Automatically organize windows and tabs in the background. */
+  autoOrganize: boolean;
+  /** Which grouping criterion `autoOrganize` uses (`'site'` or `'topic'`). */
+  autoOrganizeMode: 'site' | 'topic';
+  /** Whether to merge scattered windows into one sorted window, or split topics into dedicated windows. */
+  autoWindowMode: AutoWindowMode;
+  /** Use Chrome/Firefox coloured tab groups inside a window (off by default: clean windows without badges). */
+  useTabGroups: boolean;
   /** Use the on-device model when the browser has one. */
   useOnDeviceAi: boolean;
   /**
@@ -191,7 +204,12 @@ export const DEFAULT_SETTINGS: Settings = {
   graceMs: 2 * HOUR,
   includeGroupedTabs: true,
   showBadge: true,
-  useOnDeviceAi: true,
+  autoDeclutter: true,
+  autoOrganize: true,
+  autoOrganizeMode: 'site',
+  autoWindowMode: 'merge-windows',
+  useTabGroups: false,
+  useOnDeviceAi: false,
   useBookmarks: false,
   archiveRetentionDays: 30,
   language: 'auto',

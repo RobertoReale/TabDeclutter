@@ -127,8 +127,6 @@ test.describe('in English', () => {
     await expect(
       panel.getByRole('heading', { name: message('en', 'settingsDuplicates') }),
     ).toBeVisible();
-    // The note about Duplicate Tabs Closer is always there: coexistence cannot be detected.
-    await expect(panel.locator('.td-note')).toHaveText(message('en', 'guardCoexistence'));
 
     const editor = panel.locator('#td-whitelist');
     await expect(editor).toHaveValue('');
@@ -167,13 +165,6 @@ test.describe('in English', () => {
     await expect(
       panel.getByRole('button', { name: message('en', 'whitelistSave') }),
     ).toBeDisabled();
-
-    // §8.3's import: an extension cannot read another extension's storage, so the button
-    // explains how to paste instead of pretending to read it.
-    const how = message('en', 'whitelistImportHow');
-    await expect(panel.getByText(how)).toHaveCount(0);
-    await panel.getByRole('button', { name: message('en', 'whitelistImport') }).click();
-    await expect(panel.getByText(how)).toBeVisible();
   });
 });
 

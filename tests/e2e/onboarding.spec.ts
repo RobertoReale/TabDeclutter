@@ -43,7 +43,6 @@ test.describe('in English', () => {
     // §17.3: "Chiudila e torna a quella esistente" is the preselected answer.
     const auto = panel.getByRole('radio', { name: message('en', 'onboardingGuardAuto') });
     await expect(auto).toBeChecked();
-    await expect(panel.getByText(message('en', 'guardCoexistence'))).toBeVisible();
     // §17.4.
     await expect(panel.getByText(message('en', 'onboardingPartialData'))).toBeVisible();
 
@@ -72,25 +71,6 @@ test.describe('in English', () => {
       again.getByRole('button', { name: message('en', 'navDeclutter') }),
     ).toHaveAttribute('aria-current', 'page');
     await expect(again.getByText(message('en', 'onboardingIntro'))).toHaveCount(0);
-  });
-
-  test('the whitelist link opens the editor, keeping what was answered', async ({ panel }) => {
-    await panel.getByLabel(message('en', 'onboardingThreshold')).selectOption('3');
-    await panel.getByRole('radio', { name: message('en', 'onboardingGuardWarn') }).check();
-
-    await panel.getByRole('button', { name: message('en', 'onboardingWhitelist') }).click();
-
-    // The editor of §8.3, which is at the bottom of the duplicates sub-page.
-    await expect(panel.getByLabel(message('en', 'whitelistLabel'))).toBeVisible();
-    await expect(panel.getByLabel(message('en', 'guardFieldMode'))).toHaveValue('warn');
-
-    // And the first run is over: the answers were kept, and going back to a view does not
-    // bring the screen with it.
-    await panel.getByRole('button', { name: message('en', 'settingsBack') }).click();
-    await panel.getByRole('button', { name: message('en', 'navDeclutter') }).click();
-    await expect(panel.getByText(message('en', 'onboardingIntro'))).toHaveCount(0);
-    await openSettings(panel, 'en');
-    await expect(panel.getByLabel(message('en', 'settingsFieldStale'))).toHaveValue('3');
   });
 });
 

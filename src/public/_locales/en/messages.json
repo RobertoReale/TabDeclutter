@@ -280,15 +280,15 @@
     "description": "Scope of the Organize view: the tabs brought over from the selection bar. $1 is the formatted number."
   },
   "organizeMode": {
-    "message": "Group by",
+    "message": "How to group or sort your tabs",
     "description": "Accessible name of the Organize view's grouping mode chooser."
   },
   "organizeModeSite": {
-    "message": "By site",
+    "message": "By website (e.g. keep all YouTube or GitHub tabs together)",
     "description": "Grouping mode: one group per site."
   },
   "organizeModeTopic": {
-    "message": "By topic",
+    "message": "By topic (tabs about the same subject across different sites)",
     "description": "Grouping mode: groups of tabs that are about the same thing."
   },
   "organizeOptions": {
@@ -624,15 +624,15 @@
     "description": "Link beside the counter under the chip: opens the archive filtered to the duplicates closed automatically."
   },
   "settingsGroupSuggestions": {
-    "message": "Suggestions",
+    "message": "Automatic cleanup timing",
     "description": "Heading of the first group of settings: what makes a tab a candidate for closing."
   },
   "settingsFieldStale": {
-    "message": "Consider a tab old after",
+    "message": "Close unused tabs not opened for more than",
     "description": "Settings field that chooses how long a tab must go unused before it counts as old."
   },
   "settingsFieldGrace": {
-    "message": "Never suggest a tab opened less than",
+    "message": "Never touch newly opened tabs for at least",
     "description": "Settings field that chooses the grace period: a tab opened more recently than this is never suggested."
   },
   "settingsIncludeGrouped": {
@@ -648,11 +648,11 @@
     "description": "Explanation under the 'Ignore #hash' checkbox, which is shown on both settings pages."
   },
   "settingsBookmarks": {
-    "message": "Use the bookmarks",
+    "message": "Recognize pages already saved in Bookmarks",
     "description": "Settings checkbox: whether a bookmarked page is more readily suggested, since closing it loses nothing."
   },
   "settingsBookmarksHint": {
-    "message": "A bookmarked page is easier to suggest: it can be found again. The browser will ask for permission to read the bookmarks.",
+    "message": "If a tab is already saved in your Bookmarks it can be closed sooner when unused, since you already have it saved.",
     "description": "Explanation under the 'Use the bookmarks' checkbox."
   },
   "settingsBookmarksDenied": {
@@ -660,27 +660,27 @@
     "description": "Message shown when the user refuses the browser's permission request for the bookmarks."
   },
   "settingsGroupProtected": {
-    "message": "Protected sites",
+    "message": "Sites to never close (Protected sites)",
     "description": "Heading of the group of settings that lists the sites which are never suggested."
   },
   "settingsProtectedHint": {
-    "message": "Tabs on these sites are never suggested. One domain per line; a leading *. covers the subdomains.",
+    "message": "Tabs on these websites will never be closed or suggested for cleanup. Type one domain per line (e.g. mail.google.com or *.github.com).",
     "description": "Explanation under the 'Protected sites' heading."
   },
   "settingsProtectedLabel": {
-    "message": "Domains",
+    "message": "Protected domains",
     "description": "Label of the text box in which the protected sites are typed, one per line."
   },
   "settingsGroupGeneral": {
-    "message": "General",
+    "message": "Language, Archive and General",
     "description": "Heading of the group of settings that are neither about the suggestions nor about a site: badge, AI, archive, language."
   },
   "settingsShowBadge": {
-    "message": "Show the number on the icon",
+    "message": "Show the number of tabs to clean up on the toolbar icon",
     "description": "Settings checkbox: whether the toolbar icon carries the count of tabs worth reviewing."
   },
   "settingsUseAi": {
-    "message": "Use the on-device AI when available",
+    "message": "Use built-in on-device AI (optional)",
     "description": "Settings checkbox: whether the browser's own on-device model may be used to name the groups."
   },
   "settingsAiAvailable": {
@@ -696,11 +696,11 @@
     "description": "State line under the on-device AI setting, when the browser has no on-device model."
   },
   "settingsFieldRetention": {
-    "message": "Keep the archive for",
+    "message": "Keep closed tabs saved in the Archive for",
     "description": "Settings field that chooses how long closed tabs stay in the archive."
   },
   "settingsFieldLanguage": {
-    "message": "Language",
+    "message": "Extension language",
     "description": "Settings field that chooses the language of the extension."
   },
   "settingsLanguageAuto": {
@@ -879,16 +879,12 @@
     "message": "Ignoring the path is very aggressive: two different pages of the same site count as duplicates.",
     "description": "Warning shown in the settings when only the domain is compared."
   },
-  "guardCoexistence": {
-    "message": "If you still use Duplicate Tabs Closer, turn it off to avoid conflicts.",
-    "description": "Note in the duplicate settings. The other extension cannot be detected, so this is only information."
-  },
   "whitelistLabel": {
     "message": "One pattern per line",
     "description": "Label of the duplicate whitelist editor."
   },
   "whitelistHint": {
-    "message": "* stands for any text. A line between slashes, /…/, is a regular expression. The syntax is Duplicate Tabs Closer's, so you can paste the list you already use.",
+    "message": "* stands for any text. A line between slashes, /…/, is a regular expression.",
     "description": "Explanation under the duplicate whitelist editor's label."
   },
   "whitelistSave": {
@@ -898,14 +894,6 @@
   "whitelistDefaults": {
     "message": "Restore the defaults",
     "description": "Button that puts this browser's default patterns back into the whitelist editor."
-  },
-  "whitelistImport": {
-    "message": "Import from Duplicate Tabs Closer",
-    "description": "Button that explains how to bring another extension's whitelist over."
-  },
-  "whitelistImportHow": {
-    "message": "An extension cannot read another extension's data. Open Duplicate Tabs Closer's options, copy its whitelist and paste it here.",
-    "description": "Explanation shown by the 'Import from Duplicate Tabs Closer' button."
   },
   "whitelistLine": {
     "message": "Line $1",
@@ -963,10 +951,6 @@
     "message": "Do nothing",
     "description": "Answer to the first-run duplicate question: no live checks at all."
   },
-  "onboardingWhitelist": {
-    "message": "Do you have a Duplicate Tabs Closer whitelist? Paste it here",
-    "description": "Link of the first-run screen that opens the whitelist editor."
-  },
   "onboardingPartialData": {
     "message": "In the first few days the suggestions are based on partial data and get more accurate as you use it.",
     "description": "Note of the first-run screen about what the suggestions are worth at the start."
@@ -974,5 +958,73 @@
   "onboardingStart": {
     "message": "Start",
     "description": "Button that saves the first-run choices and opens the panel."
+  },
+  "autopilotTitle": {
+    "message": "Autopilot",
+    "description": "Heading of the autopilot controls card."
+  },
+  "autopilotHint": {
+    "message": "Keep your browser tidy automatically in the background.",
+    "description": "Subtitle of the autopilot controls card."
+  },
+  "autopilotDeclutter": {
+    "message": "Auto-close useless and old tabs (saved to Archive)",
+    "description": "Toggle for automatic background decluttering."
+  },
+  "autopilotOrganize": {
+    "message": "Auto-organize Chrome windows and tabs",
+    "description": "Toggle for automatic background window and tab organization."
+  },
+  "windowModeHeading": {
+    "message": "How to organize your windows",
+    "description": "Heading for the switch between the two window organization modes."
+  },
+  "windowModeMergeTitle": {
+    "message": "Merge and tidy into a single window",
+    "description": "Option 1: consolidate multiple windows into one sorted window."
+  },
+  "windowModeMergeHint": {
+    "message": "Combines scattered windows into one clean window and sorts tabs side by side by website or topic (without creating coloured tab groups).",
+    "description": "Explanation of the merge-windows mode."
+  },
+  "windowModeSplitTitle": {
+    "message": "One window per topic or website",
+    "description": "Option 2: place each topic/site cluster into its own dedicated window."
+  },
+  "windowModeSplitHint": {
+    "message": "Moves related tabs into dedicated windows so each Chrome window covers one coherent topic or project (without coloured tab groups).",
+    "description": "Explanation of the split-windows mode."
+  },
+  "windowOrganizeNow": {
+    "message": "Organize windows now",
+    "description": "Button that runs window organization immediately."
+  },
+  "windowUngroupAll": {
+    "message": "Remove all coloured tab groups",
+    "description": "Button that dissolves all existing Chrome tab groups."
+  },
+  "windowUseTabGroups": {
+    "message": "Use Chrome coloured tab groups (advanced)",
+    "description": "Optional toggle to enable native tab groups."
+  },
+  "windowUseTabGroupsHint": {
+    "message": "Choose 'By website' to keep pages from the same site together, or 'By topic' to group pages about the same subject.",
+    "description": "Explanation under the organizeMode / useTabGroups control."
+  },
+  "declutterIntro": {
+    "message": "Tabs you probably no longer need. Close them in one click or turn on Autopilot above: every closed tab is saved in the Archive.",
+    "description": "Introductory helper text at the top of the Declutter view."
+  },
+  "declutterCloseRecommended": {
+    "message": "Close all recommended ($1)",
+    "description": "Primary one-click button to close all tabs in the close bucket. $1 is the formatted count."
+  },
+  "organizeIntro": {
+    "message": "Keep your Chrome windows tidy automatically without cluttering the tab bar with coloured groups.",
+    "description": "Introductory helper text at the top of the Organize view."
+  },
+  "archiveIntro": {
+    "message": "Every tab closed by you or by Autopilot is kept here so you can restore it anytime.",
+    "description": "Introductory helper text at the top of the Archive view."
   }
 }

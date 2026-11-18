@@ -34,6 +34,7 @@ import { HealthBar } from '../components/HealthBar';
 import { Section } from '../components/Section';
 import { SelectionBar } from '../components/SelectionBar';
 import { Toast } from '../components/Toast';
+import { formatCount } from '../format';
 import { activeStop, nextStop, stopsOf, type OpenSection, type Stop } from '../keyboard';
 import { forgottenWindowText } from '../reasons';
 import {
@@ -59,7 +60,8 @@ import {
   selectTabs,
   toggleSelected,
 } from '../state/selection';
-import { declutter, tabCount } from '../state/tabs';
+import { setSetting, settings } from '../state/settings';
+import { declutter, scoring, tabCount } from '../state/tabs';
 
 /**
  * §4.7's "height collapse on close" plays on a row that is no longer in `declutter.value`
@@ -82,6 +84,9 @@ export function DeclutterView({ language }: { language: string }) {
   const grid = useRef<HTMLDivElement>(null);
 
   const list = declutter.value;
+  const closeTabIds = scoring.value.tabs
+    .filter((scored) => scored.bucket === 'close')
+    .map((scored) => scored.tabId);
   const sections: readonly OpenSection[] = list.sections.map((section) => ({
     section,
     open: byHand.value[section.id] ?? !section.collapsed,
@@ -351,6 +356,32 @@ export function DeclutterView({ language }: { language: string }) {
         <EmptyState text={t('declutterEmpty')} />
       ) : (
         <>
+          <p class="td-view-intro">{t('declutterIntro')}</p>
+
+          <div class="td-autopilot-card">
+            <label class="td-check">
+              <input
+                type="checkbox"
+                checked={settings.value.autoDeclutter}
+                onChange={(event) => {
+                  setSetting('autoDeclutter', event.currentTarget.checked);
+                }}
+              />
+              <span>{t('autopilotDeclutter')}</span>
+            </label>
+            {closeTabIds.length > 0 && (
+              <button
+                type="button"
+                class="td-action td-action-primary"
+                onClick={() => {
+                  requestClose(closeTabIds);
+                }}
+              >
+                {t('declutterCloseRecommended', formatCount(closeTabIds.length, language))}
+              </button>
+            )}
+          </div>
+
           <HealthBar review={list.total} total={tabCount.value} language={language} />
 
           {list.windows.map((window) => (

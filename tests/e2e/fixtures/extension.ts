@@ -95,7 +95,10 @@ async function markOnboarded(context: BrowserContext): Promise<void> {
   const [existing] = context.serviceWorkers();
   const worker = existing ?? (await context.waitForEvent('serviceworker'));
   await worker.evaluate(() =>
-    (globalThis as unknown as StorageApi).chrome.storage.local.set({ onboarded: true }),
+    (globalThis as unknown as StorageApi).chrome.storage.local.set({
+      onboarded: true,
+      settings: { autoDeclutter: false, autoOrganize: false },
+    }),
   );
 }
 

@@ -280,15 +280,15 @@
     "description": "Scope of the Organize view: the tabs brought over from the selection bar. $1 is the formatted number."
   },
   "organizeMode": {
-    "message": "Raggruppa",
+    "message": "Criterio di organizzazione",
     "description": "Accessible name of the Organize view's grouping mode chooser."
   },
   "organizeModeSite": {
-    "message": "Per sito",
+    "message": "Per sito web (es. tutte le schede di YouTube o GitHub insieme)",
     "description": "Grouping mode: one group per site."
   },
   "organizeModeTopic": {
-    "message": "Per argomento",
+    "message": "Per argomento (schede sullo stesso tema anche di siti diversi)",
     "description": "Grouping mode: groups of tabs that are about the same thing."
   },
   "organizeOptions": {
@@ -624,15 +624,15 @@
     "description": "Link beside the counter under the chip: opens the archive filtered to the duplicates closed automatically."
   },
   "settingsGroupSuggestions": {
-    "message": "Suggerimenti",
+    "message": "Tempi di pulizia automatica",
     "description": "Heading of the first group of settings: what makes a tab a candidate for closing."
   },
   "settingsFieldStale": {
-    "message": "Considera vecchia una scheda dopo",
+    "message": "Chiudi le schede che non apri da più di",
     "description": "Settings field that chooses how long a tab must go unused before it counts as old."
   },
   "settingsFieldGrace": {
-    "message": "Non suggerire schede aperte da meno di",
+    "message": "Non toccare mai le schede appena aperte per almeno",
     "description": "Settings field that chooses the grace period: a tab opened more recently than this is never suggested."
   },
   "settingsIncludeGrouped": {
@@ -648,11 +648,11 @@
     "description": "Explanation under the 'Ignore #hash' checkbox, which is shown on both settings pages."
   },
   "settingsBookmarks": {
-    "message": "Usa i preferiti",
+    "message": "Riconosci le pagine già salvate nei Preferiti",
     "description": "Settings checkbox: whether a bookmarked page is more readily suggested, since closing it loses nothing."
   },
   "settingsBookmarksHint": {
-    "message": "Una pagina nei preferiti si suggerisce più volentieri: si ritrova. Il browser chiederà il permesso di leggere i preferiti.",
+    "message": "Se una scheda è già nei tuoi Preferiti può essere chiusa prima quando non la usi, perché è già salvata.",
     "description": "Explanation under the 'Use the bookmarks' checkbox."
   },
   "settingsBookmarksDenied": {
@@ -660,27 +660,27 @@
     "description": "Message shown when the user refuses the browser's permission request for the bookmarks."
   },
   "settingsGroupProtected": {
-    "message": "Siti protetti",
+    "message": "Siti da non chiudere mai (Siti protetti)",
     "description": "Heading of the group of settings that lists the sites which are never suggested."
   },
   "settingsProtectedHint": {
-    "message": "Le schede di questi siti non vengono mai suggerite. Un dominio per riga; un *. iniziale copre i sottodomini.",
+    "message": "Le schede di questi siti non verranno mai chiuse né suggerite per la pulizia. Scrivi un dominio per riga (es. mail.google.com o *.politecnico.it).",
     "description": "Explanation under the 'Protected sites' heading."
   },
   "settingsProtectedLabel": {
-    "message": "Domini",
+    "message": "Domini protetti",
     "description": "Label of the text box in which the protected sites are typed, one per line."
   },
   "settingsGroupGeneral": {
-    "message": "Generali",
+    "message": "Lingua, Archivio e Generali",
     "description": "Heading of the group of settings that are neither about the suggestions nor about a site: badge, AI, archive, language."
   },
   "settingsShowBadge": {
-    "message": "Mostra il numero sull'icona",
+    "message": "Mostra sull'icona in alto il numero di schede da ripulire",
     "description": "Settings checkbox: whether the toolbar icon carries the count of tabs worth reviewing."
   },
   "settingsUseAi": {
-    "message": "Usa l'AI on-device quando è disponibile",
+    "message": "Usa l'AI integrata nel dispositivo (opzionale)",
     "description": "Settings checkbox: whether the browser's own on-device model may be used to name the groups."
   },
   "settingsAiAvailable": {
@@ -696,11 +696,11 @@
     "description": "State line under the on-device AI setting, when the browser has no on-device model."
   },
   "settingsFieldRetention": {
-    "message": "Conserva l'archivio per",
+    "message": "Conserva le schede chiuse nell'Archivio per",
     "description": "Settings field that chooses how long closed tabs stay in the archive."
   },
   "settingsFieldLanguage": {
-    "message": "Lingua",
+    "message": "Lingua dell'estensione",
     "description": "Settings field that chooses the language of the extension."
   },
   "settingsLanguageAuto": {
@@ -879,16 +879,12 @@
     "message": "Ignorare il percorso è molto aggressivo: due pagine diverse dello stesso sito diventano duplicati.",
     "description": "Warning shown in the settings when only the domain is compared."
   },
-  "guardCoexistence": {
-    "message": "Se usi ancora Duplicate Tabs Closer, disattivalo per evitare conflitti.",
-    "description": "Note in the duplicate settings. The other extension cannot be detected, so this is only information."
-  },
   "whitelistLabel": {
     "message": "Un pattern per riga",
     "description": "Label of the duplicate whitelist editor."
   },
   "whitelistHint": {
-    "message": "* sta per qualsiasi testo. Una riga tra barre, /…/, è un'espressione regolare. La sintassi è quella di Duplicate Tabs Closer, così puoi incollare la lista che usi già.",
+    "message": "* sta per qualsiasi testo. Una riga tra barre, /…/, è un'espressione regolare.",
     "description": "Explanation under the duplicate whitelist editor's label."
   },
   "whitelistSave": {
@@ -898,14 +894,6 @@
   "whitelistDefaults": {
     "message": "Ripristina i predefiniti",
     "description": "Button that puts this browser's default patterns back into the whitelist editor."
-  },
-  "whitelistImport": {
-    "message": "Importa da Duplicate Tabs Closer",
-    "description": "Button that explains how to bring another extension's whitelist over."
-  },
-  "whitelistImportHow": {
-    "message": "Un'estensione non può leggere i dati di un'altra estensione. Apri le opzioni di Duplicate Tabs Closer, copia la sua whitelist e incollala qui.",
-    "description": "Explanation shown by the 'Import from Duplicate Tabs Closer' button."
   },
   "whitelistLine": {
     "message": "Riga $1",
@@ -963,10 +951,6 @@
     "message": "Non fare nulla",
     "description": "Answer to the first-run duplicate question: no live checks at all."
   },
-  "onboardingWhitelist": {
-    "message": "Hai una whitelist di Duplicate Tabs Closer? Incollala qui",
-    "description": "Link of the first-run screen that opens the whitelist editor."
-  },
   "onboardingPartialData": {
     "message": "Nei primi giorni i suggerimenti si basano su dati parziali e diventano più precisi con l'uso.",
     "description": "Note of the first-run screen about what the suggestions are worth at the start."
@@ -974,5 +958,73 @@
   "onboardingStart": {
     "message": "Inizia",
     "description": "Button that saves the first-run choices and opens the panel."
+  },
+  "autopilotTitle": {
+    "message": "Pilota automatico",
+    "description": "Heading of the autopilot controls card."
+  },
+  "autopilotHint": {
+    "message": "Mantieni il browser sempre in ordine da solo in background.",
+    "description": "Subtitle of the autopilot controls card."
+  },
+  "autopilotDeclutter": {
+    "message": "Chiudi in automatico schede vecchie e inutili (salvate nell'Archivio)",
+    "description": "Toggle for automatic background decluttering."
+  },
+  "autopilotOrganize": {
+    "message": "Organizza in automatico le finestre e le schede di Chrome",
+    "description": "Toggle for automatic background window and tab organization."
+  },
+  "windowModeHeading": {
+    "message": "Come organizzare le finestre",
+    "description": "Heading for the switch between the two window organization modes."
+  },
+  "windowModeMergeTitle": {
+    "message": "Unisci e riordina in un'unica finestra",
+    "description": "Option 1: consolidate multiple windows into one sorted window."
+  },
+  "windowModeMergeHint": {
+    "message": "Raccoglie le finestre sparse in una sola finestra pulita e mette vicine le schede dello stesso sito o argomento (senza creare gruppi colorati nella barra).",
+    "description": "Explanation of the merge-windows mode."
+  },
+  "windowModeSplitTitle": {
+    "message": "Una finestra separata per ogni argomento o sito",
+    "description": "Option 2: place each topic/site cluster into its own dedicated window."
+  },
+  "windowModeSplitHint": {
+    "message": "Sposta le schede correlate nella stessa finestra così ogni finestra di Chrome è dedicata a un singolo tema o progetto (senza gruppi colorati).",
+    "description": "Explanation of the split-windows mode."
+  },
+  "windowOrganizeNow": {
+    "message": "Organizza le finestre adesso",
+    "description": "Button that runs window organization immediately."
+  },
+  "windowUngroupAll": {
+    "message": "Rimuovi tutti i gruppi colorati dalla barra",
+    "description": "Button that dissolves all existing Chrome tab groups."
+  },
+  "windowUseTabGroups": {
+    "message": "Usa i gruppi colorati di Chrome (avanzato)",
+    "description": "Optional toggle to enable native tab groups."
+  },
+  "windowUseTabGroupsHint": {
+    "message": "Scegli «Per sito web» per tenere insieme le pagine dello stesso sito, oppure «Per argomento» per mettere insieme pagine che parlano dello stesso tema.",
+    "description": "Explanation under the organizeMode / useTabGroups control."
+  },
+  "declutterIntro": {
+    "message": "Schede che probabilmente non ti servono più. Chiudile con un clic o attiva il Pilota automatico qui sopra: ogni scheda chiusa viene salvata nell'Archivio.",
+    "description": "Introductory helper text at the top of the Declutter view."
+  },
+  "declutterCloseRecommended": {
+    "message": "Chiudi tutte le consigliate ($1)",
+    "description": "Primary one-click button to close all tabs in the close bucket. $1 is the formatted count."
+  },
+  "organizeIntro": {
+    "message": "Mantieni le finestre di Chrome sempre ordinate in automatico, senza riempire la barra di gruppi colorati.",
+    "description": "Introductory helper text at the top of the Organize view."
+  },
+  "archiveIntro": {
+    "message": "Ogni scheda chiusa da te o dal Pilota automatico resta salvata qui e puoi riaprirla in qualsiasi momento.",
+    "description": "Introductory helper text at the top of the Archive view."
   }
 }

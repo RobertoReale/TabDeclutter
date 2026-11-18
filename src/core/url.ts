@@ -162,8 +162,11 @@ export function registrableDomain(urlOrHostname: string): string | null {
  * avatar takes its letter and its colour from, so the letter always matches the domain
  * on screen (PLAN.md §5.5).
  */
+const EXTENSION_SCHEMES = new Set(['chrome-extension:', 'moz-extension:']);
+
 export function displayHost(url: string): string {
   const parsed = parse(url.trim());
   if (parsed === null) return '';
+  if (EXTENSION_SCHEMES.has(parsed.protocol.toLowerCase())) return '';
   return stripWww(parsed.hostname.toLowerCase());
 }

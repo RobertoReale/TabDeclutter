@@ -16,7 +16,6 @@ import { signal } from '@preact/signals';
 import { DEFAULT_SETTINGS, type GuardMode } from '@/core/types';
 import { onboardedItem, readSettings, saveSettings } from '@/platform/storage';
 import { ONBOARDING_DEFAULT_MODE } from '../settings-fields';
-import { showSettings } from './view';
 
 /**
  * Whether the onboarding is what the panel has to show. `null` until the stored flag has been
@@ -58,10 +57,13 @@ export function startOnboarding(): void {
  */
 export async function finishOnboarding(): Promise<void> {
   const current = await readSettings();
+  const guardMode = draftGuardMode.value;
   await saveSettings({
     ...current,
     staleDays: draftStaleDays.value,
-    guard: { ...current.guard, mode: draftGuardMode.value },
+    autoDeclutter: guardMode === 'auto',
+    autoOrganize: guardMode === 'auto',
+    guard: { ...current.guard, mode: guardMode },
   });
   await onboardedItem.setValue(true);
   onboardingNeeded.value = false;
@@ -70,20 +72,6 @@ export async function finishOnboarding(): Promise<void> {
 /** "Inizia", as the button calls it. */
 export function completeOnboarding(): void {
   run(finishOnboarding());
-}
-
-/**
- * "Hai una whitelist di Duplicate Tabs Closer? Incollala qui" (§17.3): the editor is the one in
- * the duplicates settings, so the first run is finished with what has been answered so far and
- * the panel opens on that sub-page. The user lands in the editor, and the screen does not come
- * back behind them.
- */
-export function openWhitelistFromOnboarding(): void {
-  run(
-    finishOnboarding().then(() => {
-      showSettings('duplicates');
-    }),
-  );
 }
 
 function run(work: Promise<unknown>): void {

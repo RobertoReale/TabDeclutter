@@ -436,15 +436,38 @@ export function colorFor(key: string): GroupColor {
   return GROUP_COLORS[hashOf(key) % GROUP_COLORS.length] as GroupColor;
 }
 
+const NON_WEB_PROTOCOLS: ReadonlySet<string> = new Set([
+  'chrome:',
+  'chrome-extension:',
+  'moz-extension:',
+  'edge:',
+  'brave:',
+  'vivaldi:',
+  'opera:',
+  'about:',
+  'devtools:',
+  'view-source:',
+  'file:',
+  'data:',
+  'blob:',
+]);
+
 /**
  * Which site a tab belongs to, as a key: the registrable domain, or the host shown in a
  * row when there is none — `localhost`, an IP address, an intranet name are sites to the
  * user even though they have no eTLD+1 (docs/DECISIONS.md, M4.1). `''` for a tab with no
- * host at all (`about:blank`, a `file:` path), which can therefore not be grouped by
- * site.
+ * web host (`about:blank`, `chrome-extension://…`, `chrome://…`, a `file:` path), which
+ * can therefore not be grouped by site under an internal ID.
  */
 export function siteKey(url: string): string {
-  return registrableDomain(url) ?? displayHost(url);
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    if (NON_WEB_PROTOCOLS.has(parsed.protocol.toLowerCase())) return '';
+  } catch {
+    // Let registrableDomain / displayHost handle bare hostnames or unparseable strings.
+  }
+  return registrableDomain(trimmed) ?? displayHost(trimmed);
 }
 
 /** The label of a domain: `example.co.uk` → `example`, `localhost` → `localhost`. */
