@@ -35,11 +35,18 @@ import {
   type GroupColor,
   type GroupProposal,
 } from '@/core/cluster';
+import { MINUTE } from '@/core/time';
 import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '@/core/types';
 import { applyGroups, applyMessage, undoGroups, type ApplyResult } from '@/platform/groups';
-import { aiProposalItem } from '@/platform/storage';
+import { aiProposalItem, organizeSnoozeUntilItem } from '@/platform/storage';
 import { NO_WINDOW } from '@/platform/tabs';
-import { isMovableTab, organizeWindows, type OrganizeWindowsResult } from '@/platform/windows';
+import {
+  isMovableTab,
+  organizeWindows,
+  undoOrganizeWindows,
+  type OrganizeWindowsResult,
+  type OrganizeWindowsSnapshot,
+} from '@/platform/windows';
 import {
   aiActive,
   aiModel,
@@ -250,6 +257,19 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
   }
 }
 
+/** How long background `autoOrganize` snoozes after the user explicitly clicks Undo. */
+const WINDOW_UNDO_SNOOZE_MS = 5 * MINUTE;
+
+/** The last window organization that actually moved tabs, for as long as "Undo" can revert it. */
+export const windowOrganized = signal<{
+  readonly movedTabs: number;
+  readonly windowsCount: number;
+  readonly undo: OrganizeWindowsSnapshot;
+} | null>(null);
+
+/** Whether a window organization or window undo is currently running. */
+export const windowWorking = signal(false);
+
 export interface OrganizeWindowsWithAiOptions {
   readonly windowMode: AutoWindowMode;
   readonly clusterMode: ClusterMode;
@@ -275,36 +295,46 @@ export async function organizeWindowsWithAi(
 ): Promise<OrganizeWindowsResult> {
   const organize = request.deps?.organize ?? organizeWindows;
   clearAiFallbackNotice();
+  // An explicit user organize clears any prior undo snooze.
+  void organizeSnoozeUntilItem.setValue(0).catch(() => undefined);
+
+  const finish = async (proposal?: GroupProposal): Promise<OrganizeWindowsResult> => {
+    windowWorking.value = true;
+    try {
+      const outcome = await organize({
+        windowMode: request.windowMode,
+        clusterMode: request.clusterMode,
+        useTabGroups: request.useTabGroups,
+        focusedWindowId: request.focusedWindowId,
+        proposal,
+      });
+      if (outcome.undo !== undefined) {
+        windowOrganized.value = {
+          movedTabs: outcome.movedTabs,
+          windowsCount: outcome.windowsCount,
+          undo: outcome.undo,
+        };
+      }
+      return outcome;
+    } finally {
+      windowWorking.value = false;
+    }
+  };
 
   if (request.useTabGroups || request.clusterMode !== 'topic' || !request.useAi) {
-    return organize({
-      windowMode: request.windowMode,
-      clusterMode: request.clusterMode,
-      useTabGroups: request.useTabGroups,
-      focusedWindowId: request.focusedWindowId,
-    });
+    return finish();
   }
 
   const currentAvailability = availability.value ?? (await (request.deps?.check ?? checkAi)());
   if (currentAvailability !== 'available') {
-    return organize({
-      windowMode: request.windowMode,
-      clusterMode: request.clusterMode,
-      useTabGroups: request.useTabGroups,
-      focusedWindowId: request.focusedWindowId,
-    });
+    return finish();
   }
 
   const movable = (panelData.value?.tabs ?? []).filter(
     (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && isMovableTab(tab),
   );
   if (movable.length < 2) {
-    return organize({
-      windowMode: request.windowMode,
-      clusterMode: request.clusterMode,
-      useTabGroups: request.useTabGroups,
-      focusedWindowId: request.focusedWindowId,
-    });
+    return finish();
   }
 
   // Group across every open window together by placing movable tabs in one virtual window,
@@ -370,13 +400,33 @@ export async function organizeWindowsWithAi(
     }
   }
 
-  return organize({
-    windowMode: request.windowMode,
-    clusterMode: request.clusterMode,
-    useTabGroups: request.useTabGroups,
-    focusedWindowId: request.focusedWindowId,
-    proposal,
-  });
+  return finish(proposal);
+}
+
+/** Reverts the last window organization and briefly snoozes background auto-organize so it stays undone. */
+export async function undoWindowOrganize(
+  undoFn: typeof undoOrganizeWindows = undoOrganizeWindows,
+): Promise<void> {
+  const last = windowOrganized.value;
+  if (last === null || windowWorking.value) return;
+  windowOrganized.value = null;
+  windowWorking.value = true;
+  try {
+    await organizeSnoozeUntilItem
+      .setValue(Date.now() + WINDOW_UNDO_SNOOZE_MS)
+      .catch(() => undefined);
+    await aiProposalItem.setValue(null).catch(() => undefined);
+    await undoFn(last.undo);
+  } catch (error: unknown) {
+    console.error('TabDeclutter: undo window organize', error);
+  } finally {
+    windowWorking.value = false;
+  }
+}
+
+/** Dismisses the window organization toast, keeping the new window layout. */
+export function dismissWindowOrganized(): void {
+  windowOrganized.value = null;
 }
 
 /** "Annulla" in the spinner (§7.3): the run stops and §7.2's proposal stays on screen. */
@@ -388,6 +438,8 @@ export function cancelAiGrouping(): void {
 export function resetAiGrouping(): void {
   running = null;
   aiWorking.value = false;
+  windowWorking.value = false;
+  windowOrganized.value = null;
   clearAiFallbackNotice();
   answer.value = null;
 }

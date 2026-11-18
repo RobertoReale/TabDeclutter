@@ -63,10 +63,24 @@ export interface OrganizeWindowsOptions {
   readonly api?: WindowsOrganizeApi;
 }
 
+export interface WindowTabSnapshot {
+  readonly tabId: number;
+  readonly windowId: number;
+  readonly index: number;
+  readonly active: boolean;
+}
+
+export interface OrganizeWindowsSnapshot {
+  readonly tabs: readonly WindowTabSnapshot[];
+  readonly focusedWindowId?: number;
+}
+
 export interface OrganizeWindowsResult {
   readonly movedTabs: number;
   readonly ungroupedTabs: number;
   readonly windowsCount: number;
+  /** Snapshot captured before moving tabs so the user can undo the window organization in one click. */
+  readonly undo?: OrganizeWindowsSnapshot;
 }
 
 /**
@@ -112,6 +126,19 @@ export async function organizeWindows(
   );
   if (allTabs.length === 0) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
 
+  const snapshot: OrganizeWindowsSnapshot = {
+    tabs: allTabs
+      .filter(isMovableTab)
+      .sort((a, b) => (a.windowId !== b.windowId ? a.windowId - b.windowId : a.index - b.index))
+      .map((tab) => ({
+        tabId: tab.id,
+        windowId: tab.windowId,
+        index: tab.index,
+        active: tab.active,
+      })),
+    ...(options.focusedWindowId === undefined ? {} : { focusedWindowId: options.focusedWindowId }),
+  };
+
   if (options.windowMode === 'merge-windows') {
     const moved = await mergeAndSortIntoOneWindow(
       allTabs,
@@ -120,7 +147,12 @@ export async function organizeWindows(
       options.proposal,
       api,
     );
-    return { movedTabs: moved, ungroupedTabs, windowsCount: 1 };
+    return {
+      movedTabs: moved,
+      ungroupedTabs,
+      windowsCount: 1,
+      ...(moved > 0 ? { undo: snapshot } : {}),
+    };
   }
 
   const result = await splitIntoThematicWindows(
@@ -130,7 +162,96 @@ export async function organizeWindows(
     options.proposal,
     api,
   );
-  return { movedTabs: result.movedTabs, ungroupedTabs, windowsCount: result.windowsCount };
+  return {
+    movedTabs: result.movedTabs,
+    ungroupedTabs,
+    windowsCount: result.windowsCount,
+    ...(result.movedTabs > 0 ? { undo: snapshot } : {}),
+  };
+}
+
+/**
+ * Restores tabs back to the windows and positions captured before `organizeWindows` ran.
+ *
+ * Emptied windows that the browser closed during merge/split are recreated first so their tabs
+ * leave existing windows before existing windows are reordered back to their original indices.
+ */
+export async function undoOrganizeWindows(
+  snapshot: OrganizeWindowsSnapshot,
+  api: WindowsOrganizeApi = defaultApi(),
+): Promise<number> {
+  const queried = await attempt(() => api.tabs.query({}));
+  if (!queried.ok) return 0;
+
+  const liveTabs = asTabInfos(queried.value).filter(
+    (tab) => !tab.incognito && tab.windowId !== NO_WINDOW,
+  );
+  const liveById = new Map(liveTabs.map((tab) => [tab.id, tab]));
+  const liveWindowIds = new Set(liveTabs.map((tab) => tab.windowId));
+
+  const byOrigWindow = new Map<number, WindowTabSnapshot[]>();
+  for (const entry of snapshot.tabs) {
+    const live = liveById.get(entry.tabId);
+    if (live === undefined || live.pinned) continue;
+    const list = byOrigWindow.get(entry.windowId);
+    if (list === undefined) byOrigWindow.set(entry.windowId, [entry]);
+    else list.push(entry);
+  }
+
+  // Sort each window's entries by original index, and restore closed windows first so tabs
+  // leave surviving windows before surviving windows restore their original order.
+  const entries = [...byOrigWindow.entries()].sort(([leftId], [rightId]) => {
+    const leftAlive = liveWindowIds.has(leftId) ? 1 : 0;
+    const rightAlive = liveWindowIds.has(rightId) ? 1 : 0;
+    if (leftAlive !== rightAlive) return leftAlive - rightAlive;
+    return leftId - rightId;
+  });
+
+  let restored = 0;
+  for (const [origWindowId, tabs] of entries) {
+    tabs.sort((a, b) => a.index - b.index);
+    const [first, ...rest] = tabs;
+    if (first === undefined) continue;
+
+    if (!liveWindowIds.has(origWindowId)) {
+      const created = await attempt(() =>
+        api.windows.create({
+          tabId: first.tabId,
+          focused: origWindowId === snapshot.focusedWindowId,
+        }),
+      );
+      const newWindowId = created.ok ? created.value?.id : undefined;
+      if (newWindowId === undefined) continue;
+      restored += 1;
+      let idx = 1;
+      for (const tab of rest) {
+        const moved = await attempt(() =>
+          api.tabs.move(tab.tabId, { windowId: newWindowId, index: idx }),
+        );
+        if (moved.ok) {
+          restored += 1;
+          idx += 1;
+        }
+      }
+      continue;
+    }
+
+    for (const tab of tabs) {
+      const moved = await attempt(() =>
+        api.tabs.move(tab.tabId, { windowId: origWindowId, index: tab.index }),
+      );
+      if (moved.ok) restored += 1;
+    }
+  }
+
+  if (typeof api.tabs.update === 'function') {
+    for (const entry of snapshot.tabs) {
+      if (!entry.active || !liveById.has(entry.tabId)) continue;
+      await attempt(() => api.tabs.update!(entry.tabId, { active: true }));
+    }
+  }
+
+  return restored;
 }
 
 /**

@@ -7,6 +7,7 @@ import { isSafeToAutoClose } from '../../src/entrypoints/background/autopilot';
 import type { BrowserTab } from '../../src/platform/tabs';
 import {
   organizeWindows,
+  undoOrganizeWindows,
   ungroupAllOpenTabs,
   type WindowsOrganizeApi,
 } from '../../src/platform/windows';
@@ -241,6 +242,53 @@ describe('platform/windows', () => {
     expect(tabs.find((t) => t.id === 1)?.windowId).not.toBe(tabs.find((t) => t.id === 3)?.windowId);
     // Protected tabs (blank, OAuth, pinned) were never moved even though the proposal named them
     expect(moves.some((m) => m.tabId === 5 || m.tabId === 6 || m.tabId === 7)).toBe(false);
+  });
+
+  it('restores tabs and emptied windows back to their original layout with undoOrganizeWindows', async () => {
+    const { api, tabs } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://youtube.com/watch?v=1',
+        title: 'Video 1',
+        active: true,
+      },
+      { id: 2, windowId: 1, index: 1, url: 'https://github.com/repo/one', title: 'Repo 1' },
+      {
+        id: 3,
+        windowId: 2,
+        index: 0,
+        url: 'https://youtube.com/watch?v=2',
+        title: 'Video 2',
+        active: true,
+      },
+      { id: 4, windowId: 2, index: 1, url: 'https://github.com/repo/two', title: 'Repo 2' },
+    ]);
+
+    const result = await organizeWindows({
+      windowMode: 'merge-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    // All 4 tabs were consolidated into window 1 (window 2 is now empty/closed).
+    expect(new Set(tabs.map((t) => t.windowId))).toEqual(new Set([1]));
+    expect(result.undo).toBeDefined();
+
+    const restoredCount = await undoOrganizeWindows(result.undo!, api);
+    expect(restoredCount).toBe(4);
+
+    // Tabs 1 & 2 are back in window 1 at indices 0 & 1; tabs 3 & 4 share a recreated second window.
+    expect(tabs.find((t) => t.id === 1)).toMatchObject({ windowId: 1, index: 0 });
+    expect(tabs.find((t) => t.id === 2)).toMatchObject({ windowId: 1, index: 1 });
+    const win3 = tabs.find((t) => t.id === 3)?.windowId;
+    expect(win3).not.toBe(1);
+    expect(tabs.find((t) => t.id === 4)?.windowId).toBe(win3);
+    expect(tabs.find((t) => t.id === 3)?.index).toBe(0);
+    expect(tabs.find((t) => t.id === 4)?.index).toBe(1);
   });
 });
 

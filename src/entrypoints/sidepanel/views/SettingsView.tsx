@@ -195,29 +195,6 @@ function MainSettings({ language }: { language: string }) {
             setSetting('showBadge', value);
           }}
         />
-        {/* §5.5: no switch where there is no Prompt API, unless the user already enabled it. */}
-        {((caps.promptApi && availability.value !== 'unsupported') || current.useOnDeviceAi) && (
-          <CheckField
-            label="settingsUseAi"
-            value={current.useOnDeviceAi}
-            onPick={(value) => {
-              setSetting('useOnDeviceAi', value);
-            }}
-          />
-        )}
-        {current.useOnDeviceAi && aiState !== null && (
-          <p
-            class={
-              availability.value === 'unavailable' || availability.value === 'unsupported'
-                ? 'td-warning'
-                : 'td-field-hint'
-            }
-            role="status"
-            aria-live="polite"
-          >
-            {t(aiState)}
-          </p>
-        )}
       </div>
 
       <div class="td-settings-card">
@@ -232,6 +209,36 @@ function MainSettings({ language }: { language: string }) {
           {t('settingsOpenDuplicates')}
         </button>
       </div>
+
+      {/* §5.5: on-device AI is experimental, Chrome-only, and off by default; keep hidden unless supported or already enabled. */}
+      {((caps.promptApi && availability.value !== 'unsupported') || current.useOnDeviceAi) && (
+        <details class="td-advanced-details" open={current.useOnDeviceAi}>
+          <summary class="td-advanced-summary">{t('settingsGroupExperimental')}</summary>
+          <div class="td-advanced-body">
+            <p class="td-field-hint">{t('settingsExperimentalAiHint')}</p>
+            <CheckField
+              label="settingsUseAi"
+              value={current.useOnDeviceAi}
+              onPick={(value) => {
+                setSetting('useOnDeviceAi', value);
+              }}
+            />
+            {current.useOnDeviceAi && aiState !== null && (
+              <p
+                class={
+                  availability.value === 'unavailable' || availability.value === 'unsupported'
+                    ? 'td-warning'
+                    : 'td-field-hint'
+                }
+                role="status"
+                aria-live="polite"
+              >
+                {t(aiState)}
+              </p>
+            )}
+          </div>
+        </details>
+      )}
     </section>
   );
 }

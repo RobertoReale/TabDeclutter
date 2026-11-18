@@ -687,6 +687,14 @@
     "message": "Language, Archive and General",
     "description": "Heading of the group of settings that are neither about the suggestions nor about a site: badge, AI, archive, language."
   },
+  "settingsGroupExperimental": {
+    "message": "Experimental",
+    "description": "Heading of the collapsible experimental settings section at the bottom of Settings."
+  },
+  "settingsExperimentalAiHint": {
+    "message": "Optional and Chrome-only. Local organization already runs instantly and offline without AI.",
+    "description": "Honest explanation under the Experimental heading clarifying that on-device AI is optional and off by default."
+  },
   "settingsShowBadge": {
     "message": "Show the number of tabs to clean up on the toolbar icon",
     "description": "Settings checkbox: whether the toolbar icon carries the count of tabs worth reviewing."
@@ -1010,6 +1018,14 @@
   "windowOrganizeNow": {
     "message": "Organize windows now",
     "description": "Button that runs window organization immediately."
+  },
+  "windowOrganizedOne": {
+    "message": "Organized into $1 window",
+    "description": "Toast after organizing windows into one clean window. $1 is the formatted count."
+  },
+  "windowOrganizedOther": {
+    "message": "Organized into $1 windows",
+    "description": "Toast after organizing tabs across multiple windows. $1 is the formatted count."
   },
   "windowUngroupAll": {
     "message": "Remove all coloured tab groups",

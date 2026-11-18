@@ -50,6 +50,7 @@ import {
   cancelAiGrouping,
   clearAiFallbackNotice,
   dismissApplied,
+  dismissWindowOrganized,
   draft,
   mode,
   options,
@@ -61,6 +62,9 @@ import {
   setScope,
   startAiGrouping,
   undoApply,
+  undoWindowOrganize,
+  windowOrganized,
+  windowWorking,
   working,
 } from '../state/organize';
 import { setSetting, settings } from '../state/settings';
@@ -210,6 +214,7 @@ export function OrganizeView({ language }: { language: string }) {
           <button
             type="button"
             class="td-action td-action-primary"
+            disabled={windowWorking.value || aiWorking.value}
             onClick={() => {
               runWindowOrganizeNow();
             }}
@@ -318,7 +323,8 @@ export function OrganizeView({ language }: { language: string }) {
       </label>
       <p class="td-field-hint">{t('windowUseTabGroupsHint')}</p>
 
-      {mode.value === 'topic' && (
+      {/* Experimental on-device AI panel is only shown when the user explicitly opted in under Settings. */}
+      {mode.value === 'topic' && useAi.value && (
         <AiPanel
           language={language}
           useTabGroups={currentSettings.useTabGroups}
@@ -387,6 +393,12 @@ export function OrganizeView({ language }: { language: string }) {
             )}
           </div>
         </>
+      )}
+
+      {!currentSettings.useTabGroups && (
+        <div class="td-footer">
+          <WindowOrganizedToast language={language} />
+        </div>
       )}
     </section>
   );
@@ -538,6 +550,40 @@ function AppliedToast({ language }: { language: string }) {
             {t('actionUndo')}
           </button>
           <button type="button" class="td-toast-undo" onClick={dismissApplied}>
+            {t('organizeDismiss')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Undo toast for window organization (`Organize windows now`): lets the user restore every
+ * moved tab back to its original window and position in one click.
+ */
+function WindowOrganizedToast({ language }: { language: string }) {
+  const result = windowOrganized.value;
+  const count = result === null ? '' : formatCount(result.windowsCount, language);
+
+  return (
+    <div class="td-toast-slot" role="status" aria-live="polite">
+      {result !== null && (
+        <div class="td-toast">
+          <span class="td-toast-text">
+            {t(result.windowsCount === 1 ? 'windowOrganizedOne' : 'windowOrganizedOther', count)}
+          </span>
+          <button
+            type="button"
+            class="td-toast-undo"
+            disabled={windowWorking.value}
+            onClick={() => {
+              void undoWindowOrganize();
+            }}
+          >
+            {t('actionUndo')}
+          </button>
+          <button type="button" class="td-toast-undo" onClick={dismissWindowOrganized}>
             {t('organizeDismiss')}
           </button>
         </div>

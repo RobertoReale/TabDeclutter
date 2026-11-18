@@ -89,6 +89,17 @@ describe('the site of a tab', () => {
     expect(siteKey('https://www.bbc.co.uk/news')).toBe('bbc.co.uk');
   });
 
+  it('keeps major web-app subdomains separate from their parent domain', () => {
+    expect(siteKey('https://gemini.google.com/app/6c9f4e2b8a1d')).toBe('gemini.google.com');
+    expect(siteKey('https://mail.google.com/mail/u/0/#inbox')).toBe('mail.google.com');
+    expect(siteKey('https://docs.google.com/document/d/1A2b3C4d/edit')).toBe('docs.google.com');
+    expect(siteKey('https://music.youtube.com/watch?v=abc')).toBe('music.youtube.com');
+    expect(siteName('gemini.google.com')).toBe('Gemini');
+    expect(siteName('mail.google.com')).toBe('Gmail');
+    expect(siteName('docs.google.com')).toBe('Google Docs');
+    expect(siteName('music.youtube.com')).toBe('YouTube Music');
+  });
+
   it('is the host when there is no registrable domain', () => {
     expect(siteKey('http://localhost:5173/panel')).toBe('localhost');
     expect(siteKey('http://192.168.1.4/router')).toBe('192.168.1.4');
@@ -220,6 +231,21 @@ describe('the tokens of a tab (PLAN.md §7.2.1)', () => {
 
   it('has no path to read when the URL is not one', () => {
     expect(tokenize(tab(1, 'not a url at all', 'Pasta fresca'))).toEqual(['pasta', 'fresca']);
+  });
+
+  it('drops URL routing noise and opaque path IDs without losing title words', () => {
+    const gemini = tokenize(
+      tab(1, 'https://gemini.google.com/app/6c9f4e2b8a1d', 'Basi ortogonali perché è così'),
+    );
+    expect(gemini).toEqual(['basi', 'ortogonali']);
+
+    const youtube = tokenize(
+      tab(2, 'https://www.youtube.com/watch?v=abc123', 'Watch review app design - YouTube'),
+    );
+    expect(youtube).toContain('watch');
+    expect(youtube).toContain('app');
+    expect(youtube).toContain('review');
+    expect(youtube).toContain('design');
   });
 });
 

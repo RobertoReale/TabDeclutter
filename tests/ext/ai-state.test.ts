@@ -43,14 +43,21 @@ import {
   setOptions,
   setScope,
   startAiGrouping,
+  undoWindowOrganize,
+  windowOrganized,
 } from '../../src/entrypoints/sidepanel/state/organize';
 import { brought } from '../../src/entrypoints/sidepanel/state/organize-request';
 import { setSetting } from '../../src/entrypoints/sidepanel/state/settings';
 import { panelData, type PanelData } from '../../src/entrypoints/sidepanel/state/tabs';
 import type { Capabilities } from '../../src/platform/capabilities';
 import type { AiAvailability, DownloadOptions, LlmModule } from '../../src/platform/llm';
-import { aiProposalItem, readSettings, saveSettings } from '../../src/platform/storage';
-import type { OrganizeWindowsOptions } from '../../src/platform/windows';
+import {
+  aiProposalItem,
+  organizeSnoozeUntilItem,
+  readSettings,
+  saveSettings,
+} from '../../src/platform/storage';
+import type { OrganizeWindowsOptions, OrganizeWindowsSnapshot } from '../../src/platform/windows';
 
 const NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
 
@@ -644,5 +651,43 @@ describe('persisting topic + AI preferences without resets or races', () => {
         tabIds: [1_396_528_501, 1_396_528_512],
       },
     ]);
+  });
+
+  it('captures undo snapshot after window organization and snoozes background autoOrganize on Undo', async () => {
+    const snapshot: OrganizeWindowsSnapshot = {
+      tabs: [{ tabId: 1, windowId: 1, index: 0, active: true }],
+      focusedWindowId: 1,
+    };
+
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      useAi: false,
+      deps: {
+        organize: async () => ({
+          movedTabs: 2,
+          ungroupedTabs: 0,
+          windowsCount: 2,
+          undo: snapshot,
+        }),
+      },
+    });
+
+    expect(windowOrganized.value).toEqual({
+      movedTabs: 2,
+      windowsCount: 2,
+      undo: snapshot,
+    });
+
+    const undone: OrganizeWindowsSnapshot[] = [];
+    await undoWindowOrganize(async (snap) => {
+      undone.push(snap);
+      return 2;
+    });
+
+    expect(undone).toEqual([snapshot]);
+    expect(windowOrganized.value).toBeNull();
+    expect(await organizeSnoozeUntilItem.getValue()).toBeGreaterThan(Date.now());
   });
 });

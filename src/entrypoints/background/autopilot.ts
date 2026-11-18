@@ -7,18 +7,17 @@
  * cannot overlap. Everything lives in storage so service worker restarts lose nothing.
  */
 
-import { proposeGroups } from '@/core/cluster';
 import { compile } from '@/core/patterns';
 import { scoreTabs, type ScoredTab } from '@/core/scoring';
 import { DAY, HOUR } from '@/core/time';
 import { STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
 import { caps, type Capabilities } from '@/platform/capabilities';
-import { applyGroups } from '@/platform/groups';
 import {
   activityItem,
   aiProposalItem,
   duplicateWhitelistItem,
   keepsItem,
+  organizeSnoozeUntilItem,
   protectedDomainsItem,
   readGuardState,
   readKeeps,
@@ -169,6 +168,10 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     }
 
     if (settings.autoOrganize) {
+      const snoozeUntil = await organizeSnoozeUntilItem.getValue().catch(() => 0);
+      if (snoozeUntil > at) {
+        return { closedTabs, closedWindows, groupedWindows };
+      }
       const aiProposal =
         !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi
           ? ((await aiProposalItem.getValue().catch(() => null)) ?? undefined)
@@ -181,23 +184,6 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         proposal: aiProposal,
       });
       groupedWindows = winResult.windowsCount;
-
-      if (settings.useTabGroups && capabilities.tabGroups) {
-        const openTabs = await queryTabs();
-        const proposal = proposeGroups(openTabs, settings.autoOrganizeMode, {
-          includePinned: false,
-          includeGrouped: false,
-        });
-        if (proposal.groups.length > 0) {
-          await applyGroups(proposal, {
-            capabilities,
-            sortByGroup: true,
-            collapse: false,
-            includePinned: false,
-            includeGrouped: false,
-          });
-        }
-      }
     }
 
     return { closedTabs, closedWindows, groupedWindows };
@@ -333,27 +319,13 @@ export function isSafeToAutoClose(
 function onlyAiToggleChanged(
   change: { oldValue?: unknown; newValue?: unknown } | undefined,
 ): boolean {
-  if (change === undefined) return false;
-  const oldVal = change.oldValue as Record<string, unknown> | undefined;
-  const newVal = change.newValue as Record<string, unknown> | undefined;
-  if (
-    oldVal === undefined ||
-    newVal === undefined ||
-    typeof oldVal !== 'object' ||
-    typeof newVal !== 'object'
-  ) {
-    return false;
-  }
-  const keys = new Set([...Object.keys(oldVal), ...Object.keys(newVal)]);
-  let aiChanged = false;
-  for (const key of keys) {
-    if (key === 'useOnDeviceAi') {
-      aiChanged = oldVal[key] !== newVal[key];
-      continue;
-    }
-    if (JSON.stringify(oldVal[key]) !== JSON.stringify(newVal[key])) return false;
-  }
-  return aiChanged;
+  const oldVal = change?.oldValue as Record<string, unknown> | undefined;
+  const newVal = change?.newValue as Record<string, unknown> | undefined;
+  if (!oldVal || !newVal || oldVal.useOnDeviceAi === newVal.useOnDeviceAi) return false;
+  return (
+    JSON.stringify({ ...oldVal, useOnDeviceAi: false }) ===
+    JSON.stringify({ ...newVal, useOnDeviceAi: false })
+  );
 }
 
 function failed(error: unknown): void {

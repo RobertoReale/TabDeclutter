@@ -120,6 +120,13 @@ export const guardStateItem = defineVersioned<GuardState>('session:guardState', 
 export const aiProposalItem = defineVersioned<GroupProposal | null>('session:aiProposal', null);
 
 /**
+ * Timestamp (ms epoch) until which background `autoOrganize` pauses after the user clicks
+ * Undo on a window organization, so autopilot does not immediately re-organize the tabs
+ * without touching the user's persisted `autoOrganize` setting.
+ */
+export const organizeSnoozeUntilItem = defineVersioned<number>('session:organizeSnoozeUntil', 0);
+
+/**
  * One read-modify-write at a time per key.
  *
  * Two closes a few milliseconds apart would otherwise both read the same archive and the

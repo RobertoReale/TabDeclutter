@@ -115,6 +115,50 @@ export const DEFAULT_CLUSTER_OPTIONS: Required<ClusterOptions> = {
  * and this list only has to beat it where the user would notice ("Stack Overflow", not
  * "Stackoverflow").
  */
+/**
+ * Distinct web applications that live on a subdomain of a shared parent domain.
+ *
+ * Keeping them as separate site keys means Gemini, Gmail, Google Docs, Drive, Calendar,
+ * YouTube Music, Outlook, and Teams each get their own clean group/window instead of all
+ * collapsing into `google.com` or `microsoft.com`.
+ */
+const APP_SUBDOMAINS: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(
+    [
+      ['aistudio', 'Google AI Studio'],
+      ['calendar', 'Google Calendar'],
+      ['chat', 'Google Chat'],
+      ['classroom', 'Google Classroom'],
+      ['colab.research', 'Google Colab'],
+      ['console.cloud', 'Google Cloud'],
+      ['docs', 'Google Docs'],
+      ['drive', 'Google Drive'],
+      ['gemini', 'Gemini'],
+      ['keep', 'Google Keep'],
+      ['mail', 'Gmail'],
+      ['maps', 'Google Maps'],
+      ['meet', 'Google Meet'],
+      ['notebooklm', 'NotebookLM'],
+      ['photos', 'Google Photos'],
+      ['scholar', 'Google Scholar'],
+      ['sheets', 'Google Sheets'],
+      ['slides', 'Google Slides'],
+      ['translate', 'Google Translate'],
+    ].map(([sub, name]) => [`${sub}.google.com`, name] as const),
+  ),
+  'copilot.microsoft.com': 'Copilot',
+  'music.youtube.com': 'YouTube Music',
+  'onedrive.live.com': 'OneDrive',
+  'outlook.live.com': 'Outlook',
+  'outlook.office.com': 'Outlook',
+  'outlook.office365.com': 'Outlook',
+  'portal.azure.com': 'Azure',
+  'studio.youtube.com': 'YouTube Studio',
+  'teams.microsoft.com': 'Microsoft Teams',
+  'web.telegram.org': 'Telegram',
+  'web.whatsapp.com': 'WhatsApp',
+};
+
 const SITE_NAMES: Readonly<Record<string, string>> = {
   airbnb: 'Airbnb',
   amazon: 'Amazon',
@@ -125,7 +169,10 @@ const SITE_NAMES: Readonly<Record<string, string>> = {
   'bing.com': 'Bing',
   'booking.com': 'Booking.com',
   'brave.com': 'Brave',
+  'chatgpt.com': 'ChatGPT',
+  'claude.ai': 'Claude',
   'corriere.it': 'Corriere della Sera',
+  'discord.com': 'Discord',
   'duckduckgo.com': 'DuckDuckGo',
   'ecosia.org': 'Ecosia',
   'extensionworkshop.com': 'Extension Workshop',
@@ -152,6 +199,7 @@ const SITE_NAMES: Readonly<Record<string, string>> = {
   'notion.so': 'Notion',
   'npmjs.com': 'npm',
   'openai.com': 'OpenAI',
+  'perplexity.ai': 'Perplexity',
   'pragmaticengineer.com': 'The Pragmatic Engineer',
   'preactjs.com': 'Preact',
   'python.org': 'Python',
@@ -187,206 +235,63 @@ const SITE_NAMES: Readonly<Record<string, string>> = {
  * (PLAN.md §7.2.1). Only words of three characters or more are listed: shorter ones never
  * become tokens anyway (`minTokenLength`).
  */
-const STOPWORDS: ReadonlySet<string> = new Set([
+const STOPWORDS: ReadonlySet<string> = new Set(
   // Italian
-  'agli',
-  'alla',
-  'alle',
-  'allo',
-  'anche',
-  'ancora',
-  'avere',
-  'che',
-  'chi',
-  'come',
-  'con',
-  'cosa',
-  'dai',
-  'dal',
-  'dalla',
-  'degli',
-  'dei',
-  'del',
-  'della',
-  'delle',
-  'dello',
-  'dopo',
-  'due',
-  'essere',
-  'fare',
-  'fra',
-  'gli',
-  'hanno',
-  'loro',
-  'meno',
-  'mia',
-  'mio',
-  'molto',
-  'nel',
-  'nella',
-  'nelle',
-  'nello',
-  'noi',
-  'non',
-  'nostro',
-  'ogni',
-  'oppure',
-  'per',
-  'perche',
-  'piu',
-  'poi',
-  'prima',
-  'quale',
-  'quando',
-  'quanto',
-  'quella',
-  'quelle',
-  'quelli',
-  'quello',
-  'questa',
-  'queste',
-  'questi',
-  'questo',
-  'sempre',
-  'senza',
-  'siamo',
-  'solo',
-  'sono',
-  'sopra',
-  'sotto',
-  'stato',
-  'sua',
-  'sue',
-  'sui',
-  'sul',
-  'sulla',
-  'suo',
-  'tra',
-  'tre',
-  'tuo',
-  'tutta',
-  'tutte',
-  'tutti',
-  'tutto',
-  'una',
-  'uno',
-  'vedi',
-  'voi',
-  // English
-  'about',
-  'after',
-  'all',
-  'also',
-  'and',
-  'any',
-  'are',
-  'because',
-  'been',
-  'before',
-  'being',
-  'but',
-  'can',
-  'could',
-  'did',
-  'does',
-  'doing',
-  'done',
-  'each',
-  'for',
-  'from',
-  'get',
-  'getting',
-  'had',
-  'has',
-  'have',
-  'her',
-  'here',
-  'his',
-  'how',
-  'into',
-  'its',
-  'just',
-  'like',
-  'made',
-  'make',
-  'many',
-  'may',
-  'more',
-  'most',
-  'much',
-  'must',
-  'new',
-  'not',
-  'now',
-  'one',
-  'only',
-  'other',
-  'our',
-  'out',
-  'over',
-  'own',
-  'said',
-  'same',
-  'say',
-  'see',
-  'should',
-  'since',
-  'some',
-  'such',
-  'than',
-  'that',
-  'the',
-  'their',
-  'them',
-  'then',
-  'there',
-  'these',
-  'they',
-  'this',
-  'those',
-  'through',
-  'too',
-  'two',
-  'under',
-  'use',
-  'used',
-  'using',
-  'very',
-  'was',
-  'way',
-  'were',
-  'what',
-  'when',
-  'where',
-  'which',
-  'while',
-  'who',
-  'why',
-  'will',
-  'with',
-  'would',
-  'you',
-  'your',
-  // The web's own furniture, which a path and a title are full of and which no topic is
-  // ever about.
-  'amp',
-  'aspx',
-  'com',
-  'default',
-  'home',
-  'htm',
-  'html',
-  'http',
-  'https',
-  'index',
-  'jsp',
-  'net',
-  'org',
-  'page',
-  'pages',
-  'php',
-  'www',
-]);
+  (
+    'agli alla alle allo anche ancora avere che chi cioe come con cosa cosi dai dal dall dalla ' +
+    'degli dei del dell della delle dello dopo due essere fare fra gia gli hanno loro meno mia ' +
+    'mio molto nel nell nella nelle nello noi non nostro ogni oppure per perche pero piu poi ' +
+    'prima puo quale quando quanto quella quelle quelli quello questa queste questi questo sara ' +
+    'sempre senza siamo solo sono sopra sotto stato sua sue sui sul sull sulla suo tra tre tuo ' +
+    'tutta tutte tutti tutto una uno vedi voi ' +
+    // English
+    'about after all also and any are because been before being but can could did does doing ' +
+    'done each for from get getting had has have her here his how into its just like made make ' +
+    'many may more most much must new not now one only other our out over own said same say see ' +
+    'should since some such than that the their them then there these they this those through ' +
+    'too two under use used using very was way were what when where which while who why will ' +
+    'with would you your ' +
+    // Web furniture
+    'amp aspx com default home htm html http https index jsp net org page pages php www'
+  ).split(' '),
+);
+
+/**
+ * URL-path routing segments that carry no topical signal (e.g. `/watch` on YouTube, `/app/…`
+ * on Gemini, `/document/d/…/edit` on Google Docs). Filtered ONLY from URL paths — never from
+ * page titles — so a title legitimately about watches or mobile apps keeps those words.
+ */
+const PATH_NOISE: ReadonlySet<string> = new Set(
+  'app apps auth blob callback channel chat chats commit commits document edit embed feed file files folder folders inbox issue issues login logout mail oauth oauth2 playlist post posts presentation pull pulls raw redirect results search share shorts signin signup spreadsheets status thread threads tree view watch'.split(
+    ' ',
+  ),
+);
+
+/** Strips diacritics only when non-ASCII characters appear, so ASCII words stay zero-cost. */
+function foldAccents(word: string): string {
+  for (let i = 0; i < word.length; i += 1) {
+    if (word.charCodeAt(i) > 127) {
+      return word.normalize('NFD').replace(/\p{Mn}+/gu, '');
+    }
+  }
+  return word;
+}
+
+/**
+ * Detects opaque URL path IDs (pure numbers like `2026` or `847291`, or long hex/base64-like
+ * slugs such as Gemini/Docs/ChatGPT IDs `6c9f4e2b8a1d`) that would otherwise add high-IDF noise
+ * to TF-IDF vectors and drown out real topic words.
+ */
+function isOpaquePathToken(token: string): boolean {
+  let digits = 0;
+  for (let i = 0; i < token.length; i += 1) {
+    const code = token.charCodeAt(i);
+    if (code >= 48 && code <= 57) digits += 1;
+  }
+  if (digits === token.length) return true;
+  if (token.length >= 8 && digits >= 2) return true;
+  return false;
+}
 
 /**
  * The separators a site puts between a page's name and its own (PLAN.md §7.2.1). Spaced,
@@ -467,6 +372,8 @@ export function siteKey(url: string): string {
   } catch {
     // Let registrableDomain / displayHost handle bare hostnames or unparseable strings.
   }
+  const host = displayHost(trimmed).toLowerCase();
+  if (host in APP_SUBDOMAINS) return host;
   return registrableDomain(trimmed) ?? displayHost(trimmed);
 }
 
@@ -477,12 +384,12 @@ function domainLabel(key: string): string {
 }
 
 /**
- * What the group of a site is called (PLAN.md §7.1): the known name, otherwise the domain
- * without its TLD, capitalised. `''` in, `''` out.
+ * What the group of a site is called (PLAN.md §7.1): the known app/site name, otherwise the
+ * domain without its TLD, capitalised. `''` in, `''` out.
  */
 export function siteName(key: string): string {
   if (key === '') return '';
-  const known = SITE_NAMES[key] ?? SITE_NAMES[domainLabel(key)];
+  const known = APP_SUBDOMAINS[key] ?? SITE_NAMES[key] ?? SITE_NAMES[domainLabel(key)];
   if (known !== undefined) return known;
   // Nothing to drop when there is no TLD (`localhost`, `127.0.0.1`): the host is the name.
   return capitalize(key.includes('.') ? domainLabel(key) : key);
@@ -565,13 +472,17 @@ export function tokenize(
   options: ClusterOptions = {},
 ): readonly string[] {
   const minLength = options.minTokenLength ?? DEFAULT_CLUSTER_OPTIONS.minTokenLength;
-  const text = `${stripSiteSuffix(tab.title, tab.url)} ${pathOf(tab.url)}`;
   const tokens: string[] = [];
-  for (const raw of text.toLowerCase().split(TOKEN_BOUNDARY)) {
-    if (raw.length < minLength) continue;
-    if (STOPWORDS.has(raw)) continue;
-    tokens.push(raw);
-  }
+  const collect = (text: string, isPath: boolean): void => {
+    for (const raw of text.toLowerCase().split(TOKEN_BOUNDARY)) {
+      if (raw.length < minLength) continue;
+      if (isPath && (PATH_NOISE.has(raw) || isOpaquePathToken(raw))) continue;
+      if (STOPWORDS.has(raw) || STOPWORDS.has(foldAccents(raw))) continue;
+      tokens.push(raw);
+    }
+  };
+  collect(stripSiteSuffix(tab.title, tab.url), false);
+  collect(pathOf(tab.url), true);
   return tokens;
 }
 

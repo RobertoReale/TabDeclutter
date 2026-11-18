@@ -687,6 +687,14 @@
     "message": "Lingua, Archivio e Generali",
     "description": "Heading of the group of settings that are neither about the suggestions nor about a site: badge, AI, archive, language."
   },
+  "settingsGroupExperimental": {
+    "message": "Sperimentale",
+    "description": "Heading of the collapsible experimental settings section at the bottom of Settings."
+  },
+  "settingsExperimentalAiHint": {
+    "message": "Opzionale e solo su Chrome. L'organizzazione locale funziona già all'istante e offline senza AI.",
+    "description": "Honest explanation under the Experimental heading clarifying that on-device AI is optional and off by default."
+  },
   "settingsShowBadge": {
     "message": "Mostra sull'icona in alto il numero di schede da ripulire",
     "description": "Settings checkbox: whether the toolbar icon carries the count of tabs worth reviewing."
@@ -1010,6 +1018,14 @@
   "windowOrganizeNow": {
     "message": "Organizza le finestre adesso",
     "description": "Button that runs window organization immediately."
+  },
+  "windowOrganizedOne": {
+    "message": "Organizzato in $1 finestra",
+    "description": "Toast after organizing windows into one clean window. $1 is the formatted count."
+  },
+  "windowOrganizedOther": {
+    "message": "Organizzato in $1 finestre",
+    "description": "Toast after organizing tabs across multiple windows. $1 is the formatted count."
   },
   "windowUngroupAll": {
     "message": "Rimuovi tutti i gruppi colorati dalla barra",

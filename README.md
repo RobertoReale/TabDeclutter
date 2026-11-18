@@ -22,8 +22,9 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
 - **Merge and tidy into a single window** _(default)_
   - Automatically dissolves any coloured tab groups on the tab bar.
   - Consolidates tabs scattered across multiple windows into your primary window.
-  - Sorts tabs side by side **by website** (e.g. all YouTube tabs together, all GitHub tabs
-    together) or **by topic** (pages about the same subject across different websites).
+  - Sorts tabs side by side **by website** (recognizing major web apps on shared domains such as
+    Gemini, Gmail, Google Docs, Drive, Calendar, YouTube Music, Outlook, and Teams as distinct apps)
+    or **by topic** (fast local TF-IDF clustering that ignores URL noise and opaque page IDs).
   - If you were reading a tab in a secondary window that gets merged into the primary window, that
     tab stays active on screen so you never lose your place.
 - **One window per topic or website**
@@ -31,6 +32,13 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
   - Groups related tabs **by website** or **by topic** and places each cluster into its own
     dedicated browser window so every open window focuses on a single coherent topic or project.
   - The cluster containing the tab you are currently viewing always stays in your active window.
+- **One-click Undo for windows**: every manual window organization shows an **Undo** bar that
+  restores tabs (and any emptied windows) back to their previous layout and temporarily snoozes
+  background auto-organize so your layout stays intact.
+- **Experimental on-device AI** _(Chrome-only, off by default)_: local organization already runs
+  instantly and offline without AI; if you want to experiment with Chrome's built-in Gemini Nano
+  model for topic grouping, you can opt in under **Settings → Experimental**. Your choice is never
+  reset automatically, and TabDeclutter warns you if Chrome's model is unavailable or falls back.
 
 ### 2. Autopilot & Declutter
 
@@ -160,11 +168,11 @@ Release; nothing is submitted to the stores.
 ## Loading the build by hand
 
 - **Chrome**: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and
-  pick `.output/chrome-mv3`. On-device AI is off by default so Chrome does not log warnings on
-  browsers where Gemini Nano is disabled; if you enable _"Use built-in on-device AI (optional)"_ in
-  TabDeclutter's settings while Chrome's built-in AI is disabled, `chrome://extensions` may show two
-  harmless browser-level notices under "Errors" (`On-device AI is disabled in Chrome settings…` and
-  `The feature flag gating model execution was disabled`). You can enable on-device AI at
+  pick `.output/chrome-mv3`. Experimental on-device AI is off by default under **Settings →
+  Experimental** so Chrome does not log warnings on browsers where Gemini Nano is disabled; if you
+  opt in while Chrome's built-in AI is disabled, `chrome://extensions` may show two harmless
+  browser-level notices under "Errors" (`On-device AI is disabled in Chrome settings…` and
+  `The feature flag gating model execution was disabled`). You can enable Chrome's built-in AI at
   `chrome://settings/ai`.
 - **Firefox**: open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**, and
   pick `.output/firefox-mv3/manifest.json`. A temporary add-on is removed when Firefox closes.
