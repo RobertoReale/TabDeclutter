@@ -11,6 +11,7 @@ import { compile } from '@/core/patterns';
 import { scoreTabs, type ScoredTab } from '@/core/scoring';
 import { DAY, HOUR } from '@/core/time';
 import { STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
+import { unwrapSuspendedUrl } from '@/core/url';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import {
   activityItem,
@@ -270,7 +271,7 @@ export function isSafeToAutoClose(
   staleMs: number,
 ): boolean {
   if (tab.active || tab.pinned || tab.audible || tab.hidden || tab.incognito) return false;
-  const rawUrl = tab.url.trim();
+  const rawUrl = unwrapSuspendedUrl(tab.url).trim();
   if (rawUrl === '') return false;
 
   const lower = rawUrl.toLowerCase();

@@ -722,4 +722,46 @@ describe('“Chiudi tutti i duplicati” (PLAN.md §8.7)', () => {
       ]);
     });
   });
+
+  describe('with tab-suspender extensions', () => {
+    const SUSPENDED_PAGE =
+      'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fexample.com%2Farticle&title=Article';
+    const EXTENSION_VIEWER = 'chrome-extension://bbomjaikkcabgmfaomdich/views/app.html';
+    const defaultWhitelist = compile(['chrome-extension://*']).match;
+
+    it('detects a duplicate when the existing tab is suspended, even with chrome-extension://* whitelisted', () => {
+      const suspended = tab(1, { index: 0, url: SUSPENDED_PAGE });
+      const fresh = tab(2, { index: 1, active: true, url: PAGE });
+      expect(
+        resolveDuplicate(fresh, [suspended], ctxOf({}, { isWhitelisted: defaultWhitelist })),
+      ).toEqual({
+        closeTabId: 2,
+        keepTabId: 1,
+        after: 'activate',
+      });
+    });
+
+    it('wakes a suspended keeper directly to the live URL in oldest-reloaded mode', () => {
+      const suspended = tab(1, { index: 0, url: SUSPENDED_PAGE });
+      const fresh = tab(2, { index: 1, active: true, url: PAGE });
+      expect(
+        resolveDuplicate(
+          fresh,
+          [suspended],
+          ctxOf({ keep: 'oldest-reloaded' }, { isWhitelisted: defaultWhitelist }),
+        ),
+      ).toEqual({
+        closeTabId: 2,
+        keepTabId: 1,
+        after: 'activate',
+        reloadKeptWith: PAGE,
+      });
+    });
+
+    it('still ignores genuine non-suspender extension pages', () => {
+      const a = tab(1, { index: 0, url: EXTENSION_VIEWER });
+      const b = tab(2, { index: 1, active: true, url: EXTENSION_VIEWER });
+      expect(resolveDuplicate(b, [a], ctxOf({}, { isWhitelisted: defaultWhitelist }))).toBeNull();
+    });
+  });
 });

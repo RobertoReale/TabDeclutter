@@ -279,6 +279,20 @@ describe('reconciliation after a restart', () => {
       expect(result.activity[1]?.activations).toBe(7);
       expect(result).toMatchObject({ matched: 1, dropped: 0 });
     });
+
+    it('matches tabs across restarts even when suspended by a tab-suspender extension', () => {
+      const suspended =
+        'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fexample.com%2Fa&title=A';
+      const saved = store(record(11, suspended, { activations: 5 }));
+
+      const result = reconcileActivity(saved, [tab(99, 'https://example.com/a')], { now: NOW });
+      expect(result.activity[99]).toMatchObject({
+        tabId: 99,
+        url: 'https://example.com/a',
+        activations: 5,
+      });
+      expect(result).toMatchObject({ matched: 1, invented: 0, dropped: 0 });
+    });
   });
 });
 

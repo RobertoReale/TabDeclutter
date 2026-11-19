@@ -16,7 +16,7 @@
 
 import type { Capabilities } from './capabilities';
 import { caps } from './capabilities';
-import { displayHost } from '../core/url';
+import { displayHost, unwrapSuspendedUrl } from '../core/url';
 
 /** What to draw for a tab: an image we may load, or an avatar to compose. */
 export type Favicon =
@@ -66,17 +66,18 @@ export function faviconOf(tab: FaviconTab, options: FaviconOptions = {}): Favico
   const inline = tab.favIconUrl ?? '';
   if (inline.startsWith('data:')) return { kind: 'image', src: inline };
 
-  if (capabilities.faviconApi && isWebPage(tab.url)) {
+  const effectiveUrl = unwrapSuspendedUrl(tab.url);
+  if (capabilities.faviconApi && isWebPage(effectiveUrl)) {
     const base = getURL('/_favicon/');
     if (base !== '') {
       return {
         kind: 'image',
-        src: `${base}?pageUrl=${encodeURIComponent(tab.url.trim())}&size=${FAVICON_SIZE}`,
+        src: `${base}?pageUrl=${encodeURIComponent(effectiveUrl.trim())}&size=${FAVICON_SIZE}`,
       };
     }
   }
 
-  return avatar(tab.url);
+  return avatar(effectiveUrl);
 }
 
 /** The avatar of PLAN.md §5.5: the domain's initial over a colour the domain decides. */

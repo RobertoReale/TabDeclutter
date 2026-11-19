@@ -59,12 +59,72 @@ function stripWww(hostname: string): string {
   return host;
 }
 
+const SUSPENDER_PAGE =
+  /\/(?:suspend(?:ed)?|park(?:ed)?|discard(?:ed)?|sleep(?:ing)?|hibernat(?:e|ed)|freez(?:e|ing)|frozen|unload(?:ed)?)(?:\.html?)?$/i;
+
+const SUSPENDER_NEXT_PARAM =
+  /&(?:ttl|title|pos|wh|fav(?:icon|IconUrl)?|scroll_[xy]|(?:tab|window)Id)=/i;
+
 function parse(url: string): URL | null {
   try {
     return new URL(url);
   } catch {
     return null;
   }
+}
+
+function asWebUrl(candidate: string): string | null {
+  const trimmed = candidate.trim();
+  const parsed = parse(trimmed);
+  if (parsed === null) return null;
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== 'http:' && protocol !== 'https:') return null;
+  return parsed.hostname === '' ? null : trimmed;
+}
+
+function extractFromParamString(raw: string): string | null {
+  if (raw === '') return null;
+  // Unencoded `uri=https://…` / `url=https://…` (The Great / Marvellous Suspender places an
+  // unencoded `uri=` last in the fragment, where `URLSearchParams` would truncate at any `&`
+  // belonging to the wrapped page's own query string).
+  const unencoded = /(?:^|&)(?:uri|url)=(https?:\/\/.+)$/i.exec(raw);
+  if (unencoded?.[1] !== undefined) {
+    const tail = unencoded[1];
+    const cut = tail.search(SUSPENDER_NEXT_PARAM);
+    const candidate = asWebUrl(cut === -1 ? tail : tail.slice(0, cut));
+    if (candidate !== null) return candidate;
+  }
+  const params = new URLSearchParams(raw);
+  const value = params.get('url') ?? params.get('uri');
+  return value === null ? null : asWebUrl(value);
+}
+
+/**
+ * Extracts the original web URL wrapped by tab-suspender extensions (e.g. Tiny Suspender's
+ * `suspend.html?url=…`, The Great / Marvellous Suspender's `suspended.html#…&uri=…`, or
+ * Tab Suspender's `park.html?url=…`).
+ *
+ * Returns `url` unchanged for normal web URLs, non-suspender extension pages (options, PDF /
+ * Office viewers), or any wrapped payload that is not an `http:` / `https:` URL.
+ */
+export function unwrapSuspendedUrl(url: string): string {
+  let current = url.trim();
+  for (let depth = 0; depth < 2; depth += 1) {
+    const head = current.slice(0, 17).toLowerCase();
+    if (!head.startsWith('chrome-extension:') && !head.startsWith('moz-extension:')) {
+      return depth === 0 ? url : current;
+    }
+    const parsed = parse(current);
+    if (parsed === null || !SUSPENDER_PAGE.test(parsed.pathname)) {
+      return depth === 0 ? url : current;
+    }
+    const queryRaw = parsed.search.startsWith('?') ? parsed.search.slice(1) : '';
+    const hashRaw = parsed.hash.replace(/^#\??/, '');
+    const extracted = extractFromParamString(queryRaw) ?? extractFromParamString(hashRaw);
+    if (extracted === null) return depth === 0 ? url : current;
+    current = extracted;
+  }
+  return current;
 }
 
 /**
@@ -79,7 +139,7 @@ function parse(url: string): URL | null {
  * showing the same unparseable string still match each other.
  */
 export function normalizeUrl(url: string, options: MatchOptions = DEFAULT_MATCH_OPTIONS): string {
-  const trimmed = url.trim();
+  const trimmed = unwrapSuspendedUrl(url).trim();
   const parsed = parse(trimmed);
   if (parsed === null) return options.ignoreCase ? trimmed.toLowerCase() : trimmed;
 
@@ -148,7 +208,7 @@ function finish(normalized: string, options: MatchOptions): string {
 export function registrableDomain(urlOrHostname: string): string | null {
   // `allowPrivateDomains` makes `user.github.io` and `foo.blogspot.com` sites of their
   // own, which is what the user sees them as; see docs/DECISIONS.md.
-  return getDomain(urlOrHostname.trim(), { allowPrivateDomains: true });
+  return getDomain(unwrapSuspendedUrl(urlOrHostname).trim(), { allowPrivateDomains: true });
 }
 
 /**
@@ -165,7 +225,7 @@ export function registrableDomain(urlOrHostname: string): string | null {
 const EXTENSION_SCHEMES = new Set(['chrome-extension:', 'moz-extension:']);
 
 export function displayHost(url: string): string {
-  const parsed = parse(url.trim());
+  const parsed = parse(unwrapSuspendedUrl(url).trim());
   if (parsed === null) return '';
   if (EXTENSION_SCHEMES.has(parsed.protocol.toLowerCase())) return '';
   return stripWww(parsed.hostname.toLowerCase());

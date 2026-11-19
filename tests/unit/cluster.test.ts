@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ClusterOptions, GroupProposal } from '../../src/core/cluster';
 import {
+  clusterTabIds,
   colorFor,
   GROUP_COLORS,
   groupBySite,
@@ -193,6 +194,40 @@ describe('the site suffix of a title (PLAN.md §7.2.1)', () => {
   it('has nothing to strip when the tab has no site', () => {
     expect(stripSiteSuffix('  Nuova scheda  ', 'about:blank')).toBe('Nuova scheda');
   });
+
+  it('strips compound, localized, bullet-separated, and leading store prefixes', () => {
+    expect(
+      stripSiteSuffix(
+        'Basi ortogonali e non ortonormali - Google Gemini',
+        'https://gemini.google.com/app/6c9f4e2b8a1d',
+      ),
+    ).toBe('Basi ortogonali e non ortonormali');
+    expect(
+      stripSiteSuffix('Budget 2026 - Google Fogli', 'https://docs.google.com/spreadsheets/d/1'),
+    ).toBe('Budget 2026');
+    expect(
+      stripSiteSuffix('ricetta pasta - Cerca con Google', 'https://www.google.it/search?q=pasta'),
+    ).toBe('ricetta pasta');
+    expect(stripSiteSuffix('Rust async • YouTube', 'https://www.youtube.com/watch?v=1')).toBe(
+      'Rust async',
+    );
+    expect(
+      stripSiteSuffix('Amazon.it: monitor 27 pollici', 'https://www.amazon.it/s?k=monitor'),
+    ).toBe('monitor 27 pollici');
+  });
+
+  it('unwraps tab-suspender URLs for siteKey, suffix stripping, and path tokenization', () => {
+    const suspendedYt =
+      'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D1&title=Live';
+    const suspendedWiki =
+      'chrome-extension://noogafoofpebimajpfpamcfhoaifemoa/suspended.html#ttl=Test&pos=0&uri=https://it.wikipedia.org/wiki/Ortogonalizzazione_di_Gram-Schmidt';
+    expect(siteKey(suspendedYt)).toBe('youtube.com');
+    expect(stripSiteSuffix('Live #30 - YouTube', suspendedYt)).toBe('Live #30');
+    expect(tokenize(tab(1, suspendedYt, 'Live #30 - YouTube'))).toEqual(['live']);
+    expect(
+      tokenize(tab(2, suspendedWiki, 'Ortogonalizzazione di Gram-Schmidt - Wikipedia')),
+    ).toEqual(['ortogonalizzazione', 'gram', 'schmidt', 'ortogonalizzazione', 'gram', 'schmidt']);
+  });
 });
 
 describe('the tokens of a tab (PLAN.md §7.2.1)', () => {
@@ -246,6 +281,17 @@ describe('the tokens of a tab (PLAN.md §7.2.1)', () => {
     expect(youtube).toContain('app');
     expect(youtube).toContain('review');
     expect(youtube).toContain('design');
+
+    const noisyPaths = tokenize(
+      tab(
+        3,
+        'https://www.tripadvisor.it/Restaurants-g189158-Belem/photo.jpg',
+        'Migliori ristoranti Belem',
+      ),
+    );
+    expect(noisyPaths).not.toContain('g189158');
+    expect(noisyPaths).not.toContain('jpg');
+    expect(noisyPaths).toContain('belem');
   });
 });
 
@@ -513,6 +559,60 @@ describe('grouping by topic (PLAN.md §7.2)', () => {
       expect(group.color).toBe(colorFor(group.key));
     }
   });
+
+  it('matches Italian and English inflections/derivations while keeping readable titles', () => {
+    const mixed = [
+      tab(
+        1,
+        'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fgemini.google.com%2Fapp%2F1111222233334444',
+        'Dubbi su derivate e differenziali - Google Gemini',
+      ),
+      tab(
+        2,
+        'https://gemini.google.com/app/5555666677778888',
+        'Spiegazione delle note sulle derivazioni - Google Gemini',
+      ),
+      tab(
+        3,
+        'https://it.wikipedia.org/wiki/Ortogonalizzazione',
+        'Ortogonalizzazione lineare - Wikipedia',
+      ),
+      tab(4, 'https://www.youmath.it/lezioni/algebra/ortogonali.html', 'Basi ortogonali e matrici'),
+      tab(5, 'https://example.org/libraries', 'Clustering libraries and matches'),
+      tab(6, 'https://example.org/library', 'Cluster library match grouped'),
+      tab(7, 'https://example.it/politiche', 'Scienze politiche università'),
+      tab(8, 'https://example.it/politica', 'Scienza politica universita'),
+      tab(9, 'https://alpha.example/code', 'Code overview'),
+      tab(10, 'https://beta.example/coda', 'Coda notes'),
+    ];
+    const proposal = groupByTopic(mixed);
+    const sets = proposal.groups.map((g) => [...g.tabIds]);
+    expect(sets).toContainEqual([1, 2]);
+    expect(sets).toContainEqual([3, 4]);
+    expect(sets).toContainEqual([5, 6]);
+    expect(sets).toContainEqual([7, 8]);
+    // Short English words like `code` and `coda` must not falsely conflate.
+    expect(proposal.ungrouped).toEqual([9, 10]);
+    // Group titles must render real surface words, never truncated stems like "Derivat" or "Ortogonal".
+    for (const group of proposal.groups) {
+      expect(group.title).not.toMatch(/^(?:Derivat|Ortogonal|Politic|Scienz)\b/);
+    }
+  });
+
+  it('groups suspended and active tabs of the same site together in site mode', () => {
+    const mixed = [
+      tab(
+        1,
+        'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D1',
+        'Live #30 - YouTube',
+      ),
+      tab(2, 'https://www.youtube.com/watch?v=2', 'Live #33 - YouTube'),
+      tab(3, 'https://www.youtube.com/watch?v=3', 'The Science of GTA VI - YouTube'),
+    ];
+    const proposal = groupBySite(mixed);
+    expect(membership(proposal)).toEqual({ YouTube: [1, 2, 3] });
+    expect(proposal.ungrouped).toEqual([]);
+  });
 });
 
 describe('the two modes together (PLAN.md §4.4.2)', () => {
@@ -535,6 +635,10 @@ describe('the two modes together (PLAN.md §4.4.2)', () => {
         ...proposal.ungrouped,
       ];
       expect(seen.sort((a, b) => a - b)).toEqual(tabs.map((entry) => entry.id));
+      expect(clusterTabIds(tabs, mode)).toEqual({
+        groups: proposal.groups.map((group) => group.tabIds),
+        ungrouped: proposal.ungrouped,
+      });
     }
   });
 });

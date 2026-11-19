@@ -22,7 +22,7 @@
 
 import { t } from '@/platform/i18n';
 import { activateTab } from '@/platform/tabs';
-import { displayHost } from '@/core/url';
+import { displayHost, unwrapSuspendedUrl } from '@/core/url';
 import { rowStopId } from '../keyboard';
 import type { DeclutterRow } from '../sections';
 import { chipsOf, reasonText } from '../reasons';
@@ -86,7 +86,7 @@ export function TabRow({
             tabIndex={-1}
           />
           <RowFavicon page={tab} />
-          <span class="td-row-title" title={tab.url}>
+          <span class="td-row-title" title={unwrapSuspendedUrl(tab.url)}>
             {title}
           </span>
           <span class="td-row-host">{host}</span>

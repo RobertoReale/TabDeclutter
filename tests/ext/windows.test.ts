@@ -290,6 +290,86 @@ describe('platform/windows', () => {
     expect(tabs.find((t) => t.id === 3)?.index).toBe(0);
     expect(tabs.find((t) => t.id === 4)?.index).toBe(1);
   });
+
+  it('groups suspended and active tabs of the same site into the same window in split-windows mode', async () => {
+    const suspend = (u: string) =>
+      `chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=${encodeURIComponent(u)}`;
+    const { api, tabs } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: suspend('https://www.youtube.com/watch?v=1'),
+        title: 'Live #30 - YouTube',
+      },
+      {
+        id: 2,
+        windowId: 1,
+        index: 1,
+        url: suspend('https://gemini.google.com/app/aaa111222333'),
+        title: 'Basi ortogonali - Google Gemini',
+      },
+      {
+        id: 3,
+        windowId: 1,
+        index: 2,
+        url: 'https://www.youtube.com/watch?v=2',
+        title: 'Live #33 - YouTube',
+      },
+      {
+        id: 4,
+        windowId: 1,
+        index: 3,
+        url: 'https://gemini.google.com/app/bbb444555666',
+        title: 'Spiegazione derivate - Google Gemini',
+      },
+    ]);
+
+    const result = await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    expect(result.windowsCount).toBe(2);
+    expect(tabs.find((t) => t.id === 1)?.windowId).toBe(tabs.find((t) => t.id === 3)?.windowId);
+    expect(tabs.find((t) => t.id === 2)?.windowId).toBe(tabs.find((t) => t.id === 4)?.windowId);
+    expect(tabs.find((t) => t.id === 1)?.windowId).not.toBe(tabs.find((t) => t.id === 2)?.windowId);
+  });
+
+  it('keeps movable tabs anchored after pinned tabs even when an unpinned New Tab is open', async () => {
+    const { api, tabs } = fakeApi([
+      { id: 1, windowId: 1, index: 0, url: 'https://youtube.com/watch?v=1', title: 'Video 1' },
+      { id: 2, windowId: 1, index: 1, url: 'https://github.com/a', title: 'GitHub A' },
+      { id: 3, windowId: 1, index: 2, url: 'https://github.com/b', title: 'GitHub B' },
+      { id: 4, windowId: 1, index: 3, url: 'chrome://newtab/', title: 'New Tab' },
+    ]);
+
+    const first = await organizeWindows({
+      windowMode: 'merge-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+    expect(first.movedTabs).toBeGreaterThan(0);
+    // Movable tabs start at index 0 (no pinned tabs), leaving the unpinned New Tab untouched.
+    expect(tabs.find((t) => t.id === 2)?.index).toBe(0);
+    expect(tabs.find((t) => t.id === 3)?.index).toBe(1);
+    expect(tabs.find((t) => t.id === 1)?.index).toBe(2);
+
+    // A second sweep sees the window is already sorted and makes zero moves.
+    const second = await organizeWindows({
+      windowMode: 'merge-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+    expect(second.movedTabs).toBe(0);
+  });
 });
 
 function makeTab(overrides: Partial<TabInfo> = {}): TabInfo {
@@ -376,6 +456,26 @@ describe('autopilot safety guardrails (isSafeToAutoClose)', () => {
         staleMs,
       ),
     ).toBe(false);
+    expect(
+      isSafeToAutoClose(
+        makeTab({
+          url: 'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=http%3A%2F%2Flocalhost%3A3000%2F',
+        }),
+        makeScored(),
+        DEFAULT_SETTINGS,
+        staleMs,
+      ),
+    ).toBe(false);
+    expect(
+      isSafeToAutoClose(
+        makeTab({
+          url: 'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fexample.com%2Farticle',
+        }),
+        makeScored({ idleMs: 8 * DAY, score: 80 }),
+        DEFAULT_SETTINGS,
+        staleMs,
+      ),
+    ).toBe(true);
     expect(
       isSafeToAutoClose(
         makeTab({ url: 'http://127.0.0.1:8080/' }),

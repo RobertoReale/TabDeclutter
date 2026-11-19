@@ -17,7 +17,7 @@
  */
 
 import { isAuthUrl, isBlankUrl } from '../core/classify';
-import { proposeGroups, siteKey, type ClusterMode, type GroupProposal } from '../core/cluster';
+import { clusterTabIds, siteKey, type ClusterMode, type GroupProposal } from '../core/cluster';
 import { tabUrl } from '../core/duplicates';
 import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '../core/types';
 import { asTabInfos, attempt, NO_WINDOW, type BrowserTab } from './tabs';
@@ -283,8 +283,8 @@ async function mergeAndSortIntoOneWindow(
 
   const movable = allTabs.filter(isMovableTab);
   if (movable.length === 0) return 0;
-  const unmovableInTarget = allTabs.filter(
-    (tab) => tab.windowId === targetWindowId && !isMovableTab(tab),
+  const pinnedInTarget = allTabs.filter(
+    (tab) => tab.windowId === targetWindowId && tab.pinned,
   ).length;
 
   const sortedIds = orderedTabIds(movable, clusterMode, targetWindowId, precomputed);
@@ -302,17 +302,7 @@ async function mergeAndSortIntoOneWindow(
     return 0;
   }
 
-  let moved = 0;
-  let nextIndex = unmovableInTarget;
-  for (const tabId of sortedIds) {
-    const ok = await attempt(() =>
-      api.tabs.move(tabId, { windowId: targetWindowId, index: nextIndex }),
-    );
-    if (ok.ok) {
-      moved += 1;
-      nextIndex += 1;
-    }
-  }
+  const moved = await moveSequence(api, sortedIds, targetWindowId, pinnedInTarget);
 
   // If the user was looking at an active tab in a secondary window that just got merged into
   // `targetWindowId`, keep that tab active in `targetWindowId` so their current page stays on screen.
@@ -346,15 +336,9 @@ async function splitIntoThematicWindows(
   const byId = new Map(movable.map((tab) => [tab.id, tab]));
 
   // Build desired window buckets: one per proposed group, plus one bucket for ungrouped tabs (sorted by site).
-  const buckets: number[][] = proposal.groups.map((group) => [...group.tabIds]);
+  const buckets: number[][] = proposal.groups.map((group) => [...group]);
   if (proposal.ungrouped.length > 0) {
-    const sortedUngrouped = [...proposal.ungrouped].sort((leftId, rightId) => {
-      const leftSite = siteKey(byId.get(leftId)?.url ?? '');
-      const rightSite = siteKey(byId.get(rightId)?.url ?? '');
-      if (leftSite !== rightSite) return leftSite.localeCompare(rightSite);
-      return leftId - rightId;
-    });
-    buckets.push(sortedUngrouped);
+    buckets.push(sortBySite(proposal.ungrouped, byId));
   }
   if (buckets.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
@@ -434,18 +418,7 @@ async function splitIntoThematicWindows(
       const created = await attempt(() => api.windows.create({ tabId: firstId, focused: false }));
       targetWindowId = created.ok ? (created.value?.id ?? null) : null;
       if (targetWindowId === null) continue;
-      const newWindowId = targetWindowId;
-      movedTabs += 1;
-      let idx = 1;
-      for (const tabId of restIds) {
-        const moved = await attempt(() =>
-          api.tabs.move(tabId, { windowId: newWindowId, index: idx }),
-        );
-        if (moved.ok) {
-          movedTabs += 1;
-          idx += 1;
-        }
-      }
+      movedTabs += 1 + (await moveSequence(api, restIds, targetWindowId, 1));
       continue;
     }
 
@@ -463,52 +436,67 @@ async function splitIntoThematicWindows(
       continue;
     }
 
-    const unmovableCount = allTabs.filter(
-      (tab) => tab.windowId === existingWindowId && !isMovableTab(tab),
+    const pinnedCount = allTabs.filter(
+      (tab) => tab.windowId === existingWindowId && tab.pinned,
     ).length;
-    let idx = unmovableCount;
-    for (const tabId of safeTabIds) {
-      const moved = await attempt(() =>
-        api.tabs.move(tabId, { windowId: existingWindowId, index: idx }),
-      );
-      if (moved.ok) {
-        movedTabs += 1;
-        idx += 1;
-      }
-    }
+    movedTabs += await moveSequence(api, safeTabIds, existingWindowId, pinnedCount);
   }
 
   return { movedTabs, windowsCount: assignments.length };
 }
 
+async function moveSequence(
+  api: WindowsOrganizeApi,
+  tabIds: readonly number[],
+  windowId: number,
+  startIndex: number,
+): Promise<number> {
+  let moved = 0;
+  let idx = startIndex;
+  for (const tabId of tabIds) {
+    const ok = await attempt(() => api.tabs.move(tabId, { windowId, index: idx }));
+    if (ok.ok) {
+      moved += 1;
+      idx += 1;
+    }
+  }
+  return moved;
+}
+
+function sortBySite(ids: readonly number[], byId: ReadonlyMap<number, TabInfo>): number[] {
+  return [...ids].sort((leftId, rightId) => {
+    const leftSite = siteKey(byId.get(leftId)?.url ?? '');
+    const rightSite = siteKey(byId.get(rightId)?.url ?? '');
+    if (leftSite !== rightSite) return leftSite.localeCompare(rightSite);
+    return leftId - rightId;
+  });
+}
+
 /**
- * Resolves the cluster proposal for `movable` tabs: uses a precomputed AI proposal when
+ * Resolves the cluster buckets for `movable` tabs: uses a precomputed AI proposal when
  * supplied (strictly filtered to `movable` tabs so protected tabs are never touched), or
- * falls back to the deterministic local heuristic (`proposeGroups`).
+ * falls back to the deterministic local clustering (`clusterTabIds`).
  */
 function resolveWindowProposal(
   movable: readonly TabInfo[],
   clusterMode: ClusterMode,
   virtualWindowId: number,
   precomputed: GroupProposal | undefined,
-): GroupProposal {
+): { readonly groups: readonly (readonly number[])[]; readonly ungrouped: readonly number[] } {
   if (precomputed !== undefined) {
     const movableIds = new Set(movable.map((tab) => tab.id));
     const placed = new Set<number>();
     const groups = precomputed.groups
-      .map((group) => {
-        const tabIds = group.tabIds.filter((id) => {
+      .map((group) =>
+        group.tabIds.filter((id) => {
           if (!movableIds.has(id) || placed.has(id)) return false;
           placed.add(id);
           return true;
-        });
-        return { ...group, tabIds };
-      })
-      .filter((group) => group.tabIds.length > 0);
+        }),
+      )
+      .filter((tabIds) => tabIds.length > 0);
     const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
-    if (groups.length > 0) {
-      return { mode: precomputed.mode, groups, ungrouped };
-    }
+    if (groups.length > 0) return { groups, ungrouped };
   }
 
   const unified = movable.map((tab, index) => ({
@@ -517,7 +505,7 @@ function resolveWindowProposal(
     index,
     groupId: NO_GROUP_ID,
   }));
-  return proposeGroups(unified, clusterMode, {
+  return clusterTabIds(unified, clusterMode, {
     minSiteTabs: 2,
     minClusterTabs: 2,
     includePinned: false,
@@ -536,15 +524,6 @@ function orderedTabIds(
   precomputed: GroupProposal | undefined,
 ): readonly number[] {
   const proposal = resolveWindowProposal(tabs, clusterMode, virtualWindowId, precomputed);
-
-  const grouped = proposal.groups.flatMap((group) => [...group.tabIds]);
   const byId = new Map(tabs.map((tab) => [tab.id, tab]));
-  const ungrouped = [...proposal.ungrouped].sort((leftId, rightId) => {
-    const leftSite = siteKey(byId.get(leftId)?.url ?? '');
-    const rightSite = siteKey(byId.get(rightId)?.url ?? '');
-    if (leftSite !== rightSite) return leftSite.localeCompare(rightSite);
-    return leftId - rightId;
-  });
-
-  return [...grouped, ...ungrouped];
+  return [...proposal.groups.flat(), ...sortBySite(proposal.ungrouped, byId)];
 }

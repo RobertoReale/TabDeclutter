@@ -642,5 +642,31 @@ describe('keepKey', () => {
     expect(keepKey('https://WWW.Example.com/a?utm_source=x#top')).toBe(
       keepKey('https://example.com/a'),
     );
+    expect(
+      keepKey(
+        'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fwww.example.com%2Fa&title=A',
+      ),
+    ).toBe(keepKey('https://example.com/a'));
+  });
+
+  it('honours protectedSites and keeps for tabs wrapped by a tab-suspender extension', () => {
+    const suspendedGithub =
+      'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fgithub.com%2Forg%2Frepo&title=Repo';
+    const suspendedArticle =
+      'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fexample.com%2Farticle&title=Article';
+    const result = run(
+      [
+        { tab: tab(1, { url: suspendedGithub }), at: { idleMs: 14 * DAY } },
+        { tab: tab(2, { url: suspendedArticle }), at: { idleMs: 14 * DAY } },
+      ],
+      {
+        context: {
+          protectedSites: ['github.com'],
+          keeps: { [keepKey('https://example.com/article')]: null },
+        },
+      },
+    );
+    expect(result.tabs[0]?.protectedBy).toBe('protected-site');
+    expect(result.tabs[1]?.protectedBy).toBe('kept');
   });
 });

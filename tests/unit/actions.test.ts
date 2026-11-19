@@ -300,4 +300,14 @@ describe('planRestores', () => {
 
     expect(steps.map((step) => step.entry.id)).toEqual(['e1', 'e2']);
   });
+
+  it('archives the real unwrapped URL for suspended tabs and still matches their closed session', () => {
+    const suspended =
+      'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fexample.com%2Fa&title=A';
+    const entries = archiveEntries([tab(1, { url: suspended, title: 'A' })], NOW);
+    expect(entries[0]?.url).toBe('https://example.com/a');
+
+    const steps = planRestores(entries, [{ sessionId: 's1', url: suspended }]);
+    expect(steps[0]?.sessionId).toBe('s1');
+  });
 });

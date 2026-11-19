@@ -108,6 +108,27 @@ describe('faviconOf on Firefox', () => {
       hue: expect.any(Number),
     });
   });
+
+  it('unwraps tab-suspender URLs so suspended tabs show the real site favicon or initial', () => {
+    const suspended =
+      'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D1';
+    expect(faviconOf({ url: suspended }, FIREFOX)).toMatchObject({
+      kind: 'initial',
+      initial: 'Y',
+    });
+    expect(
+      faviconOf(
+        { url: suspended },
+        {
+          capabilities: { ...FIREFOX.capabilities, faviconApi: true },
+          getURL: (p) => `ext://${p}`,
+        },
+      ),
+    ).toEqual({
+      kind: 'image',
+      src: `ext:///_favicon/?pageUrl=${encodeURIComponent('https://www.youtube.com/watch?v=1')}&size=32`,
+    });
+  });
 });
 
 describe("the avatar's colour", () => {

@@ -3386,3 +3386,25 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   test (its budgets are measured by `perf budgets`). The steps that need an account are the open
   `(setup)` entries of `docs/MANUAL-CHECKS.md`. The 440×280 promo tile of §12.2 does not exist yet.
 - **Why:** no task can do these by hand, and the checklist says so instead of ticking them.
+
+## Post-release — Unwrapping tab-suspender URLs and local topic clustering cleanup
+- **Context:** URL-rewriting tab-suspender extensions (e.g. Tiny Suspender `suspend.html?url=…`,
+  The Great/Marvellous Suspender `suspended.html#…&uri=…`, Tab Suspender `park.html?url=…`) hid
+  the wrapped web URL behind `chrome-extension://`, breaking site/topic grouping, suffix stripping,
+  duplicate detection, site protection, favicons, and archive restores. Separately, local TF-IDF
+  topic clustering missed compound/localized site suffixes (`- Google Gemini`, `- Cerca con Google`,
+  leading `Amazon.it: `), common Italian stopwords (`sulle`, `nei`, `dalle`), path noise (`wiki`,
+  `comments`, `g189158`, `jpg`), and Italian/English inflections (`ortogonali`/`ortogonalizzazione`,
+  `derivata`/`derivate`).
+- **Decision:** added `unwrapSuspendedUrl()` in `src/core/url.ts` (strictly limited to suspender
+  pages carrying an `http:`/`https:` target so non-suspender extension views and non-web payloads
+  stay untouched) and routed URL normalization, `tabUrl`, `siteKey`, `pathOf`, `faviconOf`,
+  reconciliation, tracker, and autopilot guardrails through it. Added compound/localized site
+  suffix/prefix stripping, conservative Italian+English stemming with surface-form titles and
+  sublinear TF in `src/core/cluster.ts`, and exported `clusterTabIds()` so `platform/windows.ts`
+  and the background worker skip unused title/colour helpers to stay within the 25 KB background
+  bundle budget. Also anchored movable tab ordering in `platform/windows.ts` to `pinnedCount`
+  rather than `unmovableCount` so an unpinned New Tab never shifts indices.
+- **Why:** users running tab suspenders alongside TabDeclutter get consistent grouping, duplicate
+  protection, and archive recovery without uninstalling their suspender, and non-AI topic
+  clustering handles real Italian/English titles cleanly without over-merging or exceeding budgets.

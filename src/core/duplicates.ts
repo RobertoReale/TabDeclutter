@@ -16,7 +16,7 @@
  */
 
 import type { GuardSettings, MatchOptions, Settings, TabInfo } from './types';
-import { normalizeUrl } from './url';
+import { normalizeUrl, unwrapSuspendedUrl } from './url';
 
 /**
  * How to compare two URLs, and what else belongs to the identity of a page.
@@ -102,7 +102,8 @@ export function duplicateKey(
  * duplicate every other loading tab.
  */
 export function tabUrl(tab: Pick<TabInfo, 'url' | 'pendingUrl'>): string {
-  return tab.url !== '' ? tab.url : (tab.pendingUrl ?? '');
+  const raw = tab.url !== '' ? tab.url : (tab.pendingUrl ?? '');
+  return unwrapSuspendedUrl(raw);
 }
 
 /** Tabs showing one page, in the order they were given. */

@@ -21,7 +21,7 @@
 
 import type { TabInfo } from './types';
 import { NO_GROUP_ID } from './types';
-import { displayHost, registrableDomain } from './url';
+import { displayHost, registrableDomain, unwrapSuspendedUrl } from './url';
 
 /** The tab group colours Chrome accepts (`chrome.tabGroups.ColorEnum`, PLAN.md §7.1). */
 export type GroupColor =
@@ -124,28 +124,16 @@ export const DEFAULT_CLUSTER_OPTIONS: Required<ClusterOptions> = {
  */
 const APP_SUBDOMAINS: Readonly<Record<string, string>> = {
   ...Object.fromEntries(
-    [
-      ['aistudio', 'Google AI Studio'],
-      ['calendar', 'Google Calendar'],
-      ['chat', 'Google Chat'],
-      ['classroom', 'Google Classroom'],
-      ['colab.research', 'Google Colab'],
-      ['console.cloud', 'Google Cloud'],
-      ['docs', 'Google Docs'],
-      ['drive', 'Google Drive'],
-      ['gemini', 'Gemini'],
-      ['keep', 'Google Keep'],
-      ['mail', 'Gmail'],
-      ['maps', 'Google Maps'],
-      ['meet', 'Google Meet'],
-      ['notebooklm', 'NotebookLM'],
-      ['photos', 'Google Photos'],
-      ['scholar', 'Google Scholar'],
-      ['sheets', 'Google Sheets'],
-      ['slides', 'Google Slides'],
-      ['translate', 'Google Translate'],
-    ].map(([sub, name]) => [`${sub}.google.com`, name] as const),
+    'calendar chat classroom docs drive keep maps meet photos scholar sheets slides translate'
+      .split(' ')
+      .map((sub) => [`${sub}.google.com`, `Google ${capitalize(sub)}`] as const),
   ),
+  'aistudio.google.com': 'Google AI Studio',
+  'colab.research.google.com': 'Google Colab',
+  'console.cloud.google.com': 'Google Cloud',
+  'gemini.google.com': 'Gemini',
+  'mail.google.com': 'Gmail',
+  'notebooklm.google.com': 'NotebookLM',
   'copilot.microsoft.com': 'Copilot',
   'music.youtube.com': 'YouTube Music',
   'onedrive.live.com': 'OneDrive',
@@ -160,73 +148,39 @@ const APP_SUBDOMAINS: Readonly<Record<string, string>> = {
 };
 
 const SITE_NAMES: Readonly<Record<string, string>> = {
-  airbnb: 'Airbnb',
-  amazon: 'Amazon',
   'ansa.it': 'ANSA',
-  'anthropic.com': 'Anthropic',
-  'atlassian.com': 'Atlassian',
   bbc: 'BBC',
-  'bing.com': 'Bing',
   'booking.com': 'Booking.com',
-  'brave.com': 'Brave',
   'chatgpt.com': 'ChatGPT',
-  'claude.ai': 'Claude',
   'corriere.it': 'Corriere della Sera',
-  'discord.com': 'Discord',
   'duckduckgo.com': 'DuckDuckGo',
-  'ecosia.org': 'Ecosia',
   'extensionworkshop.com': 'Extension Workshop',
-  'facebook.com': 'Facebook',
-  'figma.com': 'Figma',
   'gazzettaufficiale.it': 'Gazzetta Ufficiale',
   getyourguide: 'GetYourGuide',
   'giallozafferano.it': 'GialloZafferano',
   'github.com': 'GitHub',
   'gitlab.com': 'GitLab',
-  'google.com': 'Google',
   'html.it': 'HTML.it',
   ikea: 'IKEA',
   'ilpost.it': 'Il Post',
-  'instagram.com': 'Instagram',
   'intesasanpaolo.com': 'Intesa Sanpaolo',
   'linkedin.com': 'LinkedIn',
   'lonelyplanet.com': 'Lonely Planet',
-  'medium.com': 'Medium',
-  'microsoft.com': 'Microsoft',
   'microsoftonline.com': 'Microsoft',
-  'mozilla.org': 'Mozilla',
-  'netflix.com': 'Netflix',
-  'notion.so': 'Notion',
   'npmjs.com': 'npm',
   'openai.com': 'OpenAI',
-  'perplexity.ai': 'Perplexity',
   'pragmaticengineer.com': 'The Pragmatic Engineer',
   'preactjs.com': 'Preact',
-  'python.org': 'Python',
   'raiplay.it': 'RaiPlay',
-  'react.dev': 'React',
-  'reddit.com': 'Reddit',
   'repubblica.it': 'la Repubblica',
   'rome2rio.com': 'Rome2rio',
-  skyscanner: 'Skyscanner',
-  'slack.com': 'Slack',
-  'spotify.com': 'Spotify',
   'stackoverflow.com': 'Stack Overflow',
-  'subito.it': 'Subito',
   'theguardian.com': 'The Guardian',
-  trello: 'Trello',
-  tripadvisor: 'Tripadvisor',
-  'twitch.tv': 'Twitch',
-  'twitter.com': 'Twitter',
   'typescriptlang.org': 'TypeScript',
   'visitportugal.com': 'Visit Portugal',
-  'vitest.dev': 'Vitest',
   'w3.org': 'W3C',
   'whatsapp.com': 'WhatsApp',
-  'wikimedia.org': 'Wikimedia',
-  'wikipedia.org': 'Wikipedia',
   'wxt.dev': 'WXT',
-  'x.com': 'X',
   'youtube.com': 'YouTube',
 };
 
@@ -238,12 +192,13 @@ const SITE_NAMES: Readonly<Record<string, string>> = {
 const STOPWORDS: ReadonlySet<string> = new Set(
   // Italian
   (
-    'agli alla alle allo anche ancora avere che chi cioe come con cosa cosi dai dal dall dalla ' +
-    'degli dei del dell della delle dello dopo due essere fare fra gia gli hanno loro meno mia ' +
-    'mio molto nel nell nella nelle nello noi non nostro ogni oppure per perche pero piu poi ' +
-    'prima puo quale quando quanto quella quelle quelli quello questa queste questi questo sara ' +
-    'sempre senza siamo solo sono sopra sotto stato sua sue sui sul sull sulla suo tra tre tuo ' +
-    'tutta tutte tutti tutto una uno vedi voi ' +
+    'agli alla alle allo altra altre altri altro anche ancora avere che chi cio cioe coi col ' +
+    'come con cosa cosi cui dagli dai dal dall dalla dalle dallo degli dei del dell della delle ' +
+    'dello dopo dove due era essere fare fra gia gli hanno invece loro meno mentre mia mio molto ' +
+    'negli nei nel nell nella nelle nello noi non nostro ogni oppure per perche pero piu poi ' +
+    'prima puo quale quali quando quante quanti quanto quella quelle quelli quello questa queste ' +
+    'questi questo quindi sara sempre senza sia siamo solo sono sopra sotto stato sua sue sugli ' +
+    'sui sul sull sulla sulle sullo suo tra tre tuo tutta tutte tutti tutto una uno vedi voi ' +
     // English
     'about after all also and any are because been before being but can could did does doing ' +
     'done each for from get getting had has have her here his how into its just like made make ' +
@@ -257,14 +212,21 @@ const STOPWORDS: ReadonlySet<string> = new Set(
 );
 
 /**
- * URL-path routing segments that carry no topical signal (e.g. `/watch` on YouTube, `/app/…`
- * on Gemini, `/document/d/…/edit` on Google Docs). Filtered ONLY from URL paths — never from
- * page titles — so a title legitimately about watches or mobile apps keeps those words.
+ * URL-path routing segments and file extensions that carry no topical signal (e.g. `/watch`
+ * on YouTube, `/wiki/` on Wikipedia, `/comments/` on Reddit, `/app/…` on Gemini, `.jpg`).
+ * Filtered ONLY from URL paths — never from page titles — so a title legitimately about
+ * watches, mobile apps, or wikis keeps those words.
  */
 const PATH_NOISE: ReadonlySet<string> = new Set(
-  'app apps auth blob callback channel chat chats commit commits document edit embed feed file files folder folders inbox issue issues login logout mail oauth oauth2 playlist post posts presentation pull pulls raw redirect results search share shorts signin signup spreadsheets status thread threads tree view watch'.split(
-    ' ',
-  ),
+  (
+    'app apps article articles auth blob callback channel channels chat chats comment comments ' +
+    'commit commits css document download downloads drive edit embed feed file files folder ' +
+    'folders forms gif inbox issue issues item items jpeg jpg json login logout mail node oauth ' +
+    'oauth2 park parked pdf playlist png post posts presentation profile profiles pull pulls ' +
+    'question questions raw redirect results search searchresults share shorts signin signup ' +
+    'spreadsheets status suspend suspended svg tagged thread threads tree txt user users video ' +
+    'videos view views watch webp wiki xml'
+  ).split(' '),
 );
 
 /** Strips diacritics only when non-ASCII characters appear, so ASCII words stay zero-cost. */
@@ -278,9 +240,9 @@ function foldAccents(word: string): string {
 }
 
 /**
- * Detects opaque URL path IDs (pure numbers like `2026` or `847291`, or long hex/base64-like
- * slugs such as Gemini/Docs/ChatGPT IDs `6c9f4e2b8a1d`) that would otherwise add high-IDF noise
- * to TF-IDF vectors and drown out real topic words.
+ * Detects opaque URL path IDs (pure numbers like `2026` or `847291`, prefixed site IDs like
+ * Tripadvisor's `g189158`, or long hex/base64-like slugs such as Gemini/Docs/ChatGPT IDs
+ * `6c9f4e2b8a1d`) that would otherwise add high-IDF noise to TF-IDF vectors.
  */
 function isOpaquePathToken(token: string): boolean {
   let digits = 0;
@@ -290,14 +252,72 @@ function isOpaquePathToken(token: string): boolean {
   }
   if (digits === token.length) return true;
   if (token.length >= 8 && digits >= 2) return true;
+  if (token.length >= 5 && digits === token.length - 1 && /^[a-z]\d{4,}$/.test(token)) return true;
   return false;
 }
+
+/**
+ * Ordered Italian + English derivational suffixes with their minimum remaining root length,
+ * used only when vectorizing topics so inflected/derived forms (`ortogonali` /
+ * `ortogonalizzazione`, `derivata` / `derivate` / `derivazione`, `cluster` / `clustering`)
+ * match while displayed group titles still use the original surface words.
+ */
+const STEM_SUFFIXES: readonly string[] =
+  'izzazioni izzazione izations ization isations isation imenti imento amenti amento azioni azione ations ation ments ment mente ings ing'.split(
+    ' ',
+  );
+
+/** Conservative Italian + English light stemmer for TF-IDF vector keys. */
+function stemToken(raw: string): string {
+  const word = foldAccents(raw);
+  if (word.length < 5 || /\d/.test(word)) return word;
+
+  for (const suffix of STEM_SUFFIXES) {
+    if (word.endsWith(suffix) && word.length - suffix.length >= 4) {
+      return word.slice(0, -suffix.length);
+    }
+  }
+  if (word.endsWith('ies') && word.length >= 6) return `${word.slice(0, -3)}y`;
+  if (word.endsWith('ed') && word.length >= 7) return word.slice(0, -2);
+  if (word.length >= 8 && /at[aeio]$/.test(word)) return word.slice(0, -3);
+  if (word.length >= 7 && /[cg]h[ei]$/.test(word)) return word.slice(0, -2);
+  if (word.length >= 6 && /(?:sh|ch|[sxz])es$/.test(word)) return word.slice(0, -2);
+  if (word.endsWith('s') && !/(?:ss|us|is)$/.test(word)) return word.slice(0, -1);
+  if (word.length >= 6 && /[aeio]$/.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+/**
+ * Known localized or branded title suffixes that differ from `siteName(key)` (e.g. Google Docs
+ * hosts Documenti / Fogli / Presentazioni / Moduli on `docs.google.com`, and Wikipedia appends
+ * its tagline on landing pages).
+ */
+const SITE_TITLE_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  'docs.google.com': 'Documenti Fogli Presentazioni Moduli Sheets Slides Forms'
+    .split(' ')
+    .map((n) => `Google ${n}`),
+  'mail.google.com': ['Google Mail'],
+  'translate.google.com': ['Google Traduttore'],
+  google: ['Cerca con Google', 'Google Search'],
+  brave: ['Brave Search'],
+  'ycombinator.com': ['Hacker News'],
+  'wikipedia.org': ["Wikipedia, l'enciclopedia libera", 'Wikipedia, the free encyclopedia'],
+};
 
 /**
  * The separators a site puts between a page's name and its own (PLAN.md §7.2.1). Spaced,
  * so a hyphenated word or a path separator in a title is not mistaken for one.
  */
-const TITLE_SEPARATORS: readonly string[] = [' - ', ' – ', ' — ', ' | ', ' · ', ' :: ', ' // '];
+const TITLE_SEPARATORS: readonly string[] = [
+  ' - ',
+  ' – ',
+  ' — ',
+  ' | ',
+  ' · ',
+  ' • ',
+  ' :: ',
+  ' // ',
+];
 
 /** Anything that is not a letter or a digit, in any script, separates two tokens. */
 const TOKEN_BOUNDARY = /[^\p{L}\p{N}]+/u;
@@ -341,21 +361,11 @@ export function colorFor(key: string): GroupColor {
   return GROUP_COLORS[hashOf(key) % GROUP_COLORS.length] as GroupColor;
 }
 
-const NON_WEB_PROTOCOLS: ReadonlySet<string> = new Set([
-  'chrome:',
-  'chrome-extension:',
-  'moz-extension:',
-  'edge:',
-  'brave:',
-  'vivaldi:',
-  'opera:',
-  'about:',
-  'devtools:',
-  'view-source:',
-  'file:',
-  'data:',
-  'blob:',
-]);
+const NON_WEB_PROTOCOLS: ReadonlySet<string> = new Set(
+  'chrome: chrome-extension: moz-extension: edge: brave: vivaldi: opera: about: devtools: view-source: file: data: blob:'.split(
+    ' ',
+  ),
+);
 
 /**
  * Which site a tab belongs to, as a key: the registrable domain, or the host shown in a
@@ -365,16 +375,15 @@ const NON_WEB_PROTOCOLS: ReadonlySet<string> = new Set([
  * can therefore not be grouped by site under an internal ID.
  */
 export function siteKey(url: string): string {
-  const trimmed = url.trim();
+  const trimmed = unwrapSuspendedUrl(url).trim();
   try {
-    const parsed = new URL(trimmed);
-    if (NON_WEB_PROTOCOLS.has(parsed.protocol.toLowerCase())) return '';
+    if (NON_WEB_PROTOCOLS.has(new URL(trimmed).protocol.toLowerCase())) return '';
   } catch {
     // Let registrableDomain / displayHost handle bare hostnames or unparseable strings.
   }
-  const host = displayHost(trimmed).toLowerCase();
+  const host = displayHost(trimmed);
   if (host in APP_SUBDOMAINS) return host;
-  return registrableDomain(trimmed) ?? displayHost(trimmed);
+  return registrableDomain(trimmed) ?? host;
 }
 
 /** The label of a domain: `example.co.uk` → `example`, `localhost` → `localhost`. */
@@ -416,22 +425,41 @@ function simplify(text: string): string {
  * already trimmed title, so what is kept always starts with that character.
  */
 export function stripSiteSuffix(title: string, url: string): string {
-  const key = siteKey(url);
-  const forms = new Set(
-    [siteName(key), key, domainLabel(key), displayHost(url)]
-      .filter((form) => form !== '')
-      .map(simplify),
-  );
+  const effectiveUrl = unwrapSuspendedUrl(url);
+  const key = siteKey(effectiveUrl);
+  const name = siteName(key);
+  const parentKey = registrableDomain(effectiveUrl) ?? '';
+  const parentName = parentKey !== '' && parentKey !== key ? siteName(parentKey) : '';
+  const candidates: string[] = [name, key, domainLabel(key), displayHost(effectiveUrl)];
+  if (parentName !== '') {
+    candidates.push(parentName, `${parentName} ${name}`, `${name} ${parentName}`);
+  }
+  const aliases = SITE_TITLE_ALIASES[key] ?? SITE_TITLE_ALIASES[domainLabel(key)];
+  if (aliases !== undefined) candidates.push(...aliases);
+  const forms = new Set(candidates.filter((form) => form !== '').map(simplify));
   let out = title.trim();
   if (forms.size === 0) return out;
 
   for (;;) {
     const cut = lastSeparator(out);
-    if (cut === null) return out;
+    if (cut === null) break;
     const tail = out.slice(cut.at + cut.separator.length);
-    if (!forms.has(simplify(tail))) return out;
+    if (!forms.has(simplify(tail))) break;
     out = out.slice(0, cut.at).trim();
   }
+
+  // Also drop a leading `"Site: "` prefix (e.g. `"Amazon.it: monitor 27 pollici"`) when
+  // followed by a real title, so store prefixes do not falsely merge unrelated products.
+  const colon = out.indexOf(': ');
+  if (colon > 0 && colon < out.length - 2) {
+    const head = out.slice(0, colon);
+    if (forms.has(simplify(head))) {
+      const rest = out.slice(colon + 2).trim();
+      if (rest !== '') out = rest;
+    }
+  }
+
+  return out;
 }
 
 function lastSeparator(title: string): { at: number; separator: string } | null {
@@ -445,9 +473,10 @@ function lastSeparator(title: string): { at: number; separator: string } | null 
 
 /** The path of a URL, percent-decoded when it can be, or `''` when there is none. */
 function pathOf(url: string): string {
+  const effectiveUrl = unwrapSuspendedUrl(url).trim();
   let path: string;
   try {
-    path = new URL(url.trim()).pathname;
+    path = new URL(effectiveUrl).pathname;
   } catch {
     return '';
   }
@@ -456,6 +485,15 @@ function pathOf(url: string): string {
   } catch {
     // A stray `%` is not an escape; the raw path still tokenizes.
     return path;
+  }
+}
+
+function collectTokens(text: string, isPath: boolean, minLength: number, into: string[]): void {
+  for (const raw of text.toLowerCase().split(TOKEN_BOUNDARY)) {
+    if (raw.length < minLength) continue;
+    if (isPath && (PATH_NOISE.has(raw) || isOpaquePathToken(raw))) continue;
+    if (STOPWORDS.has(raw) || STOPWORDS.has(foldAccents(raw))) continue;
+    into.push(raw);
   }
 }
 
@@ -473,16 +511,8 @@ export function tokenize(
 ): readonly string[] {
   const minLength = options.minTokenLength ?? DEFAULT_CLUSTER_OPTIONS.minTokenLength;
   const tokens: string[] = [];
-  const collect = (text: string, isPath: boolean): void => {
-    for (const raw of text.toLowerCase().split(TOKEN_BOUNDARY)) {
-      if (raw.length < minLength) continue;
-      if (isPath && (PATH_NOISE.has(raw) || isOpaquePathToken(raw))) continue;
-      if (STOPWORDS.has(raw) || STOPWORDS.has(foldAccents(raw))) continue;
-      tokens.push(raw);
-    }
-  };
-  collect(stripSiteSuffix(tab.title, tab.url), false);
-  collect(pathOf(tab.url), true);
+  collectTokens(stripSiteSuffix(tab.title, tab.url), false, minLength, tokens);
+  collectTokens(pathOf(tab.url), true, minLength, tokens);
   return tokens;
 }
 
@@ -526,16 +556,6 @@ interface Candidate {
   readonly firstAt: number;
 }
 
-/**
- * Largest group first, and groups of equal size in the order their first tab appears.
- * Both modes order their output this way, so the preview opens on the groups that matter
- * and the limit of 8 cuts the smallest (docs/DECISIONS.md, M4.1).
- */
-function compareCandidates(a: Candidate, b: Candidate): number {
-  if (a.tabIds.length !== b.tabIds.length) return b.tabIds.length - a.tabIds.length;
-  return a.firstAt - b.firstAt;
-}
-
 function proposalOf(
   mode: ClusterMode,
   groups: readonly Candidate[],
@@ -554,13 +574,26 @@ function proposalOf(
   };
 }
 
-/**
- * By site (PLAN.md §7.1): one group per registrable domain that has at least
- * `minSiteTabs` tabs in the window. The others stay out of groups.
- */
-export function groupBySite(tabs: readonly TabInfo[], options: ClusterOptions = {}): GroupProposal {
-  const resolved = resolve(options);
-  const groups: Candidate[] = [];
+interface SiteBucket {
+  readonly key: string;
+  readonly windowId: number;
+  readonly tabIds: readonly number[];
+  readonly firstAt: number;
+}
+
+function compareBuckets(
+  a: { readonly tabIds: readonly number[]; readonly firstAt: number },
+  b: { readonly tabIds: readonly number[]; readonly firstAt: number },
+): number {
+  if (a.tabIds.length !== b.tabIds.length) return b.tabIds.length - a.tabIds.length;
+  return a.firstAt - b.firstAt;
+}
+
+function siteBuckets(
+  tabs: readonly TabInfo[],
+  resolved: Required<ClusterOptions>,
+): { readonly buckets: readonly SiteBucket[]; readonly ungrouped: readonly number[] } {
+  const buckets: SiteBucket[] = [];
   const ungrouped: number[] = [];
 
   for (const { windowId, tabs: own } of byWindow(tabs)) {
@@ -568,7 +601,6 @@ export function groupBySite(tabs: readonly TabInfo[], options: ClusterOptions = 
     for (const [at, tab] of own.entries()) {
       if (!isEligible(tab, resolved)) continue;
       const key = siteKey(tab.url);
-      // No host at all: there is no site to group it with.
       if (key === '') {
         ungrouped.push(tab.id);
         continue;
@@ -578,23 +610,33 @@ export function groupBySite(tabs: readonly TabInfo[], options: ClusterOptions = 
       else found.tabIds.push(tab.id);
     }
 
-    const candidates: Candidate[] = [];
+    const candidates: SiteBucket[] = [];
     for (const [key, site] of sites) {
       if (site.tabIds.length < resolved.minSiteTabs) {
         ungrouped.push(...site.tabIds);
         continue;
       }
-      candidates.push({
-        key,
-        title: siteName(key),
-        windowId,
-        tabIds: site.tabIds,
-        firstAt: site.firstAt,
-      });
+      candidates.push({ key, windowId, tabIds: site.tabIds, firstAt: site.firstAt });
     }
-    groups.push(...candidates.sort(compareCandidates));
+    buckets.push(...candidates.sort(compareBuckets));
   }
 
+  return { buckets, ungrouped };
+}
+
+/**
+ * By site (PLAN.md §7.1): one group per registrable domain that has at least
+ * `minSiteTabs` tabs in the window. The others stay out of groups.
+ */
+export function groupBySite(tabs: readonly TabInfo[], options: ClusterOptions = {}): GroupProposal {
+  const { buckets, ungrouped } = siteBuckets(tabs, resolve(options));
+  const groups: Candidate[] = buckets.map((b) => ({
+    key: b.key,
+    title: siteName(b.key),
+    windowId: b.windowId,
+    tabIds: b.tabIds,
+    firstAt: b.firstAt,
+  }));
   return proposalOf('site', groups, ungrouped);
 }
 
@@ -622,10 +664,13 @@ function cosine(a: Vector, b: Vector): number {
   return sum;
 }
 
+/** Weight of URL-path tokens relative to title tokens so long URL slugs do not drown titles. */
+const PATH_TOKEN_WEIGHT = 0.7;
+
 /** What one window's tabs add up to: a vector each, and the vocabulary behind them. */
 interface Vectors {
   readonly vectors: readonly Vector[];
-  /** Token id → the token, for the titles. Domain tokens keep their prefix. */
+  /** Token id → the stem key (or `site:…` for domain tokens). */
   readonly vocabulary: readonly string[];
 }
 
@@ -635,39 +680,44 @@ interface Vectors {
  *
  * `idf = ln(1 + N/df)`, so it is always positive: a token every tab carries still counts
  * for something (ln 2) instead of vanishing, which matters with the two or three
- * documents a small window has. The vectors are L2-normalised, so a cosine is a dot
- * product and a long title is not more similar to everything than a short one.
+ * documents a small window has. Content words are stemmed conservatively for matching while
+ * sublinear TF keeps repeated URL slugs from skewing norms against tabs with opaque paths.
  */
-function vectorize(
-  tabs: readonly TabInfo[],
-  options: Required<ClusterOptions>,
-  tokensOf: (tab: TabInfo) => readonly string[],
-): Vectors {
+function vectorize(tabs: readonly TabInfo[], options: Required<ClusterOptions>): Vectors {
   const vocabulary: string[] = [];
   const ids = new Map<string, number>();
   const documentFrequency: number[] = [];
   const counts: Map<number, number>[] = [];
 
+  const register = (key: string, weight: number, perTab: Map<number, number>): void => {
+    let id = ids.get(key);
+    if (id === undefined) {
+      id = vocabulary.length;
+      ids.set(key, id);
+      vocabulary.push(key);
+      documentFrequency.push(0);
+    }
+    const seen = perTab.get(id);
+    if (seen === undefined) {
+      perTab.set(id, weight);
+      documentFrequency[id] = (documentFrequency[id] as number) + 1;
+    } else {
+      perTab.set(id, seen + weight);
+    }
+  };
+
   for (const tab of tabs) {
-    const tokens = [...tokensOf(tab)];
-    const key = siteKey(tab.url);
-    if (key !== '') tokens.push(`${DOMAIN_PREFIX}${key}`);
+    const titleTokens: string[] = [];
+    const pathTokens: string[] = [];
+    collectTokens(stripSiteSuffix(tab.title, tab.url), false, options.minTokenLength, titleTokens);
+    collectTokens(pathOf(tab.url), true, options.minTokenLength, pathTokens);
 
     const perTab = new Map<number, number>();
-    for (const token of tokens) {
-      let id = ids.get(token);
-      if (id === undefined) {
-        id = vocabulary.length;
-        ids.set(token, id);
-        vocabulary.push(token);
-        documentFrequency.push(0);
-      }
-      const seen = perTab.get(id);
-      if (seen === undefined) {
-        perTab.set(id, 1);
-        documentFrequency[id] = (documentFrequency[id] as number) + 1;
-      } else perTab.set(id, seen + 1);
-    }
+    for (const raw of titleTokens) register(stemToken(raw), 1, perTab);
+    for (const raw of pathTokens) register(stemToken(raw), PATH_TOKEN_WEIGHT, perTab);
+    const key = siteKey(tab.url);
+    if (key !== '') register(`${DOMAIN_PREFIX}${key}`, 1, perTab);
+
     counts.push(perTab);
   }
 
@@ -682,7 +732,9 @@ function vectorize(
       const df = documentFrequency[id] as number;
       const idf = Math.log(1 + total / df);
       const isDomain = (vocabulary[id] as string).startsWith(DOMAIN_PREFIX);
-      const weight = (perTab.get(id) as number) * idf * (isDomain ? options.domainWeight : 1);
+      const rawTf = perTab.get(id) as number;
+      const tf = rawTf > 1 ? 1 + Math.log(rawTf) : rawTf;
+      const weight = tf * idf * (isDomain ? options.domainWeight : 1);
       vectorIds[at] = id;
       values[at] = weight;
       norm += weight * weight;
@@ -812,27 +864,58 @@ interface RankedToken {
 }
 
 /**
- * The cluster's tokens by total TF-IDF weight, heaviest first, ties alphabetical. The
- * synthetic domain token is left out: it is an aid to the similarity, not a word, and a
- * group named after its site would say nothing a "by site" grouping does not.
+ * The cluster's tokens by total TF-IDF weight, heaviest first, ties alphabetical. Each stem
+ * is rendered using the most frequent original surface word inside the cluster (tie-broken by
+ * shortest length, then alphabetical) so group titles are always real, readable words.
  */
 function rankTokens(
   cluster: readonly number[],
+  eligible: readonly TabInfo[],
   vectors: readonly Vector[],
   vocabulary: readonly string[],
+  minTokenLength: number,
 ): readonly RankedToken[] {
   const weights = new Map<string, number>();
+  const formCounts = new Map<string, Map<string, number>>();
   for (const index of cluster) {
     const vector = vectors[index] as Vector;
     for (let at = 0; at < vector.ids.length; at += 1) {
-      const token = vocabulary[vector.ids[at] as number] as string;
-      if (token.startsWith(DOMAIN_PREFIX)) continue;
-      weights.set(token, (weights.get(token) ?? 0) + (vector.values[at] as number));
+      const key = vocabulary[vector.ids[at] as number] as string;
+      if (key.startsWith(DOMAIN_PREFIX)) continue;
+      weights.set(key, (weights.get(key) ?? 0) + (vector.values[at] as number));
+    }
+    const tab = eligible[index] as TabInfo;
+    for (const word of tokenize(tab, { minTokenLength })) {
+      const stem = stemToken(word);
+      let agg = formCounts.get(stem);
+      if (agg === undefined) {
+        agg = new Map<string, number>();
+        formCounts.set(stem, agg);
+      }
+      agg.set(word, (agg.get(word) ?? 0) + 1);
     }
   }
   return [...weights]
-    .map(([token, weight]) => ({ token, weight }))
+    .map(([stem, weight]) => ({ token: bestSurfaceForm(formCounts.get(stem), stem), weight }))
     .sort((a, b) => (b.weight !== a.weight ? b.weight - a.weight : a.token.localeCompare(b.token)));
+}
+
+function bestSurfaceForm(counts: Map<string, number> | undefined, fallback: string): string {
+  if (counts === undefined || counts.size === 0) return fallback;
+  let bestWord = fallback;
+  let bestCount = -1;
+  for (const [word, count] of counts) {
+    if (
+      count > bestCount ||
+      (count === bestCount &&
+        (word.length < bestWord.length ||
+          (word.length === bestWord.length && word.localeCompare(bestWord) < 0)))
+    ) {
+      bestWord = word;
+      bestCount = count;
+    }
+  }
+  return bestWord;
 }
 
 /**
@@ -892,6 +975,94 @@ function dominantSite(cluster: readonly number[], tabs: readonly TabInfo[]): str
   return tied ? '' : siteName(best);
 }
 
+function hasContentToken(
+  cluster: readonly number[],
+  vectors: readonly Vector[],
+  vocabulary: readonly string[],
+): boolean {
+  for (const index of cluster) {
+    const vector = vectors[index] as Vector;
+    for (let at = 0; at < vector.ids.length; at += 1) {
+      if (!(vocabulary[vector.ids[at] as number] as string).startsWith(DOMAIN_PREFIX)) return true;
+    }
+  }
+  return false;
+}
+
+interface TopicWindowResult {
+  readonly windowId: number;
+  readonly eligible: readonly TabInfo[];
+  readonly vectors: readonly Vector[];
+  readonly vocabulary: readonly string[];
+  readonly kept: readonly {
+    readonly indexes: readonly number[];
+    readonly tabIds: readonly number[];
+    readonly firstAt: number;
+  }[];
+  readonly ungrouped: readonly number[];
+}
+
+function topicWindowClusters(
+  windowId: number,
+  own: readonly TabInfo[],
+  resolved: Required<ClusterOptions>,
+): TopicWindowResult {
+  const eligible = own.filter((tab) => isEligible(tab, resolved));
+  const { vectors, vocabulary } = vectorize(eligible, resolved);
+  const ungrouped: number[] = [];
+  const candidates: {
+    readonly indexes: readonly number[];
+    readonly tabIds: readonly number[];
+    readonly firstAt: number;
+  }[] = [];
+
+  for (const cluster of agglomerate(vectors, resolved.threshold)) {
+    const tabIds = cluster.map((index) => (eligible[index] as TabInfo).id);
+    if (cluster.length < resolved.minClusterTabs) {
+      ungrouped.push(...tabIds);
+      continue;
+    }
+    candidates.push({ indexes: cluster, tabIds, firstAt: cluster[0] as number });
+  }
+  candidates.sort(compareBuckets);
+
+  for (const cut of candidates.slice(resolved.maxGroups)) ungrouped.push(...cut.tabIds);
+  const kept: typeof candidates = [];
+  for (const entry of candidates.slice(0, resolved.maxGroups)) {
+    if (!hasContentToken(entry.indexes, vectors, vocabulary)) {
+      ungrouped.push(...entry.tabIds);
+      continue;
+    }
+    kept.push(entry);
+  }
+  return { windowId, eligible, vectors, vocabulary, kept, ungrouped };
+}
+
+/**
+ * Lightweight clustering returning only the tab IDs per cluster and the ungrouped tab IDs,
+ * without computing titles or colours. Used by `platform/windows.ts` so the background service
+ * worker stays small and skips unused naming/colouring work.
+ */
+export function clusterTabIds(
+  tabs: readonly TabInfo[],
+  mode: ClusterMode,
+  options: ClusterOptions = {},
+): { readonly groups: readonly (readonly number[])[]; readonly ungrouped: readonly number[] } {
+  const resolved = resolve(options);
+  if (mode === 'site') {
+    const { buckets, ungrouped } = siteBuckets(tabs, resolved);
+    return { groups: buckets.map((b) => b.tabIds), ungrouped };
+  }
+  const groups: (readonly number[])[] = [];
+  const ungrouped: number[] = [];
+  for (const { windowId, tabs: own } of byWindow(tabs)) {
+    const result = topicWindowClusters(windowId, own, resolved);
+    for (const entry of result.kept) groups.push(entry.tabIds);
+    ungrouped.push(...result.ungrouped);
+  }
+  return { groups, ungrouped };
+}
+
 /**
  * By topic, without AI (PLAN.md §7.2): tokens, TF-IDF, average-linkage clustering, at
  * least `minClusterTabs` tabs per group and at most `maxGroups` groups per window.
@@ -906,40 +1077,33 @@ export function groupByTopic(
   const ungrouped: number[] = [];
 
   for (const { windowId, tabs: own } of byWindow(tabs)) {
-    const eligible = own.filter((tab) => isEligible(tab, resolved));
-    const { vectors, vocabulary } = vectorize(eligible, resolved, (tab) => tokenize(tab, resolved));
-
-    const candidates: { indexes: readonly number[]; candidate: Candidate }[] = [];
-    for (const cluster of agglomerate(vectors, resolved.threshold)) {
-      const tabIds = cluster.map((index) => (eligible[index] as TabInfo).id);
-      if (cluster.length < resolved.minClusterTabs) {
-        ungrouped.push(...tabIds);
-        continue;
-      }
-      candidates.push({
-        indexes: cluster,
-        // The title is not known yet: it depends on which groups survive the limit.
-        candidate: { key: '', title: '', windowId, tabIds, firstAt: cluster[0] as number },
-      });
-    }
-    candidates.sort((a, b) => compareCandidates(a.candidate, b.candidate));
-
-    // PLAN.md §7.2.6: past the limit of 8 the smallest clusters go to "Altro".
-    for (const cut of candidates.slice(resolved.maxGroups)) ungrouped.push(...cut.candidate.tabIds);
+    const {
+      eligible,
+      vectors,
+      vocabulary,
+      kept,
+      ungrouped: dropped,
+    } = topicWindowClusters(windowId, own, resolved);
+    ungrouped.push(...dropped);
 
     const taken = new Set<string>();
-    for (const { indexes, candidate } of candidates.slice(0, resolved.maxGroups)) {
-      const ranked = rankTokens(indexes, vectors, vocabulary);
-      const title = titleOf(ranked, dominantSite(indexes, eligible), taken);
-      if (title === '') {
-        // Nothing to call it by: no group rather than a group with no name.
-        ungrouped.push(...candidate.tabIds);
-        continue;
-      }
+    for (const entry of kept) {
+      const ranked = rankTokens(
+        entry.indexes,
+        eligible,
+        vectors,
+        vocabulary,
+        resolved.minTokenLength,
+      );
+      const title = titleOf(ranked, dominantSite(entry.indexes, eligible), taken);
       taken.add(title);
-      // The key is the title: that is what the group *is* here, and the colour follows it
-      // so that renaming a group in the preview does not recolour it.
-      groups.push({ ...candidate, title, key: title.toLowerCase() });
+      groups.push({
+        windowId,
+        tabIds: entry.tabIds,
+        firstAt: entry.firstAt,
+        title,
+        key: title.toLowerCase(),
+      });
     }
   }
 

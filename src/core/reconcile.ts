@@ -12,6 +12,7 @@
  */
 
 import type { ActivityStore, TabActivity } from './types';
+import { unwrapSuspendedUrl } from './url';
 
 /**
  * What matching needs of a tab. A subset of `TabInfo`, because the background has the
@@ -83,7 +84,7 @@ export function bootstrapRecord(tab: ReconcileTab, now: number): TabActivity {
     tab.lastAccessed !== undefined && tab.lastAccessed > 0 ? Math.min(tab.lastAccessed, now) : now;
   return {
     tabId: tab.id,
-    url: tab.url,
+    url: unwrapSuspendedUrl(tab.url),
     createdAt: seen,
     lastActiveAt: seen,
     activations: 0,
@@ -105,8 +106,9 @@ export function reconcileActivity(
 ): ReconcileResult {
   const byUrl = new Map<string, TabActivity[]>();
   for (const record of records(saved)) {
-    const sameUrl = byUrl.get(record.url);
-    if (sameUrl === undefined) byUrl.set(record.url, [record]);
+    const key = unwrapSuspendedUrl(record.url);
+    const sameUrl = byUrl.get(key);
+    if (sameUrl === undefined) byUrl.set(key, [record]);
     else sameUrl.push(record);
   }
 
@@ -116,8 +118,9 @@ export function reconcileActivity(
   let used = 0;
 
   for (const tab of [...tabs].sort(inWindowOrder)) {
+    const effectiveUrl = unwrapSuspendedUrl(tab.url);
     // An empty URL is "the browser did not say", not something two tabs have in common.
-    const byUrlRecord = tab.url === '' ? undefined : byUrl.get(tab.url)?.shift();
+    const byUrlRecord = effectiveUrl === '' ? undefined : byUrl.get(effectiveUrl)?.shift();
     // The saved copy of a tab Firefox restored itself is spent either way: the session
     // value is the same record, so the tabs behind this one must get the other records.
     if (byUrlRecord !== undefined) used += 1;
@@ -128,7 +131,7 @@ export function reconcileActivity(
       activity[tab.id] = bootstrapRecord(tab, options.now);
       invented += 1;
     } else {
-      activity[tab.id] = { ...record, tabId: tab.id, url: tab.url };
+      activity[tab.id] = { ...record, tabId: tab.id, url: effectiveUrl };
       matched += 1;
     }
   }
@@ -157,7 +160,7 @@ export function bootstrapActivity(
   for (const tab of tabs) {
     const stored = saved[tab.id];
     if (isTabActivity(stored)) {
-      activity[tab.id] = { ...stored, tabId: tab.id, url: tab.url };
+      activity[tab.id] = { ...stored, tabId: tab.id, url: unwrapSuspendedUrl(tab.url) };
       matched += 1;
     } else {
       activity[tab.id] = bootstrapRecord(tab, now);

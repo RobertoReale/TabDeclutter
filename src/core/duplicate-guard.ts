@@ -255,7 +255,8 @@ function reloadUrlFor(
 ): string | undefined {
   if (ctx.settings.keep !== 'oldest-reloaded') return undefined;
   if (keep.id === trigger.id) return undefined;
-  return tabUrl(keep) === triggerUrl ? undefined : triggerUrl;
+  const keepRaw = keep.url !== '' ? keep.url : (keep.pendingUrl ?? '');
+  return keepRaw === triggerUrl ? undefined : triggerUrl;
 }
 
 /**

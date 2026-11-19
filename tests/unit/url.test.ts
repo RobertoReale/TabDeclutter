@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_MATCH_OPTIONS } from '../../src/core/types';
 import type { MatchOptions } from '../../src/core/types';
-import { displayHost, isTrackingParam, normalizeUrl, registrableDomain } from '../../src/core/url';
+import {
+  displayHost,
+  isTrackingParam,
+  normalizeUrl,
+  registrableDomain,
+  unwrapSuspendedUrl,
+} from '../../src/core/url';
 
 /** The defaults with one switch flipped, so each case says what it is testing. */
 function withOptions(overrides: Partial<MatchOptions>): MatchOptions {
@@ -276,4 +282,67 @@ describe('displayHost', () => {
       expect(displayHost(input)).toBe('');
     },
   );
+});
+
+describe('unwrapSuspendedUrl (tab-suspender compatibility)', () => {
+  const TINY =
+    'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc%26t%3D12&title=Live%20%2330';
+  const MARVELLOUS =
+    'chrome-extension://noogafoofpebimajpfpamcfhoaifemoa/suspended.html#ttl=Video&pos=0&uri=https://www.youtube.com/watch?v=abc&list=PL123&t=42';
+  const MARVELLOUS_REORDERED =
+    'chrome-extension://noogafoofpebimajpfpamcfhoaifemoa/suspended.html#uri=https://example.com/a?x=1&ttl=MyTitle';
+  const TAB_SUSPENDER =
+    'chrome-extension://fiabciakcmgepblmdkmemdbbkilneeeh/park.html?title=Doc&url=https%3A%2F%2Fgemini.google.com%2Fapp%2F6c9f4e2b8a1d';
+  const FIREFOX_SUSPENDER =
+    'moz-extension://1b2c-3d/suspended.html#?url=https%3A%2F%2Fit.wikipedia.org%2Fwiki%2FGram-Schmidt';
+
+  it('extracts the wrapped web URL from Tiny Suspender, Great/Marvellous Suspender, and Tab Suspender', () => {
+    expect(unwrapSuspendedUrl(TINY)).toBe('https://www.youtube.com/watch?v=abc&t=12');
+    expect(unwrapSuspendedUrl(MARVELLOUS)).toBe(
+      'https://www.youtube.com/watch?v=abc&list=PL123&t=42',
+    );
+    expect(unwrapSuspendedUrl(MARVELLOUS_REORDERED)).toBe('https://example.com/a?x=1');
+    expect(unwrapSuspendedUrl(TAB_SUSPENDER)).toBe('https://gemini.google.com/app/6c9f4e2b8a1d');
+    expect(unwrapSuspendedUrl(FIREFOX_SUSPENDER)).toBe(
+      'https://it.wikipedia.org/wiki/Gram-Schmidt',
+    );
+  });
+
+  it('unwraps double-suspended extension URLs safely', () => {
+    const wrappedTwice = `chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=${encodeURIComponent(TINY)}`;
+    // The inner target is `chrome-extension:` so the first pass rejects non-http(s) payloads;
+    // normal single-wrapped URLs are unwrapped directly and idempotently.
+    expect(unwrapSuspendedUrl(wrappedTwice)).toBe(wrappedTwice);
+    expect(unwrapSuspendedUrl(unwrapSuspendedUrl(TINY))).toBe(
+      'https://www.youtube.com/watch?v=abc&t=12',
+    );
+  });
+
+  it('leaves normal web URLs, non-suspender extension pages, and non-web payloads untouched', () => {
+    const cases = [
+      'https://example.com/suspend.html?url=https%3A%2F%2Fother.com',
+      'chrome-extension://bbomjaikkcabgmfaomdich/views/app.html',
+      'chrome-extension://abcdef/panel.html?url=https%3A%2F%2Fexample.com',
+      'chrome-extension://abcdef/suspended.html',
+      'chrome-extension://abcdef/suspended.html#uri=javascript:alert(1)',
+      'chrome-extension://abcdef/suspended.html#uri=file:///etc/passwd',
+      'chrome-extension://abcdef/suspended.html#uri=chrome://settings',
+      'chrome-extension://abcdef/suspended.html#uri=not-a-url',
+      'chrome-extension://abcdef/suspended.html?url=https%3A%2F%2F',
+      'chrome-extension://',
+      'about:reader?url=https%3A%2F%2Fe.com',
+      '   ',
+    ];
+    for (const input of cases) {
+      expect(unwrapSuspendedUrl(input), input).toBe(input);
+    }
+  });
+
+  it('propagates unwrapped URLs through normalizeUrl, registrableDomain, and displayHost', () => {
+    expect(normalizeUrl(TINY)).toBe('https://youtube.com/watch?t=12&v=abc');
+    expect(registrableDomain(TINY)).toBe('youtube.com');
+    expect(displayHost(TINY)).toBe('youtube.com');
+    expect(displayHost(TAB_SUSPENDER)).toBe('gemini.google.com');
+    expect(displayHost('chrome-extension://bbomjaikkcabgmfaomdich/views/app.html')).toBe('');
+  });
 });

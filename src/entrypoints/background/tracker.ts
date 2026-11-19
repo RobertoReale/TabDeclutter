@@ -31,6 +31,7 @@ import {
   reconcileActivity,
 } from '@/core/reconcile';
 import type { ActivityStore, TabActivity } from '@/core/types';
+import { unwrapSuspendedUrl } from '@/core/url';
 import type { Capabilities } from '@/platform/capabilities';
 import { caps } from '@/platform/capabilities';
 import { activityItem, foregroundItem } from '@/platform/storage';
@@ -257,7 +258,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
       // tab that redirects itself has not been touched (PLAN.md §6.1).
       current[tabId] = {
         ...record,
-        url,
+        url: unwrapSuspendedUrl(url),
         lastActiveAt: tab.active === true ? at : record.lastActiveAt,
       };
       mark(tabId);
@@ -358,7 +359,7 @@ function asReconcileTab(tab: TabLike & { id?: number }): ReconcileTab {
 /** A tab that is still loading has its destination in `pendingUrl` and `url: ''`. */
 function urlOf(tab: TabLike): string {
   const url = tab.url !== undefined && tab.url !== '' ? tab.url : tab.pendingUrl;
-  return url ?? '';
+  return unwrapSuspendedUrl(url ?? '');
 }
 
 /** Firefox restores these with the tab, so they are the first thing a restart reads. */
