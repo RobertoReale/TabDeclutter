@@ -24,7 +24,9 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
   - Consolidates tabs scattered across multiple windows into your primary window.
   - Sorts tabs side by side **by website** (recognizing major web apps on shared domains such as
     Gemini, Gmail, Google Docs, Drive, Calendar, YouTube Music, Outlook, and Teams as distinct apps)
-    or **by topic** (fast local TF-IDF clustering that ignores URL noise and opaque page IDs).
+    or **by topic** (fast offline TF-IDF clustering with Italian/English stemming, compound and
+    localized site-suffix stripping such as `- Google Gemini`, `- Cerca con Google`, or `Amazon.it:`,
+    and URL routing/opaque-ID noise filtering).
   - If you were reading a tab in a secondary window that gets merged into the primary window, that
     tab stays active on screen so you never lose your place.
 - **One window per topic or website**
@@ -35,6 +37,11 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
 - **One-click Undo for windows**: every manual window organization shows an **Undo** bar that
   restores tabs (and any emptied windows) back to their previous layout and temporarily snoozes
   background auto-organize so your layout stays intact.
+- **Tab-suspender compatibility**: works seamlessly alongside both native browser discarding (Chrome
+  Memory Saver, Auto Tab Discard) and URL-rewriting tab-suspender extensions (Tiny Suspender, The
+  Great / Marvellous Suspender, Tab Suspender). TabDeclutter transparently unwraps suspended tab URLs
+  for site/topic organization, duplicate detection, site protection, favicons, activity tracking, and
+  Archive restores, while leaving genuine extension pages (such as PDF or Office viewers) untouched.
 - **Experimental on-device AI** _(Chrome-only, off by default)_: local organization already runs
   instantly and offline without AI; if you want to experiment with Chrome's built-in Gemini Nano
   model for topic grouping, you can opt in under **Settings → Experimental**. Your choice is never
@@ -101,15 +108,22 @@ TabDeclutter is designed never to get in your way while you are working:
 
 ## Side Panel & Shortcuts
 
-| Shortcut / Control | Action                                                                 |
-| ------------------ | ---------------------------------------------------------------------- |
-| `Alt+Shift+D`      | Open the TabDeclutter side panel                                       |
-| `Alt+Shift+M`      | Pause or resume Duplicate Protection                                   |
-| `Alt+Shift+X`      | Close all duplicate tabs now                                           |
-| `↑` / `↓`          | Navigate rows and sections in the Declutter list                       |
-| `Enter`            | Switch to the focused tab (or expand/collapse a section)               |
-| `Delete`           | Close the selected or focused tab(s) (saved to Archive, `Ctrl+Z` undo) |
-| `K`                | Mark the selected or focused tab(s) as **Keep**                        |
+| Shortcut / Control               | Action                                                          |
+| -------------------------------- | --------------------------------------------------------------- |
+| `Alt+Shift+D`                    | Open the TabDeclutter side panel                                |
+| Browser command _(configurable)_ | Pause or resume Duplicate Protection (`toggle-duplicate-guard`) |
+| Browser command _(configurable)_ | Close all duplicate tabs now (`close-all-duplicates`)           |
+| `↑` / `↓`                        | Navigate rows and sections in the Declutter list                |
+| `Space`                          | Select or deselect the focused row                              |
+| `Enter`                          | Switch to the focused tab (or expand/collapse a section)        |
+| `Delete` / `Backspace`           | Close the selected or focused tab(s) (saved to Archive)         |
+| `K`                              | Mark the selected or focused tab(s) as **Keep**                 |
+| `Ctrl+A` / `Cmd+A`               | Select all rows in the current section                          |
+| `Ctrl+Z` / `Cmd+Z`               | Undo the last close                                             |
+| `Esc`                            | Cancel a close confirmation or clear the selection              |
+
+Browser-level shortcuts can be customized or assigned in `chrome://extensions/shortcuts` (Chrome) or
+`about:addons` → _Manage Extension Shortcuts_ (Firefox).
 
 Supports **Italian** and **English** (switchable live in **Settings → Extension language**) and
 automatically follows your system's **Light / Dark theme**. Works on Chrome 121+ (and Chromium
