@@ -34,8 +34,7 @@ import {
   duplicateWhitelistItem,
   keepsItem,
   protectedDomainsItem,
-  readKeeps,
-  readSettings,
+  readScoringStore,
   settingsItem,
 } from '@/platform/storage';
 import { queryTabs } from '@/platform/tabs';
@@ -247,33 +246,20 @@ export function startPanelState(options: PanelStateOptions = {}): PanelStateHand
 
 /** One pass over everything a score needs. */
 async function read(at: number): Promise<PanelData> {
-  const [
-    openTabs,
-    activity,
-    settings,
-    keeps,
-    protectedSites,
-    whitelist,
-    bookmarks,
-    focusedWindowId,
-  ] = await Promise.all([
+  const [openTabs, store, bookmarks, focusedWindowId] = await Promise.all([
     queryTabs(),
-    activityItem.getValue(),
-    readSettings(),
-    readKeeps(at),
-    protectedDomainsItem.getValue(),
-    duplicateWhitelistItem.getValue(),
+    readScoringStore(at),
     bookmarkedKeys(),
     currentWindowId(),
   ]);
 
   return {
     tabs: openTabs,
-    activity,
-    settings,
-    keeps,
-    protectedSites,
-    whitelist,
+    activity: store.activity,
+    settings: store.settings,
+    keeps: store.keeps,
+    protectedSites: store.protectedSites,
+    whitelist: store.whitelist,
     bookmarks,
     focusedWindowId,
     ownOrigin: browser.runtime.getURL(''),

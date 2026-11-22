@@ -3,40 +3,80 @@
  * forgotten windows, archiving every one first) and automatic window/tab organization
  * (`Settings.autoDeclutter` and `Settings.autoOrganize`).
  *
- * Driven by events and the periodic alarm, never polling, and serialized so two bursts
- * cannot overlap. Everything lives in storage so service worker restarts lose nothing.
+ * Driven by events and alarms, never polling, and serialized so two bursts cannot overlap.
+ * Everything lives in storage so service worker restarts lose nothing, and every import is
+ * static so the MV3 service worker never calls dynamic `import()` (disallowed in
+ * `ServiceWorkerGlobalScope` by the HTML spec).
  */
 
+import { buildPrompt, SYSTEM_PROMPT, validateAiAnswer } from '@/core/ai-prompt';
+import { colorFor, type GroupProposal, type ProposedGroup } from '@/core/cluster';
 import { compile } from '@/core/patterns';
-import type { GroupProposal } from '@/core/cluster';
 import { scoreTabs, type ScoredTab } from '@/core/scoring';
 import { DAY, HOUR, MINUTE } from '@/core/time';
 import { NO_GROUP_ID, STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
 import { unwrapSuspendedUrl } from '@/core/url';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import {
-  activityItem,
+  aiBgCooldownUntilItem,
   aiBusyUntilItem,
   aiProposalItem,
-  aiProposalSignatureItem,
   duplicateWhitelistItem,
   keepsItem,
+  onBackgroundAiPreempt,
   organizeSnoozeUntilItem,
   protectedDomainsItem,
+  readAiProposalState,
   readGuardState,
-  readKeeps,
+  readScoringInputs,
   readSettings,
+  saveAiProposalState,
   settingsItem,
+  withAiLock,
 } from '@/platform/storage';
 import { activateTab, closeTabs, closeWindow, NO_WINDOW, queryTabs } from '@/platform/tabs';
+import { isMovableTab, movableTabsSignature, organizeWindows } from '@/platform/windows';
+
+import { reportBackgroundError } from './report';
 
 const AUTOPILOT_DEBOUNCE_MS = 1_200;
 const AUTOPILOT_PERIOD_MINUTES = 15;
 const ALARM_NAME = 'autopilot-sweep';
+const STARTUP_ALARM_NAME = 'autopilot-startup';
+/** Chrome 120+ enforces a 30 s minimum alarm delay; using 30 s avoids dev console warnings while clearing the 15 s startup grace window. */
+const STARTUP_ALARM_DELAY_MS = Math.max(STARTUP_GRACE_MS + 500, 30_000);
 const BG_AI_WARMUP_TIMEOUT_MS = 60_000;
 const BG_AI_TIMEOUT_MS = 90_000;
 const BG_AI_COOLDOWN_MS = 2 * MINUTE;
+const BG_AI_MAX_BATCH_TABS = 40;
+const BG_AI_MAX_GROUPS = 8;
+const BG_AI_MAX_NAME_LENGTH = 24;
 const SW_KEEPALIVE_MS = 20_000;
+
+const EXPECTED_TEXT_OPTIONS = {
+  expectedInputs: [{ type: 'text', languages: ['en'] }],
+  expectedOutputs: [{ type: 'text', languages: ['en'] }],
+} as const;
+
+interface BackgroundLanguageModelSession {
+  prompt(input: string, options?: { readonly signal?: AbortSignal }): Promise<string>;
+  clone?(options?: { readonly signal?: AbortSignal }): Promise<BackgroundLanguageModelSession>;
+  destroy?(): void;
+}
+
+interface BackgroundLanguageModelApi {
+  availability(options?: typeof EXPECTED_TEXT_OPTIONS): Promise<string>;
+  create(
+    options?: typeof EXPECTED_TEXT_OPTIONS & { readonly signal?: AbortSignal },
+  ): Promise<BackgroundLanguageModelSession>;
+}
+
+function backgroundLanguageModel(): BackgroundLanguageModelApi | undefined {
+  const found = (globalThis as { LanguageModel?: BackgroundLanguageModelApi }).LanguageModel;
+  return typeof found?.availability === 'function' && typeof found.create === 'function'
+    ? found
+    : undefined;
+}
 
 function bareKey(key: string): string {
   return key.slice(key.indexOf(':') + 1);
@@ -75,7 +115,6 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let chain: Promise<unknown> = Promise.resolve();
   let bgAiInFlight = false;
-  let bgAiCooldownUntil = 0;
   let lastBgAiSignature = '';
 
   function run(): Promise<AutopilotReport> {
@@ -91,124 +130,100 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     }, debounceMs);
   }
 
-  async function refreshAiInBackground(settings: Settings, focusedId?: number): Promise<void> {
-    if (bgAiInFlight || now() < bgAiCooldownUntil) return;
-    if (
-      !capabilities.promptApi ||
-      typeof (globalThis as { LanguageModel?: unknown }).LanguageModel === 'undefined'
-    ) {
-      return;
-    }
-    const busyUntil = await aiBusyUntilItem.getValue().catch(() => 0);
-    if (busyUntil > now()) return;
-    const [windowsMod, allTabs] = await Promise.all([
-      import('@/platform/windows'),
+  async function setBgCooldown(): Promise<void> {
+    await aiBgCooldownUntilItem.setValue(now() + BG_AI_COOLDOWN_MS).catch(ignore);
+  }
+
+  async function refreshAiInBackground(focusedId?: number): Promise<void> {
+    if (bgAiInFlight) return;
+    const modelApi = capabilities.promptApi ? backgroundLanguageModel() : undefined;
+    if (modelApi === undefined) return;
+
+    const [cooldownUntil, busyUntil] = await Promise.all([
+      aiBgCooldownUntilItem.getValue().catch(() => 0),
+      aiBusyUntilItem.getValue().catch(() => 0),
+    ]);
+    if (cooldownUntil > now() || busyUntil > now()) return;
+
+    const [allTabs, proposalState] = await Promise.all([
       queryTabs().catch(() => []),
+      readAiProposalState().catch(() => ({ proposal: null, signature: '' })),
     ]);
     const movable = allTabs.filter(
-      (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && windowsMod.isMovableTab(tab),
+      (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && isMovableTab(tab),
     );
     if (movable.length < 2) return;
-    const signature = windowsMod.movableTabsSignature(movable);
-    const [existing, savedSig] = await Promise.all([
-      aiProposalItem.getValue().catch(() => null),
-      aiProposalSignatureItem.getValue().catch(() => ''),
-    ]);
+    const signature = movableTabsSignature(movable);
     if (
-      proposalCoversMovable(existing, movable, savedSig, signature) ||
+      proposalCoversMovable(proposalState.proposal, movable, proposalState.signature, signature) ||
       lastBgAiSignature === signature
     ) {
       return;
     }
 
-    bgAiInFlight = true;
-    void aiBusyUntilItem.setValue(now() + BG_AI_WARMUP_TIMEOUT_MS + BG_AI_TIMEOUT_MS).catch(ignore);
-    // Keep the MV3 service worker alive while on-device GPU inference runs.
-    const heartbeat = setInterval(() => {
-      void (browser.runtime as unknown as { getPlatformInfo?: () => Promise<unknown> })
-        .getPlatformInfo?.()
+    await withAiLock(true, async () => {
+      if (bgAiInFlight) return;
+      bgAiInFlight = true;
+      void aiBusyUntilItem
+        .setValue(now() + BG_AI_WARMUP_TIMEOUT_MS + BG_AI_TIMEOUT_MS)
         .catch(ignore);
-    }, SW_KEEPALIVE_MS);
-    (heartbeat as unknown as { unref?: () => void }).unref?.();
+      // Keep the MV3 service worker alive while on-device GPU inference runs.
+      const heartbeat = setInterval(() => {
+        void (browser.runtime as unknown as { getPlatformInfo?: () => Promise<unknown> })
+          .getPlatformInfo?.()
+          .catch(ignore);
+      }, SW_KEEPALIVE_MS);
+      (heartbeat as unknown as { unref?: () => void }).unref?.();
 
-    try {
-      const [llmMod, aiMod] = await Promise.all([
-        import('@/platform/llm'),
-        import('@/core/ai-grouping'),
-      ]);
-      const state = await llmMod.checkAvailability();
-      if (state !== 'available') {
-        bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
-        return;
-      }
-      const session = llmMod.panelSession({ timeoutMs: BG_AI_TIMEOUT_MS });
-      const warmupController = new AbortController();
-      const warmupTimer = setTimeout(() => {
-        warmupController.abort(new DOMException('background AI warmup timed out', 'TimeoutError'));
-      }, BG_AI_WARMUP_TIMEOUT_MS);
-      (warmupTimer as unknown as { unref?: () => void }).unref?.();
+      const bgController = new AbortController();
+      const unsubPreempt = onBackgroundAiPreempt(() => {
+        bgController.abort(new DOMException('preempted by side panel', 'AbortError'));
+      });
+
       try {
-        await session.open?.({ signal: warmupController.signal });
-      } finally {
-        clearTimeout(warmupTimer);
-      }
+        const restored = await promptBackgroundProposal(modelApi, movable, bgController.signal);
+        if (bgController.signal.aborted) return;
+        if (restored === null || restored.groups.length === 0) {
+          await setBgCooldown();
+          return;
+        }
+        lastBgAiSignature = signature;
+        await saveAiProposalState(restored, signature);
 
-      const realByShort = new Map<number, number>();
-      const compact: TabInfo[] = movable.map((tab, index) => {
-        const shortId = index + 1;
-        realByShort.set(shortId, tab.id);
-        return { ...tab, id: shortId, windowId: 1, index, groupId: NO_GROUP_ID };
-      });
-      const result = await aiMod.groupByAi(compact, session, {
-        minSiteTabs: 2,
-        minClusterTabs: 2,
-        includePinned: false,
-        includeGrouped: true,
-        timeoutMs: BG_AI_TIMEOUT_MS,
-      });
-      if (result.source !== 'ai') {
-        bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
-        return;
+        // Inference can take 30-90 s; re-read settings and snooze before moving any window.
+        const [latest, snoozeUntil] = await Promise.all([
+          readSettings(),
+          organizeSnoozeUntilItem.getValue().catch(() => 0),
+        ]);
+        if (
+          bgController.signal.aborted ||
+          !latest.autoOrganize ||
+          latest.useTabGroups ||
+          latest.autoOrganizeMode !== 'topic' ||
+          !latest.useOnDeviceAi ||
+          snoozeUntil > now()
+        ) {
+          return;
+        }
+        await organizeWindows({
+          windowMode: latest.autoWindowMode,
+          clusterMode: latest.autoOrganizeMode,
+          useTabGroups: latest.useTabGroups,
+          focusedWindowId: focusedId ?? (await focusedWindow()),
+          proposal: restored,
+        });
+      } catch {
+        // Yielding to the foreground side panel is normal, not a failure cooldown.
+        if (!bgController.signal.aborted) {
+          await setBgCooldown();
+        }
+      } finally {
+        unsubPreempt();
+        clearInterval(heartbeat);
+        bgAiInFlight = false;
+        void aiBusyUntilItem.setValue(0).catch(ignore);
       }
-      const restored: GroupProposal = {
-        mode: result.proposal.mode,
-        groups: result.proposal.groups
-          .map((group) => ({
-            ...group,
-            tabIds: group.tabIds
-              .map((id) => realByShort.get(id))
-              .filter((id): id is number => id !== undefined),
-          }))
-          .filter((group) => group.tabIds.length >= 2),
-        ungrouped: result.proposal.ungrouped
-          .map((id) => realByShort.get(id))
-          .filter((id): id is number => id !== undefined),
-      };
-      if (restored.groups.length === 0) {
-        bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
-        return;
-      }
-      lastBgAiSignature = signature;
-      await Promise.all([
-        aiProposalItem.setValue(restored),
-        aiProposalSignatureItem.setValue(signature),
-      ]);
-      const snoozeUntil = await organizeSnoozeUntilItem.getValue().catch(() => 0);
-      if (snoozeUntil > now()) return;
-      await windowsMod.organizeWindows({
-        windowMode: settings.autoWindowMode,
-        clusterMode: settings.autoOrganizeMode,
-        useTabGroups: settings.useTabGroups,
-        focusedWindowId: focusedId ?? (await focusedWindow()),
-        proposal: restored,
-      });
-    } catch {
-      bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
-    } finally {
-      clearInterval(heartbeat);
-      bgAiInFlight = false;
-      void aiBusyUntilItem.setValue(0).catch(ignore);
-    }
+    });
   }
 
   async function sweep(): Promise<AutopilotReport> {
@@ -233,18 +248,12 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     const focusedId = await focusedWindow();
 
     if (settings.autoDeclutter) {
-      const [tabs, activity, keeps, protectedSites, whitelist] = await Promise.all([
-        queryTabs(),
-        activityItem.getValue(),
-        readKeeps(at),
-        protectedDomainsItem.getValue(),
-        duplicateWhitelistItem.getValue(),
-      ]);
+      const [tabs, inputs] = await Promise.all([queryTabs(), readScoringInputs(at)]);
 
-      const scoring = scoreTabs(tabs, activity, settings, at, {
-        isWhitelisted: compile(whitelist).match,
-        protectedSites,
-        keeps,
+      const scoring = scoreTabs(tabs, inputs.activity, settings, at, {
+        isWhitelisted: compile(inputs.whitelist).match,
+        protectedSites: inputs.protectedSites,
+        keeps: inputs.keeps,
         ownOrigin: browser.runtime.getURL(''),
         focusedWindowId: focusedId,
       });
@@ -306,7 +315,6 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi
           ? ((await aiProposalItem.getValue().catch(() => null)) ?? undefined)
           : undefined;
-      const { organizeWindows } = await import('@/platform/windows');
       const winResult = await organizeWindows({
         windowMode: settings.autoWindowMode,
         clusterMode: settings.autoOrganizeMode,
@@ -320,7 +328,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         settings.autoOrganizeMode === 'topic' &&
         settings.useOnDeviceAi
       ) {
-        void refreshAiInBackground(settings, focusedId).catch(ignore);
+        void refreshAiInBackground(focusedId).catch(ignore);
       }
     }
 
@@ -352,13 +360,19 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   );
 
   browser.alarms.onAlarm.addListener((alarm: { name: string }) => {
-    if (alarm.name === ALARM_NAME) void run().catch(failed);
+    if (alarm.name === ALARM_NAME || alarm.name === STARTUP_ALARM_NAME) {
+      void run().catch(failed);
+    }
   });
 
+  // Use a durable alarm rather than `setTimeout` so an MV3 service worker suspended during
+  // the 15 s startup grace window still runs its post-restore sweep on time (invariant 6).
   browser.runtime.onStartup.addListener(() => {
-    setTimeout(() => {
-      void run().catch(failed);
-    }, STARTUP_GRACE_MS + 500);
+    void scheduleStartupAlarm(now() + STARTUP_ALARM_DELAY_MS).catch(() => {
+      setTimeout(() => {
+        void run().catch(failed);
+      }, STARTUP_GRACE_MS + 500);
+    });
   });
 
   browser.runtime.onInstalled.addListener(() => {
@@ -366,15 +380,152 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   });
 
   void ensureAlarm().catch(failed);
-  schedule();
 
   return { run };
+}
+
+/**
+ * Prompts Chrome's on-device `LanguageModel` directly in the service worker and always destroys
+ * the ephemeral session in `finally` so the worker never retains ~4 GiB of VRAM or keep-alive
+ * intervals after finishing.
+ */
+async function promptBackgroundProposal(
+  modelApi: BackgroundLanguageModelApi,
+  movable: readonly TabInfo[],
+  preemptSignal: AbortSignal,
+): Promise<GroupProposal | null> {
+  if (preemptSignal.aborted) return null;
+  const availability = await modelApi.availability(EXPECTED_TEXT_OPTIONS);
+  if (availability !== 'available' || preemptSignal.aborted) return null;
+
+  const realByShort = new Map<number, number>();
+  const compact: TabInfo[] = movable.map((tab, index) => {
+    const shortId = index + 1;
+    realByShort.set(shortId, tab.id);
+    return { ...tab, id: shortId, windowId: 1, index, groupId: NO_GROUP_ID };
+  });
+
+  const session = await withTimeout(
+    BG_AI_WARMUP_TIMEOUT_MS,
+    'background AI warmup timed out',
+    preemptSignal,
+    (s) => modelApi.create({ ...EXPECTED_TEXT_OPTIONS, signal: s }),
+  );
+
+  let sessionDestroyed = false;
+  const destroySession = (): void => {
+    if (sessionDestroyed) return;
+    sessionDestroyed = true;
+    session.destroy?.();
+  };
+  preemptSignal.addEventListener('abort', destroySession, { once: true });
+
+  try {
+    const batches: TabInfo[][] = [];
+    for (let i = 0; i < compact.length; i += BG_AI_MAX_BATCH_TABS) {
+      batches.push(compact.slice(i, i + BG_AI_MAX_BATCH_TABS));
+    }
+
+    const groups: ProposedGroup[] = [];
+    const claimed = new Set<number>();
+    let answered = 0;
+
+    for (const batch of batches) {
+      if (preemptSignal.aborted) return null;
+      const promptInput = `${SYSTEM_PROMPT}\n\n${buildPrompt(batch)}`;
+      const raw = await withTimeout(
+        BG_AI_TIMEOUT_MS,
+        'background AI prompt timed out',
+        preemptSignal,
+        async (s) => {
+          if (batches.length > 1 && typeof session.clone === 'function') {
+            const clone = await session.clone({ signal: s });
+            let destroyed = false;
+            const destroyClone = (): void => {
+              if (destroyed) return;
+              destroyed = true;
+              clone.destroy?.();
+            };
+            s.addEventListener('abort', destroyClone, { once: true });
+            try {
+              return await clone.prompt(promptInput, { signal: s });
+            } finally {
+              s.removeEventListener('abort', destroyClone);
+              destroyClone();
+            }
+          }
+          return session.prompt(promptInput, { signal: s });
+        },
+      );
+
+      const verdict = validateAiAnswer(raw, batch, {
+        maxNameLength: BG_AI_MAX_NAME_LENGTH,
+        minClusterTabs: 2,
+      });
+      if (!verdict.ok) continue;
+      answered += 1;
+
+      for (const draft of verdict.drafts) {
+        if (groups.length >= BG_AI_MAX_GROUPS) break;
+        const tabIds = draft.tabIds
+          .map((id) => realByShort.get(id))
+          .filter((id): id is number => id !== undefined && !claimed.has(id));
+        if (tabIds.length < 2) continue;
+        for (const id of tabIds) claimed.add(id);
+        groups.push({
+          key: `ai:1:${groups.length}:${draft.title.toLowerCase()}`,
+          title: draft.title,
+          color: colorFor(draft.title),
+          windowId: 1,
+          tabIds,
+        });
+      }
+    }
+
+    if (answered === 0 || groups.length === 0) return null;
+    const ungrouped = movable.filter((tab) => !claimed.has(tab.id)).map((tab) => tab.id);
+    return { mode: 'topic', groups, ungrouped };
+  } finally {
+    preemptSignal.removeEventListener('abort', destroySession);
+    destroySession();
+  }
+}
+
+async function withTimeout<T>(
+  timeoutMs: number,
+  message: string,
+  outerSignal: AbortSignal,
+  action: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const onOuterAbort = (): void => {
+    controller.abort(outerSignal.reason);
+  };
+  if (outerSignal.aborted) {
+    controller.abort(outerSignal.reason);
+  } else {
+    outerSignal.addEventListener('abort', onOuterAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException(message, 'TimeoutError'));
+  }, timeoutMs);
+  (timer as unknown as { unref?: () => void }).unref?.();
+  try {
+    return await action(controller.signal);
+  } finally {
+    clearTimeout(timer);
+    outerSignal.removeEventListener('abort', onOuterAbort);
+  }
 }
 
 async function ensureAlarm(): Promise<void> {
   const alarms = api().alarms;
   if ((await alarms.get(ALARM_NAME)) !== undefined) return;
   await alarms.create(ALARM_NAME, { periodInMinutes: AUTOPILOT_PERIOD_MINUTES });
+}
+
+async function scheduleStartupAlarm(when: number): Promise<void> {
+  await api().alarms.create(STARTUP_ALARM_NAME, { when });
 }
 
 async function focusedWindow(): Promise<number | undefined> {
@@ -388,7 +539,7 @@ async function focusedWindow(): Promise<number | undefined> {
 interface AutopilotApi {
   readonly alarms: {
     get(name: string): Promise<{ name: string } | undefined>;
-    create(name: string, info: { periodInMinutes: number }): Promise<void> | void;
+    create(name: string, info: { periodInMinutes?: number; when?: number }): Promise<void> | void;
   };
   readonly windows: {
     getLastFocused(): Promise<{ id?: number }>;
@@ -493,7 +644,7 @@ function proposalCoversMovable(
 }
 
 function failed(error: unknown): void {
-  console.error('TabDeclutter: autopilot', error);
+  void reportBackgroundError('autopilot', error);
 }
 
 function ignore(): void {

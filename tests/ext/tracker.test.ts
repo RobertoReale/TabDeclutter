@@ -687,4 +687,23 @@ describe('when something goes wrong', () => {
     expect(errors).toHaveBeenCalledTimes(1);
     expect(errors).toHaveBeenCalledWith('TabDeclutter: tracker', expect.any(Error));
   });
+
+  it('merges incremental tab updates without clobbering concurrent pruning or external records', async () => {
+    const tracker = start();
+    const tabA = await openTab('https://a.test/');
+    await tracker.flush();
+
+    // Simulate cleanup pruning or another context updating `local:activity` while tracker is cached.
+    await activityItem.setValue({
+      999: record(999, 'https://seeded.test/'),
+    });
+
+    const tabB = await openTab('https://b.test/');
+    await tracker.flush();
+
+    const final = await stored();
+    expect(final[999]?.url).toBe('https://seeded.test/');
+    expect(final[tabB]?.url).toBe('https://b.test/');
+    expect(final[tabA]).toBeUndefined();
+  });
 });

@@ -110,6 +110,12 @@ function extractFromParamString(raw: string): string | null {
 export function unwrapSuspendedUrl(url: string): string {
   let current = url.trim();
   for (let depth = 0; depth < 2; depth += 1) {
+    // Fast-path normal web URLs (`http://`, `https://`, `about:`, etc.) without allocating
+    // a prefix slice or lower-casing unless the string begins with `c`/`C` or `m`/`M`.
+    const first = current.charCodeAt(0);
+    if (first !== 99 && first !== 67 && first !== 109 && first !== 77) {
+      return depth === 0 ? url : current;
+    }
     const head = current.slice(0, 17).toLowerCase();
     if (!head.startsWith('chrome-extension:') && !head.startsWith('moz-extension:')) {
       return depth === 0 ? url : current;

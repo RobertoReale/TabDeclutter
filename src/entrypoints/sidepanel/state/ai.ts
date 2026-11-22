@@ -98,12 +98,16 @@ export async function enableAi(deps: AiDeps = {}): Promise<AiAvailability> {
 
   availability.value = 'downloading';
   downloadProgress.value = 0;
-  await setUseAi(true);
-  const state = await module.downloadModel({
-    onProgress: (loaded) => {
-      downloadProgress.value = loaded;
-    },
-  });
+  // Start `downloadModel()` without awaiting storage first so Chrome's transient user activation
+  // for `LanguageModel.create()` is never delayed behind a storage lock or IPC round-trip.
+  const [state] = await Promise.all([
+    module.downloadModel({
+      onProgress: (loaded) => {
+        downloadProgress.value = loaded;
+      },
+    }),
+    setUseAi(true),
+  ]);
   availability.value = state;
   downloadProgress.value = null;
   return state;

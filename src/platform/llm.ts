@@ -82,10 +82,12 @@ export interface LanguageModelCreateOptions {
 
 /** The session the API hands back, as much of it as this module uses. */
 export interface LanguageModelSession {
-  /** Tokens the session can hold in total. */
+  /** Tokens the session can hold in total (`contextWindow` in newer drafts, `inputQuota` in Chrome 138+). */
   readonly contextWindow?: number;
-  /** Tokens it has already spent. */
+  readonly inputQuota?: number;
+  /** Tokens it has already spent (`contextUsage` in newer drafts, `inputUsage` in Chrome 138+). */
   readonly contextUsage?: number;
+  readonly inputUsage?: number;
   prompt(
     input: string,
     options?: {
@@ -94,6 +96,17 @@ export interface LanguageModelSession {
       readonly signal?: AbortSignal;
     },
   ): Promise<string>;
+  promptStreaming?(
+    input: string,
+    options?: {
+      readonly responseConstraint?: unknown;
+      readonly omitResponseConstraintInput?: boolean;
+      readonly signal?: AbortSignal;
+    },
+  ):
+    | ReadableStream<string>
+    | AsyncIterable<string>
+    | Promise<ReadableStream<string> | AsyncIterable<string>>;
   measureInputUsage?(input: string, options?: { readonly signal?: AbortSignal }): Promise<number>;
   clone?(options?: { readonly signal?: AbortSignal }): Promise<LanguageModelSession>;
   destroy(): void;
@@ -231,6 +244,8 @@ export class AiSession implements Llm {
   #keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   /** Number of active prompt executions, so keep-alive pings only fire when idle. */
   #activePrompts = 0;
+  /** Compact diagnostic trace of the most recent `prompt()` sub-stages. */
+  #lastTrace = '';
   /** Listeners notified when a background session creation finishes warming. */
   readonly #warmListeners = new Set<() => void>();
 
@@ -243,11 +258,16 @@ export class AiSession implements Llm {
 
   /** Tokens the live session can hold, and `undefined` while there is none. */
   get contextWindow(): number | undefined {
-    return this.#open?.contextWindow;
+    return this.#open?.contextWindow ?? this.#open?.inputQuota;
   }
 
   get contextUsage(): number | undefined {
-    return this.#open?.contextUsage;
+    return this.#open?.contextUsage ?? this.#open?.inputUsage;
+  }
+
+  /** Diagnostic trace of the last `prompt()` call (stage, clone/prefill/stream timings, output preview). */
+  get lastTrace(): string {
+    return this.#lastTrace;
   }
 
   /** Whether a session is open, which is what `closeSession()` has to destroy. */
@@ -284,6 +304,8 @@ export class AiSession implements Llm {
   }
 
   async prompt(input: string, options: LlmPromptOptions = {}): Promise<string> {
+    this.#lastTrace = 'stage=open';
+    const onStage = options.onStage;
     return this.#within(options.signal, async (signal) => {
       const base = await this.#session(signal);
       const fullInput = withSystemPrompt(input);
@@ -296,9 +318,16 @@ export class AiSession implements Llm {
         try {
           if (constraint !== undefined && this.#timeoutMs >= CONSTRAINED_SPLIT_MIN_MS) {
             const constrainedCap = Math.floor(this.#timeoutMs * 0.5);
-            return await this.#askWithCap(base, fullInput, constraint, signal, constrainedCap);
+            return await this.#askWithCap(
+              base,
+              fullInput,
+              constraint,
+              signal,
+              constrainedCap,
+              onStage,
+            );
           }
-          return await this.#ask(base, fullInput, constraint, signal);
+          return await this.#ask(base, fullInput, constraint, signal, onStage);
         } catch (error: unknown) {
           if (signal.aborted || isTerminalPromptError(error)) throw error;
           console.info('TabDeclutter: on-device AI prompt failed, retrying cleanly', error);
@@ -311,7 +340,7 @@ export class AiSession implements Llm {
           }
           const retryInput = `${fullInput}\nIMPORTANT: Every group "name" MUST be 1-3 simple English words only (e.g. "Math", "Videos", "Email").`;
           try {
-            return await this.#ask(retryBase, retryInput, undefined, signal);
+            return await this.#ask(retryBase, retryInput, undefined, signal, onStage);
           } catch (retryError: unknown) {
             if (!hasClone || signal.aborted || isTerminalPromptError(retryError)) {
               throw retryError;
@@ -319,7 +348,7 @@ export class AiSession implements Llm {
             // If the base session itself became unhealthy (e.g. idle disconnect), reload it once.
             this.close();
             const fresh = await this.#session(signal);
-            return await this.#ask(fresh, retryInput, undefined, signal);
+            return await this.#ask(fresh, retryInput, undefined, signal, onStage);
           }
         }
       } finally {
@@ -338,6 +367,7 @@ export class AiSession implements Llm {
     responseConstraint: unknown,
     outer: AbortSignal,
     capMs: number,
+    onStage?: (stage: string) => void,
   ): Promise<string> {
     const child = new AbortController();
     const onOuterAbort = (): void => {
@@ -364,7 +394,7 @@ export class AiSession implements Llm {
             ),
           );
         }, capMs);
-        this.#ask(base, input, responseConstraint, child.signal).then(keep, reject);
+        this.#ask(base, input, responseConstraint, child.signal, onStage).then(keep, reject);
       });
     } finally {
       if (timer !== undefined) clearTimeout(timer);
@@ -374,22 +404,31 @@ export class AiSession implements Llm {
 
   /**
    * Prompts an isolated clone of `base` when the browser supports `session.clone()`, so
-   * repeated groupings reuse the KV-cached system prompt without accumulating history tokens.
-   * Passing `omitResponseConstraintInput: true` avoids duplicating the JSON Schema text into
-   * the prompt context (our prompt already states the exact JSON shape).
+   * repeated groupings reuse the warm weights without accumulating history tokens.
+   *
+   * Uses `promptStreaming()` whenever available on unconstrained calls (the default path) so we
+   * surface live sub-stage telemetry (`clone` → `prefill` → `streaming`), stop the millisecond
+   * a complete balanced `{"groups":[...]}` JSON object finishes, break runaway repetition loops,
+   * and report exact diagnostics if the hardware stalls.
    */
   async #ask(
     base: LanguageModelSession,
     input: string,
     responseConstraint: unknown,
     signal: AbortSignal,
+    onStage?: (stage: string) => void,
   ): Promise<string> {
     const promptOpts =
       responseConstraint === undefined
         ? { signal }
         : { responseConstraint, omitResponseConstraintInput: true, signal };
     if (typeof base.clone === 'function') {
+      if (signal.aborted) throw signal.reason as Error;
+      const cloneStartedAt = Date.now();
+      this.#lastTrace = 'stage=clone';
+      onStage?.('clone (session.clone)');
       const isolated = await base.clone({ signal });
+      const cloneMs = Date.now() - cloneStartedAt;
       let destroyed = false;
       const cleanup = (): void => {
         if (destroyed) return;
@@ -398,13 +437,156 @@ export class AiSession implements Llm {
       };
       signal.addEventListener('abort', cleanup, { once: true });
       try {
-        return await isolated.prompt(input, promptOpts);
+        return await this.#execute(isolated, input, promptOpts, signal, cloneMs, cleanup, onStage);
       } finally {
         signal.removeEventListener('abort', cleanup);
         cleanup();
       }
     }
-    return base.prompt(input, promptOpts);
+    return this.#execute(base, input, promptOpts, signal, undefined, undefined, onStage);
+  }
+
+  async #execute(
+    target: LanguageModelSession,
+    input: string,
+    promptOpts: {
+      readonly responseConstraint?: unknown;
+      readonly omitResponseConstraintInput?: boolean;
+      readonly signal?: AbortSignal;
+    },
+    signal: AbortSignal,
+    cloneMs: number | undefined,
+    stopSession: (() => void) | undefined,
+    onStage?: (stage: string) => void,
+  ): Promise<string> {
+    const cloneTag = cloneMs === undefined ? '' : `clone=${fmtSec(cloneMs)} · `;
+    const startedAt = Date.now();
+    this.#lastTrace = `stage=prefill (${cloneTag}0 chars)`;
+    onStage?.(`prefill (${cloneTag}waiting for 1st token)`);
+
+    if (
+      promptOpts.responseConstraint === undefined &&
+      typeof target.promptStreaming === 'function'
+    ) {
+      return this.#stream(
+        target,
+        input,
+        promptOpts,
+        signal,
+        cloneTag,
+        startedAt,
+        stopSession,
+        onStage,
+      );
+    }
+
+    const reply = await target.prompt(input, promptOpts);
+    this.#lastTrace = `stage=done (${cloneTag}${reply.length} chars in ${fmtSec(Date.now() - startedAt)})`;
+    return reply;
+  }
+
+  async #stream(
+    target: LanguageModelSession,
+    input: string,
+    promptOpts: { readonly signal?: AbortSignal },
+    signal: AbortSignal,
+    cloneTag: string,
+    startedAt: number,
+    stopSession: (() => void) | undefined,
+    onStage?: (stage: string) => void,
+  ): Promise<string> {
+    const stream = await target.promptStreaming!(input, promptOpts);
+    let accumulated = '';
+    let firstTokenMs: number | undefined;
+    let chunks = 0;
+    let lastStageUpdate = 0;
+
+    const updateTrace = (phase: string): void => {
+      const firstTag =
+        firstTokenMs === undefined ? 'no 1st token' : `1stTok=${fmtSec(firstTokenMs)}`;
+      const preview = compactPreview(accumulated);
+      const sample = preview === '' ? '' : ` · out=${JSON.stringify(preview)}`;
+      this.#lastTrace = `stage=${phase} (${cloneTag}${firstTag} · ${accumulated.length} chars/${chunks} chunks${sample})`;
+    };
+
+    const handleChunk = (chunk: string): { done: boolean; result?: string } => {
+      if (chunk === '') return { done: false };
+      chunks += 1;
+      if (firstTokenMs === undefined) {
+        firstTokenMs = Date.now() - startedAt;
+      }
+      // Support both spec incremental delta chunks and cumulative-prefix chunks defensively.
+      accumulated =
+        accumulated.length > 0 && chunk.startsWith(accumulated) ? chunk : accumulated + chunk;
+      updateTrace('streaming');
+
+      const nowMs = Date.now();
+      if (chunks === 1 || nowMs - lastStageUpdate >= 250) {
+        lastStageUpdate = nowMs;
+        onStage?.(`streaming (${accumulated.length} chars · 1st tok ${fmtSec(firstTokenMs)})`);
+      }
+
+      // Stop immediately once a complete top-level `{"groups":[...]}` JSON object finishes,
+      // preventing Gemini Nano from burning tens of seconds on trailing prose or EOS loops.
+      const complete = extractCompleteGroupsJson(accumulated);
+      if (complete !== null) {
+        this.#lastTrace = `stage=done-early (${cloneTag}1stTok=${fmtSec(firstTokenMs)} · ${complete.length} chars in ${fmtSec(nowMs - startedAt)})`;
+        return { done: true, result: complete };
+      }
+
+      // Break runaway repetition loops early instead of stalling until the 90 s timeout.
+      if (isDegenerateStream(accumulated)) {
+        updateTrace('loop-stopped');
+        return { done: true, result: accumulated };
+      }
+      return { done: false };
+    };
+
+    try {
+      if (isReadableStream(stream)) {
+        const reader = stream.getReader();
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (typeof value !== 'string') continue;
+            const step = handleChunk(value);
+            if (step.done) {
+              void reader.cancel().catch(() => undefined);
+              stopSession?.();
+              return step.result ?? accumulated;
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      } else {
+        for await (const chunk of stream) {
+          if (typeof chunk !== 'string') continue;
+          const step = handleChunk(chunk);
+          if (step.done) {
+            stopSession?.();
+            return step.result ?? accumulated;
+          }
+        }
+      }
+    } catch (error: unknown) {
+      updateTrace(firstTokenMs === undefined ? 'prefill' : 'mid-stream');
+      // If we hit a timeout after already streaming recoverable group JSON, return the partial
+      // text so `validateAiAnswer` can salvage completed groups instead of discarding everything.
+      if (
+        signal.aborted &&
+        errorNameOf(signal.reason) === 'TimeoutError' &&
+        hasRecoverableGroupSnippet(accumulated)
+      ) {
+        updateTrace('timeout-salvaged');
+        return accumulated;
+      }
+      throw error;
+    }
+
+    this.#lastTrace = `stage=done (${cloneTag}${firstTokenMs === undefined ? 'empty' : `1stTok=${fmtSec(firstTokenMs)}`} · ${accumulated.length} chars in ${fmtSec(Date.now() - startedAt)})`;
+    return accumulated;
   }
 
   /**
@@ -416,7 +598,8 @@ export class AiSession implements Llm {
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<number> {
     return this.#within(options.signal, async (signal) => {
-      const session = await this.#session(signal);
+      const session = await raceSignal(this.#session(signal), signal);
+      if (signal.aborted) throw signal.reason as Error;
       if (session.measureInputUsage === undefined) {
         throw new Error('the session cannot measure an input');
       }
@@ -518,6 +701,7 @@ export class AiSession implements Llm {
           .catch(() => undefined);
       }
     }, SESSION_KEEPALIVE_MS);
+    (this.#keepAliveTimer as unknown as { unref?: () => void }).unref?.();
   }
 
   #stopKeepAlive(): void {
@@ -641,9 +825,93 @@ function sanitizeConstraint(constraint: unknown): unknown {
 }
 
 function isTerminalPromptError(error: unknown): boolean {
-  if (error === null || typeof error !== 'object' || !('name' in error)) return false;
-  const name = String((error as { name: unknown }).name);
+  const name = errorNameOf(error);
   return name === 'AbortError' || name === 'TimeoutError' || name === 'QuotaExceededError';
+}
+
+function errorNameOf(error: unknown): string {
+  if (error === null || typeof error !== 'object' || !('name' in error)) return '';
+  return String((error as { name: unknown }).name);
+}
+
+function fmtSec(ms: number): string {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+}
+
+function isReadableStream(value: unknown): value is ReadableStream<string> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'getReader' in value &&
+    typeof (value as { getReader?: unknown }).getReader === 'function'
+  );
+}
+
+function compactPreview(text: string): string {
+  const clean = text.replace(/\s+/gu, ' ').trim();
+  if (clean.length <= 80) return clean;
+  return `${clean.slice(0, 48)}…${clean.slice(-28)}`;
+}
+
+/**
+ * Extracts the first complete balanced top-level `{...}` JSON object containing `"groups"`
+ * once all braces and strings close, allowing streaming inference to stop the instant valid
+ * JSON completes instead of waiting on trailing prose or EOS loops.
+ */
+export function extractCompleteGroupsJson(raw: string): string | null {
+  const start = raw.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        const candidate = raw.slice(start, i + 1);
+        if (!candidate.includes('"groups"')) return null;
+        try {
+          const parsed = JSON.parse(candidate) as { groups?: unknown };
+          if (Array.isArray(parsed.groups)) return candidate;
+        } catch {
+          return null;
+        }
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** Maximum chars streamed before stopping a runaway small-model generation loop. */
+const MAX_STREAM_CHARS = 4_000;
+
+/** Detects pathological token/substring repetition loops in unconstrained small-model output. */
+export function isDegenerateStream(text: string): boolean {
+  if (text.length >= MAX_STREAM_CHARS) return true;
+  if (text.length < 160) return false;
+  const tail = text.slice(-160);
+  // 5+ consecutive repeats of any 4..32-char unit (e.g. `,1,1,1,1,1...` or repeated words/newlines).
+  return /(.{4,32}?)\1{4,}/su.test(tail);
+}
+
+function hasRecoverableGroupSnippet(text: string): boolean {
+  return /"name"\s*:\s*"[^"]+"[^{}[\]]*?"tabIds"\s*:\s*\[\s*\d+/u.test(text);
 }
 
 /**

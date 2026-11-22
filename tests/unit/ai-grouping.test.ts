@@ -775,4 +775,35 @@ describe('more than one batch of tabs', () => {
     expect(covered(result.proposal)).toEqual(MANY.map((it) => it.id));
     expect(new Set(covered(result.proposal)).size).toBe(MANY.length);
   });
+
+  it('forwards onStage and appends llm.lastTrace to timeout and error diagnostics', async () => {
+    const stages: string[] = [];
+    const timeoutLlm: Llm = {
+      lastTrace: 'stage=prefill (clone=0.0s · no 1st token · 0 chars/0 chunks)',
+      prompt: async (_input, options) => {
+        options?.onStage?.('prefill (waiting for 1st token)');
+        throw named('TimeoutError');
+      },
+    };
+    const timedOut = await groupByAi(
+      SIX_TABS,
+      timeoutLlm,
+      at(0, { onStage: (s) => stages.push(s) }),
+    );
+    expect(stages[0]).toContain('measure');
+    expect(stages).toContain('prefill (waiting for 1st token)');
+    expect(timedOut.fallbackReason).toBe('timeout');
+    expect(timedOut.fallbackDetail).toContain('stage=prefill');
+
+    const errorLlm: Llm = {
+      lastTrace: 'stage=clone',
+      prompt: async () => {
+        throw new Error('backend crashed');
+      },
+    };
+    const errored = await groupByAi(SIX_TABS, errorLlm, at(0));
+    expect(errored.fallbackReason).toBe('error');
+    expect(errored.fallbackDetail).toContain('backend crashed');
+    expect(errored.fallbackDetail).toContain('stage=clone');
+  });
 });

@@ -11,6 +11,8 @@ import {
   checkAvailability,
   closeSession,
   downloadModel,
+  extractCompleteGroupsJson,
+  isDegenerateStream,
   languageModel,
   panelSession,
 } from '../../src/platform/llm';
@@ -532,6 +534,131 @@ describe('AiSession', () => {
     expect(warmed).toBe(1);
     await expect(session.prompt('tabs')).resolves.toContain('Math');
     expect(api.created).toHaveLength(1);
+  });
+
+  it('never clones or prompts after a cold-loading call was aborted', async () => {
+    let finishCreate: () => void = () => undefined;
+    let cloneCalls = 0;
+    const baseSession = new FakeSession(async () => '{"groups":[]}');
+    const cloneable: LanguageModelSession = {
+      prompt: baseSession.prompt.bind(baseSession),
+      destroy: baseSession.destroy.bind(baseSession),
+      clone: async () => {
+        cloneCalls += 1;
+        return new FakeSession(async () => '{"groups":[]}');
+      },
+    };
+    const api = {
+      availability: async () => 'available',
+      create: async () => {
+        await new Promise<void>((resolve) => {
+          finishCreate = resolve;
+        });
+        return cloneable;
+      },
+    };
+    const session = new AiSession({ api, timeoutMs: 60_000 });
+    const controller = new AbortController();
+
+    const pending = session.prompt('tabs', { signal: controller.signal });
+    const caught = pending.catch((error: unknown) => error);
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    expect(await caught).toMatchObject({ name: 'AbortError' });
+
+    finishCreate();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(cloneCalls).toBe(0);
+    expect(baseSession.asked).toHaveLength(0);
+  });
+
+  it('uses promptStreaming(), reports live stages, and stops early once complete JSON closes', async () => {
+    let cancelled = false;
+    let destroyed = 0;
+    const stages: string[] = [];
+    const streamingSession: LanguageModelSession = {
+      inputQuota: 4096,
+      inputUsage: 120,
+      prompt: async () => {
+        throw new Error('blocking prompt should not be used when promptStreaming exists');
+      },
+      promptStreaming: () =>
+        new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue('```json\n{"groups":[{"name":"Math",');
+            controller.enqueue('"tabIds":[1,2]}]}');
+            // Never close the stream to simulate Gemini Nano hanging/rambling after `}`.
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+      destroy: () => {
+        destroyed += 1;
+      },
+    };
+    const api = {
+      availability: async () => 'available',
+      create: async () => ({
+        ...streamingSession,
+        clone: async () => streamingSession,
+      }),
+    };
+    const session = new AiSession({ api, timeoutMs: 5_000 });
+
+    const reply = await session.prompt('1|Algebra|a.com\n2|Calculus|b.com', {
+      onStage: (stage) => stages.push(stage),
+    });
+
+    expect(reply).toBe('{"groups":[{"name":"Math","tabIds":[1,2]}]}');
+    expect(cancelled).toBe(true);
+    expect(destroyed).toBe(1);
+    expect(session.contextWindow).toBe(4096);
+    expect(session.contextUsage).toBe(120);
+    expect(stages.some((s) => s.startsWith('clone'))).toBe(true);
+    expect(stages.some((s) => s.startsWith('prefill'))).toBe(true);
+    expect(stages.some((s) => s.startsWith('streaming'))).toBe(true);
+    expect(session.lastTrace).toContain('stage=done-early');
+  });
+
+  it('records stage=prefill in lastTrace when promptStreaming stalls before the first token', async () => {
+    vi.useFakeTimers();
+    const stalled: LanguageModelSession = {
+      prompt: async () => new Promise<string>(() => undefined),
+      promptStreaming: (_input, opts) =>
+        new ReadableStream<string>({
+          start(controller) {
+            opts?.signal?.addEventListener('abort', () => controller.error(opts.signal?.reason), {
+              once: true,
+            });
+          },
+        }),
+      destroy: () => undefined,
+    };
+    const api = {
+      availability: async () => 'available',
+      create: async () => stalled,
+    };
+    const session = new AiSession({ api, timeoutMs: 1_000 });
+
+    const pending = session.prompt('tabs');
+    const caught = pending.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(await caught).toMatchObject({ name: 'TimeoutError' });
+    expect(session.lastTrace).toContain('stage=prefill');
+    expect(session.lastTrace).toContain('0 chars');
+  });
+
+  it('detects complete balanced groups JSON and runaway repetition loops', () => {
+    expect(extractCompleteGroupsJson('{"groups":[{"name":"A","tabIds":[1,2]}')).toBeNull();
+    expect(
+      extractCompleteGroupsJson('Sure!\n{"groups":[{"name":"A","tabIds":[1,2]}]}\nHope this helps'),
+    ).toBe('{"groups":[{"name":"A","tabIds":[1,2]}]}');
+    expect(isDegenerateStream('{"groups":[{"name":"A","tabIds":[1,2]}]}')).toBe(false);
+    expect(isDegenerateStream('x'.repeat(200) + ',1,2,3'.repeat(10))).toBe(true);
   });
 });
 

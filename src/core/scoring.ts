@@ -24,8 +24,8 @@ import {
   chooseTabToKeep,
   duplicateKey,
   duplicateOptions,
-  findDuplicateSets,
   tabUrl,
+  type DuplicateOptions,
   type DuplicateSet,
 } from './duplicates';
 import { DEFAULT_SCORING_CONFIG, type ScoringConfig } from './scoring.config';
@@ -197,14 +197,22 @@ function hostOf(url: string): string {
 }
 
 /**
- * A "Siti protetti" entry against a host: the domain itself and everything under it, so
- * `atlassian.net` covers `team.atlassian.net`. A leading `*.` is accepted and means the
- * same thing, because that is how the examples in PLAN.md §4.6 are written.
+ * Normalizes a "Siti protetti" list once per `scoreTabs` call: `*.atlassian.net` and
+ * `atlassian.net` mean the same domain, and empty entries are dropped upfront.
  */
-function matchesSite(pattern: string, host: string): boolean {
-  let domain = pattern.trim().toLowerCase();
-  if (domain.startsWith('*.')) domain = domain.slice(2);
-  if (domain === '' || host === '') return false;
+function normalizeProtectedSites(sites: readonly string[] | undefined): readonly string[] {
+  if (sites === undefined || sites.length === 0) return [];
+  const normalized: string[] = [];
+  for (const pattern of sites) {
+    let domain = pattern.trim().toLowerCase();
+    if (domain.startsWith('*.')) domain = domain.slice(2);
+    if (domain !== '') normalized.push(domain);
+  }
+  return normalized;
+}
+
+/** A pre-normalized "Siti protetti" domain against a lower-cased host. */
+function matchesNormalizedSite(domain: string, host: string): boolean {
   return host === domain || host.endsWith(`.${domain}`);
 }
 
@@ -325,39 +333,57 @@ interface NearPlace {
 }
 
 /**
- * Groups the tabs by "same host and path", so a tab can be told that another one is
- * showing nearly the same page (PLAN.md §6.4).
- *
- * The grouping key is `duplicateKey` with the query string and the fragment thrown away,
- * which keeps the user's other comparison settings — and the container — in force. Empty
- * tabs are left out: several new tabs are not variants of one page.
+ * Groups the tabs by exact duplicate key (when `context.duplicates` was not supplied) and by
+ * "same host and path" in a single pass, computing `exact` once per tab and skipping the
+ * second URL parse for clean URLs without `?` or `#` (PLAN.md §6.4, §11).
  */
-function groupNearDuplicates(
+function indexDuplicatesAndNear(
   facts: readonly TabFacts[],
-  settings: Settings,
+  options: DuplicateOptions,
   isWhitelisted: (url: string) => boolean,
-): Map<number, NearPlace> {
-  const options = duplicateOptions(settings);
-  const nearOptions = { ...options, ignoreAllParams: true, ignoreHash: true };
-  const groups = new Map<string, NearGroup>();
+  needSets: boolean,
+): { readonly sets: readonly DuplicateSet[]; readonly near: Map<number, NearPlace> } {
+  const nearOptions: DuplicateOptions = { ...options, ignoreAllParams: true, ignoreHash: true };
+  const exactByKey = needSets ? new Map<string, TabInfo[]>() : null;
+  const nearGroups = new Map<string, NearGroup>();
   const places = new Map<number, NearPlace>();
 
   for (const fact of facts) {
-    if (fact.tab.hidden || fact.type === 'blank' || isWhitelisted(fact.url)) continue;
+    if (fact.tab.hidden || isWhitelisted(fact.url)) continue;
 
     const exact = duplicateKey(fact.url, options, fact.tab.cookieStoreId);
-    const near = duplicateKey(fact.url, nearOptions, fact.tab.cookieStoreId);
+    if (exactByKey !== null) {
+      const bucket = exactByKey.get(exact);
+      if (bucket === undefined) exactByKey.set(exact, [fact.tab]);
+      else bucket.push(fact.tab);
+    }
 
-    let group = groups.get(near);
+    // Empty tabs are left out of near-duplicates: several new tabs are not variants of one page.
+    if (fact.type === 'blank') continue;
+
+    // A URL with neither `?` nor `#` produces the exact same key when params and hash are ignored.
+    const near =
+      fact.url.includes('?') || fact.url.includes('#')
+        ? duplicateKey(fact.url, nearOptions, fact.tab.cookieStoreId)
+        : exact;
+
+    let group = nearGroups.get(near);
     if (group === undefined) {
       group = { first: { id: fact.tab.id, key: exact } };
-      groups.set(near, group);
+      nearGroups.set(near, group);
     } else if (group.other === undefined && group.first.key !== exact) {
       group.other = { id: fact.tab.id, key: exact };
     }
     places.set(fact.tab.id, { group, exact });
   }
-  return places;
+
+  const sets: DuplicateSet[] = [];
+  if (exactByKey !== null) {
+    for (const [key, group] of exactByKey) {
+      if (group.length > 1) sets.push({ key, tabs: group });
+    }
+  }
+  return { sets, near: places };
 }
 
 /** The other tab showing nearly this page, or `undefined` when there is none. */
@@ -372,11 +398,11 @@ function nearDuplicateOf(tabId: number, places: Map<number, NearPlace>): number 
 /** Step 1, in the order PLAN.md §6.4 lists it. `undefined` means "not protected". */
 function protectionOf(
   fact: TabFacts,
-  settings: Settings,
-  now: number,
-  context: ScoringContext,
+  pass: Pass,
+  keepKeyOf: () => string,
 ): ProtectionCode | undefined {
   const { tab } = fact;
+  const { settings, now, context, protectedSites, hasKeeps } = pass;
 
   // Not a policy but a fact: a hidden tab is not on screen (PLAN.md §5.5).
   if (tab.hidden) return 'hidden';
@@ -387,15 +413,16 @@ function protectionOf(
 
   // The host is parsed only for a user who has protected sites: on a thousand tabs that
   // is a thousand URL parses saved (PLAN.md §11).
-  const sites = context.protectedSites;
-  if (sites !== undefined && sites.length > 0) {
+  if (protectedSites.length > 0) {
     const host = hostOf(fact.url);
-    if (sites.some((pattern) => matchesSite(pattern, host))) return 'protected-site';
+    if (host !== '' && protectedSites.some((domain) => matchesNormalizedSite(domain, host))) {
+      return 'protected-site';
+    }
   }
 
-  if (context.keeps !== undefined) {
+  if (hasKeeps && context.keeps !== undefined) {
     // `null` is "Sempre"; a number is when the keep runs out (PLAN.md §10).
-    const until = context.keeps[keepKey(fact.url)];
+    const until = context.keeps[keepKeyOf()];
     if (until === null || (until !== undefined && until > now)) return 'kept';
   }
 
@@ -495,16 +522,24 @@ export function scoreTabs(
     if (record !== undefined) createdAt[tab.id] = record.createdAt;
   }
 
-  const sets =
-    context.duplicates ?? findDuplicateSets(tabs, duplicateOptions(settings), isWhitelisted);
+  const indexed = indexDuplicatesAndNear(
+    facts,
+    duplicateOptions(settings),
+    isWhitelisted,
+    context.duplicates === undefined,
+  );
+  const sets = context.duplicates ?? indexed.sets;
   const pass: Pass = {
     config,
     settings,
     now,
     context,
     staleMs,
+    protectedSites: normalizeProtectedSites(context.protectedSites),
+    hasKeeps: context.keeps !== undefined && Object.keys(context.keeps).length > 0,
+    hasBookmarks: context.bookmarkedUrls !== undefined && context.bookmarkedUrls.size > 0,
     duplicateOf: mapDuplicates(sets, settings, createdAt, context),
-    near: groupNearDuplicates(facts, settings, isWhitelisted),
+    near: indexed.near,
   };
 
   const scored: ScoredTab[] = [];
@@ -533,22 +568,27 @@ interface Pass {
   readonly now: number;
   readonly context: ScoringContext;
   readonly staleMs: number;
+  readonly protectedSites: readonly string[];
+  readonly hasKeeps: boolean;
+  readonly hasBookmarks: boolean;
   readonly duplicateOf: Map<number, number>;
   readonly near: Map<number, NearPlace>;
 }
 
 function scoreOne(fact: TabFacts, window: WindowFacts, pass: Pass): ScoredTab {
-  const { config, settings, now, context } = pass;
+  const { config, settings, context } = pass;
   const common = {
     tabId: fact.tab.id,
     windowId: fact.tab.windowId,
     pageType: fact.type,
     idleMs: fact.idleMs,
   };
+  let cachedKeepKey: string | undefined;
+  const keepKeyOf = (): string => (cachedKeepKey ??= keepKey(fact.url));
 
   // Step 1. A protected tab is not scored at all, and no reason is collected for it:
   // nothing about it is on the list to explain.
-  const protectedBy = protectionOf(fact, settings, now, context);
+  const protectedBy = protectionOf(fact, pass, keepKeyOf);
   if (protectedBy !== undefined) {
     return {
       ...common,
@@ -619,7 +659,7 @@ function scoreOne(fact: TabFacts, window: WindowFacts, pass: Pass): ScoredTab {
     reasons.push({ code: 'near-duplicate', points: config.nearDuplicatePoints, otherTabId });
   }
 
-  if (context.bookmarkedUrls?.has(keepKey(fact.url)) === true) {
+  if (pass.hasBookmarks && context.bookmarkedUrls?.has(keepKeyOf()) === true) {
     reasons.push({ code: 'bookmarked', points: config.bookmarkedPoints });
   }
 

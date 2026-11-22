@@ -254,4 +254,39 @@ describe('the cache (PLAN.md §11)', () => {
 
     expect(await bookmarkedKeys(api)).toEqual(new Set([keepKey('https://example.com/doc')]));
   });
+
+  it('coalesces concurrent reads into one tree walk so neither caller sees a premature empty set', async () => {
+    let finishTree: () => void = () => undefined;
+    let markTreeStarted: () => void = () => undefined;
+    const treeStarted = new Promise<void>((resolve) => {
+      markTreeStarted = resolve;
+    });
+    let calls = 0;
+    const api: BookmarksApi = {
+      permissions: {
+        contains: () => Promise.resolve(true),
+        request: () => Promise.resolve(true),
+        remove: () => Promise.resolve(true),
+      },
+      bookmarks: {
+        getTree: () => {
+          calls += 1;
+          markTreeStarted();
+          return new Promise((resolve) => {
+            finishTree = () => resolve([{ url: 'https://example.com/saved' }]);
+          });
+        },
+      },
+    };
+
+    const first = bookmarkedKeys(api);
+    const second = bookmarkedKeys(api);
+    await treeStarted;
+    finishTree();
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(calls).toBe(1);
+    expect(a).toEqual(new Set([keepKey('https://example.com/saved')]));
+    expect(b).toEqual(a);
+  });
 });

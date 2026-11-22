@@ -19,10 +19,13 @@
  * above `maxBatchTabs` tabs, the pre-clustering the batches are built from.
  */
 
+import { buildPrompt, SYSTEM_PROMPT, tabLine, validateAiAnswer } from './ai-prompt';
+import type { AiDraft } from './ai-prompt';
 import type { ClusterOptions, GroupProposal, ProposedGroup } from './cluster';
-import { colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic, stripSiteSuffix } from './cluster';
+import { colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic } from './cluster';
 import type { TabInfo } from './types';
-import { displayHost } from './url';
+
+export { buildPrompt, SYSTEM_PROMPT, tabLine };
 
 /** What `Llm.prompt` is given besides the input (PLAN.md §7.3). */
 export interface LlmPromptOptions {
@@ -30,6 +33,8 @@ export interface LlmPromptOptions {
   readonly responseConstraint?: unknown;
   /** Aborted on "Annulla" and when the timeout fires. */
   readonly signal?: AbortSignal;
+  /** Optional live sub-stage diagnostic callback (e.g. `clone`, `prefill`, `streaming`). */
+  readonly onStage?: (stage: string) => void;
 }
 
 /**
@@ -45,6 +50,8 @@ export interface Llm {
   readonly contextWindow?: number;
   /** Tokens the session has already spent, when the model reports it. */
   readonly contextUsage?: number;
+  /** Compact diagnostic trace of the most recent `prompt()` sub-stages (for fallback telemetry). */
+  readonly lastTrace?: string;
   /** Warms/initialises the underlying session ahead of prompting, when supported. */
   open?(options?: { readonly signal?: AbortSignal }): Promise<void>;
   /** Registers a one-shot callback invoked when an in-flight background warmup completes. */
@@ -53,26 +60,6 @@ export interface Llm {
   /** Tokens `input` would cost, when the model can measure it. */
   measureInputUsage?(input: string, options?: { signal?: AbortSignal }): Promise<number>;
 }
-
-/**
- * The system prompt of PLAN.md §7.3, word for word. In English: the Prompt API officially
- * supports en/ja/es/de/fr, and Italian titles are passed in as data (PLAN.md §3.5).
- *
- * Exported rather than sent with every prompt: a session is created once and reused
- * (PLAN.md §7.3, "Performance"), so this belongs to its creation, in `platform/llm.ts`.
- */
-export const SYSTEM_PROMPT =
-  'You organize browser tabs into a small number of topical groups. ' +
-  "Group by the user's task or topic, not by website. " +
-  'Ignore minor spelling typos in names and never pair unrelated tabs over one coincidental word. ' +
-  'Use short English group names (1-3 words). Prefer 3-8 groups. ' +
-  "Tabs that fit nowhere go to 'Other'.";
-
-/** PLAN.md §7.3: the title a tab is listed with is truncated to this many characters. */
-const MAX_INPUT_TITLE_CHARS = 80;
-
-/** How a group name says "this tab belongs nowhere", in the prompt and in the answer. */
-const OTHER_NAMES: ReadonlySet<string> = new Set(['other', 'others', 'altro', 'altri']);
 
 /** Roughly how many characters of English a token is worth, when nobody can measure it. */
 const CHARS_PER_TOKEN = 4;
@@ -90,6 +77,8 @@ export interface AiGroupingOptions extends ClusterOptions {
   readonly timeoutMs?: number;
   /** "Annulla" in the spinner (PLAN.md §7.3). */
   readonly signal?: AbortSignal;
+  /** Optional live sub-stage diagnostic callback forwarded to `llm.prompt`. */
+  readonly onStage?: (stage: string) => void;
   /** Injected clock (TASKS.md §2.4), which is what makes the timeout testable. */
   readonly now?: () => number;
 }
@@ -161,32 +150,6 @@ export function responseConstraintFor(maxGroups: number, maxNameLength: number):
   };
 }
 
-/**
- * One tab as the model sees it (PLAN.md §7.3): `id|title|host`, the title truncated to 80
- * characters.
- *
- * `|` and every newline are replaced in the title, and runs of whitespace collapsed: a
- * title is untrusted input (TASKS.md §2.7), and the only thing keeping one line one tab is
- * that a title can neither carry the separator nor end the line.
- */
-export function tabLine(tab: Pick<TabInfo, 'id' | 'title' | 'url'>): string {
-  const title = stripSiteSuffix(tab.title, tab.url)
-    .replace(/[|\s]+/gu, ' ')
-    .trim()
-    .slice(0, MAX_INPUT_TITLE_CHARS)
-    .trim();
-  return `${tab.id}|${title}|${displayHost(tab.url)}`;
-}
-
-/** The prompt for one batch: the tab list, and what to answer with. */
-export function buildPrompt(tabs: readonly Pick<TabInfo, 'id' | 'title' | 'url'>[]): string {
-  return [
-    'Group these tabs by topic. One tab per line, as id|title|host:',
-    tabs.map((tab) => tabLine(tab)).join('\n'),
-    'Answer with JSON only: {"groups":[{"name":"Short English Topic","tabIds":[1,2]}]}. Use each id at most once, and no id that is not listed.',
-  ].join('\n');
-}
-
 /** Everything one run needs, resolved once: the numbers, the clock and its deadline. */
 interface Settings {
   readonly maxBatchTabs: number;
@@ -194,6 +157,7 @@ interface Settings {
   readonly maxGroups: number;
   readonly minClusterTabs: number;
   readonly signal: AbortSignal | undefined;
+  readonly onStage: ((stage: string) => void) | undefined;
   readonly now: () => number;
   /** ms epoch at which §7.2 takes over, whatever the model is doing (PLAN.md §7.3). */
   readonly deadline: number;
@@ -211,22 +175,16 @@ function resolve(options: AiGroupingOptions): Settings {
     maxGroups,
     minClusterTabs: options.minClusterTabs ?? DEFAULT_CLUSTER_OPTIONS.minClusterTabs,
     signal: options.signal,
+    onStage: options.onStage,
     now,
     deadline: now() + (options.timeoutMs ?? DEFAULT_AI_GROUPING_OPTIONS.timeoutMs),
     constraint: responseConstraintFor(maxGroups, maxNameLength),
   };
 }
 
-/** A group being built, before the per-window limit and the ordering are applied. */
-interface Draft {
-  readonly title: string;
-  readonly windowId: number;
-  readonly tabIds: readonly number[];
-}
-
 /** What one prompt — or one batch that had to be split — came back with. */
 interface Outcome {
-  readonly drafts: readonly Draft[];
+  readonly drafts: readonly AiDraft[];
   /** Tabs the model itself put in "Other". */
   readonly ungrouped: readonly number[];
   /** Tabs no answer covered: §7.2 groups these. */
@@ -318,7 +276,11 @@ async function promptWithin(llm: Llm, input: string, settings: Settings): Promis
         Math.max(0, settings.deadline - settings.now()),
       );
       llm
-        .prompt(input, { responseConstraint: settings.constraint, signal: controller.signal })
+        .prompt(input, {
+          responseConstraint: settings.constraint,
+          signal: controller.signal,
+          ...(settings.onStage === undefined ? {} : { onStage: settings.onStage }),
+        })
         .then(keep, reject);
     });
   } finally {
@@ -328,11 +290,11 @@ async function promptWithin(llm: Llm, input: string, settings: Settings): Promis
 }
 
 /** What a prompt would cost in tokens, measured by the model or estimated from its length. */
-async function inputCost(llm: Llm, input: string): Promise<number> {
+async function inputCost(llm: Llm, input: string, signal?: AbortSignal): Promise<number> {
   const estimate = Math.ceil(input.length / CHARS_PER_TOKEN);
   if (llm.measureInputUsage === undefined) return estimate;
   try {
-    return await llm.measureInputUsage(input);
+    return await llm.measureInputUsage(input, signal === undefined ? undefined : { signal });
   } catch {
     // Measuring is an optimisation; if it fails the estimate still answers the question.
     return estimate;
@@ -344,185 +306,15 @@ async function inputCost(llm: Llm, input: string): Promise<number> {
  * that reports no `contextWindow` is simply asked: `QuotaExceededError` says the same
  * thing one prompt later.
  */
-async function fitsContext(llm: Llm, input: string): Promise<boolean> {
+async function fitsContext(llm: Llm, input: string, signal?: AbortSignal): Promise<boolean> {
   const window = llm.contextWindow;
   if (window === undefined || window <= 0) return true;
   const used = llm.contextUsage ?? 0;
-  return used + (await inputCost(llm, input)) + OUTPUT_RESERVE_TOKENS <= window;
+  return used + (await inputCost(llm, input, signal)) + OUTPUT_RESERVE_TOKENS <= window;
 }
 
-/**
- * The answer, validated against the tabs it was asked about (PLAN.md §7.3).
- *
- * It fails when the answer cannot be used at all, and says which of the two ways it was:
- * `unparsable` (not JSON, or JSON that is not the schema's shape) or `no-groups` (JSON the
- * schema would accept, with not one usable group left in it after the checks). Otherwise
- * every id the model invented is discarded, every id it repeated counts once, and every
- * tab of the batch it did not mention is in `ungrouped` — which is exactly "missing IDs go
- * to Other".
- */
-type Validation =
-  | {
-      readonly ok: true;
-      readonly drafts: readonly Draft[];
-      readonly ungrouped: readonly number[];
-      readonly failed: readonly number[];
-    }
-  | { readonly ok: false; readonly reason: 'unparsable' | 'no-groups' };
-
-const UNPARSABLE: Validation = { ok: false, reason: 'unparsable' };
-
-/**
- * Extracts `{ name, tabIds }` group pairs directly from raw model text whenever Gemini Nano
- * omits `},{` between groups inside `"groups":[{...}]` (which causes `JSON.parse` to silently
- * overwrite earlier duplicate `"name"`/`"tabIds"` keys with the final `"Other"` group) or
- * truncates the final `"tabIds":[1,2,3` array before closing `]}`.
- */
-function extractRegexGroups(raw: string): { name: string; tabIds: number[] }[] {
-  if (!/"groups"\s*:/u.test(raw)) return [];
-  const normalized = raw.replace(/\\"/gu, '"');
-  const groups: { name: string; tabIds: number[] }[] = [];
-  const pattern =
-    /"name"\s*:\s*"([^"]+)"[^{}[\]]*?"tabIds"\s*:\s*\[([^\]{}]*)(?:\]|(?=\s*[,}])|$)/gu;
-  for (const match of normalized.matchAll(pattern)) {
-    const name = match[1] ?? '';
-    const rawIds = match[2] ?? '';
-    const tabIds = rawIds
-      .split(',')
-      .map((part) => part.trim())
-      .filter((part) => part !== '' && /^-?\d+$/u.test(part))
-      .map((part) => Number(part))
-      .filter((id) => Number.isInteger(id));
-    groups.push({ name, tabIds });
-  }
-  return groups;
-}
-
-/**
- * Checks whether a `JSON.parse` result lost groups due to duplicate `"name"` keys inside one
- * `{...}` object (missing `},{` separator) and, if so, upgrades it with `extractRegexGroups`.
- */
-function recoverCollapsedGroups(raw: string, parsed: unknown): unknown {
-  if (parsed === null || typeof parsed !== 'object') return parsed;
-  const groups = (parsed as { groups?: unknown }).groups;
-  if (!Array.isArray(groups)) return parsed;
-  const extracted = extractRegexGroups(raw);
-  if (extracted.length > groups.length) {
-    return { ...parsed, groups: extracted };
-  }
-  return parsed;
-}
-
-/**
- * Parses JSON from the model's answer, tolerating markdown code fences (` ```json ... ``` `),
- * short surrounding prose, Gemini Nano wrapping group objects in stray quotes inside
- * `"groups": ["{"name":...}"]`, missing `},{` separators between groups, or truncated output.
- */
-function parseModelJson(
-  answer: string,
-): { ok: true; value: unknown; truncated: boolean } | { ok: false } {
-  try {
-    return {
-      ok: true,
-      value: recoverCollapsedGroups(answer, JSON.parse(answer)),
-      truncated: false,
-    };
-  } catch {
-    const stripped = answer
-      .trim()
-      .replace(/^```(?:json)?\s*/iu, '')
-      .replace(/\s*```$/u, '')
-      .trim();
-    try {
-      return {
-        ok: true,
-        value: recoverCollapsedGroups(stripped, JSON.parse(stripped)),
-        truncated: false,
-      };
-    } catch {
-      const start = stripped.indexOf('{');
-      const end = stripped.lastIndexOf('}');
-      const candidate = start !== -1 && end > start ? stripped.slice(start, end + 1) : stripped;
-      try {
-        return {
-          ok: true,
-          value: recoverCollapsedGroups(stripped, JSON.parse(candidate)),
-          truncated: false,
-        };
-      } catch {
-        // Gemini Nano occasionally wraps each `{...}` item in `"groups":[...]` in stray quotes
-        // (`"{"name":"Topic","tabIds":[1,2]}"`) or leaves trailing commas before `]` / `}`.
-        const repaired = candidate
-          .replace(/"\s*(\{\s*"[^{}]*\})\s*"/gu, '$1')
-          .replace(/,\s*([\]}])/gu, '$1');
-        try {
-          return {
-            ok: true,
-            value: recoverCollapsedGroups(stripped, JSON.parse(repaired)),
-            truncated: false,
-          };
-        } catch {
-          const groups = extractRegexGroups(stripped);
-          if (groups.length > 0) return { ok: true, value: { groups }, truncated: true };
-          return { ok: false };
-        }
-      }
-    }
-  }
-}
-
-function validate(answer: string, batch: readonly TabInfo[], settings: Settings): Validation {
-  const decoded = parseModelJson(answer);
-  if (!decoded.ok) return UNPARSABLE;
-  const parsed = decoded.value;
-  if (parsed === null || typeof parsed !== 'object') return UNPARSABLE;
-  const groups = (parsed as { groups?: unknown }).groups;
-  if (!Array.isArray(groups)) return UNPARSABLE;
-
-  const allowed = new Set(batch.map((tab) => tab.id));
-  const windowId = (batch[0] as TabInfo).windowId;
-  const taken = new Set<number>();
-  const drafts: Draft[] = [];
-
-  for (const rawGroup of groups) {
-    let group: unknown = rawGroup;
-    if (typeof rawGroup === 'string') {
-      const inner = parseModelJson(rawGroup);
-      if (!inner.ok) continue;
-      group = inner.value;
-    }
-    if (group === null || typeof group !== 'object') continue;
-    const { name, tabIds } = group as { name?: unknown; tabIds?: unknown };
-    if (typeof name !== 'string' || !Array.isArray(tabIds)) continue;
-
-    const members: number[] = [];
-    for (const id of tabIds) {
-      // An invented id is discarded, and a repeated one belongs to the first group that
-      // claimed it: a tab cannot be in two native groups anyway (PLAN.md §7.4).
-      if (typeof id !== 'number' || !Number.isInteger(id)) continue;
-      if (!allowed.has(id) || taken.has(id)) continue;
-      taken.add(id);
-      members.push(id);
-    }
-
-    const title = name.replace(/\s+/gu, ' ').trim().slice(0, settings.maxNameLength).trim();
-    // "Other" is the model's way of saying "nowhere", and PLAN.md §7.2.4 does not group
-    // it; an unnamed group could not be applied either, and a group below
-    // `minClusterTabs` is not worth one. Their tabs fall through to "Altro" below.
-    if (title === '' || OTHER_NAMES.has(title.toLowerCase())) continue;
-    if (members.length < settings.minClusterTabs) continue;
-    drafts.push({ title, windowId, tabIds: members });
-  }
-
-  if (drafts.length === 0) return { ok: false, reason: 'no-groups' };
-  // "Altro" is everything no group kept: the tabs the model forgot, and the ones it put
-  // in a group that was then dropped. When the model's output was truncated mid-JSON, tabs
-  // it never reached go to `failed` so §7.2 local clustering still groups the unreached tail.
-  const grouped = new Set(drafts.flatMap((draft) => draft.tabIds));
-  const leftover = batch.filter((tab) => !grouped.has(tab.id)).map((tab) => tab.id);
-  return decoded.truncated
-    ? { ok: true, drafts, ungrouped: [], failed: leftover }
-    : { ok: true, drafts, ungrouped: leftover, failed: [] };
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 /**
@@ -531,28 +323,39 @@ function validate(answer: string, batch: readonly TabInfo[], settings: Settings)
  * still does not fit gives up and lets §7.2 group it.
  */
 async function askBatch(llm: Llm, batch: readonly TabInfo[], settings: Settings): Promise<Outcome> {
-  if (settings.signal?.aborted === true) return failed(batch, 'aborted', 0);
+  if (isAborted(settings.signal)) return failed(batch, 'aborted', 0);
   if (settings.now() >= settings.deadline) {
     return failed(batch, 'timeout', 0, `deadline reached before batch (${batch.length} tabs)`);
   }
 
   const input = buildPrompt(batch);
-  if (!(await fitsContext(llm, input))) return split(llm, batch, settings, 'quota', 0);
+  settings.onStage?.(`measure (${batch.length} tabs, ${input.length} chars)`);
+  if (!(await fitsContext(llm, input, settings.signal))) {
+    return split(llm, batch, settings, 'quota', 0);
+  }
+  if (isAborted(settings.signal)) return failed(batch, 'aborted', 0);
 
   let answer: string;
   try {
     answer = await promptWithin(llm, input, settings);
   } catch (error) {
     const name = errorName(error);
+    const trace = llm.lastTrace !== undefined && llm.lastTrace !== '' ? ` · ${llm.lastTrace}` : '';
     if (error instanceof PromptTimeout || name === 'TimeoutError') {
-      return failed(batch, 'timeout', 1, `prompt (${batch.length} tabs, ${input.length} chars)`);
+      return failed(
+        batch,
+        'timeout',
+        1,
+        `prompt (${batch.length} tabs, ${input.length} chars)${trace}`,
+      );
     }
     if (name === QUOTA_ERROR) return split(llm, batch, settings, 'quota', 1);
     if (name === 'AbortError') return failed(batch, 'aborted', 1);
-    return failed(batch, 'error', 1, errorDetail(error));
+    const detail = errorDetail(error);
+    return failed(batch, 'error', 1, detail === undefined ? trace.slice(3) : `${detail}${trace}`);
   }
 
-  const checked = validate(answer, batch, settings);
+  const checked = validateAiAnswer(answer, batch, settings);
   if (!checked.ok) {
     const compact = answer.replace(/\s+/gu, ' ').trim();
     const preview =
@@ -669,8 +472,8 @@ function fallbackDrafts(
   fallback: GroupProposal,
   failedIds: ReadonlySet<number>,
   settings: Settings,
-): { drafts: readonly Draft[]; ungrouped: readonly number[] } {
-  const drafts: Draft[] = [];
+): { drafts: readonly AiDraft[]; ungrouped: readonly number[] } {
+  const drafts: AiDraft[] = [];
   const claimed = new Set<number>();
   for (const group of fallback.groups) {
     const members = group.tabIds.filter((id) => failedIds.has(id));
@@ -691,7 +494,7 @@ function fallbackDrafts(
  * M4.1).
  */
 function assemble(
-  drafts: readonly Draft[],
+  drafts: readonly AiDraft[],
   ungrouped: readonly number[],
   position: ReadonlyMap<number, number>,
   windows: readonly number[],

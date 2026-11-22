@@ -362,6 +362,56 @@ export function colorFor(key: string): GroupColor {
   return GROUP_COLORS[hashOf(key) % GROUP_COLORS.length] as GroupColor;
 }
 
+interface ParsedTabUrl {
+  readonly key: string;
+  readonly host: string;
+  readonly domain: string;
+  readonly path: string;
+}
+
+/**
+ * Parses `url` once into its site key, display host, registrable domain, and decoded path
+ * (+ search query), avoiding repeated `new URL()` and PSL trie lookups across suffix stripping,
+ * tokenization, vectorization, and dominant-site selection.
+ */
+function parseTabUrl(url: string): ParsedTabUrl {
+  const trimmed = unwrapSuspendedUrl(url).trim();
+  let parsed: URL | null;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    parsed = null;
+  }
+  if (parsed === null) {
+    const domain = registrableDomain(trimmed) ?? '';
+    return { key: domain, host: '', domain, path: '' };
+  }
+  const query =
+    parsed.searchParams.get('search_query') ??
+    parsed.searchParams.get('q') ??
+    parsed.searchParams.get('query') ??
+    '';
+  const rawPath = query !== '' ? `${parsed.pathname}/${query}` : parsed.pathname;
+  let path = rawPath;
+  try {
+    path = decodeURIComponent(rawPath);
+  } catch {
+    // A stray `%` is not an escape; the raw path still tokenizes.
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { key: '', host: '', domain: '', path };
+  }
+  let host = parsed.hostname.toLowerCase();
+  while (host.startsWith('www.')) {
+    const rest = host.slice(4);
+    if (!rest.includes('.')) break;
+    host = rest;
+  }
+  const domain = registrableDomain(host) ?? '';
+  const key = host in APP_SUBDOMAINS ? host : domain !== '' ? domain : host;
+  return { key, host, domain, path };
+}
+
 /**
  * Which site a tab belongs to, as a key: the registrable domain, or the host shown in a
  * row when there is none — `localhost`, an IP address, an intranet name are sites to the
@@ -410,24 +460,15 @@ function simplify(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-/**
- * The title without the site's own name at the end (PLAN.md §7.2.1): " - YouTube",
- * " | Medium", " · GitHub".
- *
- * The tail after the last separator is dropped when, ignoring case and punctuation, it is
- * one of the ways this site spells itself — its readable name, its domain, its label or
- * its host. Repeated, because a site can add two ("Issue #1 · user/repo · GitHub"), and
- * it never empties the title: `lastSeparator` only answers past the first character of an
- * already trimmed title, so what is kept always starts with that character.
- */
-export function stripSiteSuffix(title: string, url: string): string {
-  const effectiveUrl = unwrapSuspendedUrl(url);
-  const key = siteKey(effectiveUrl);
+function stripSiteSuffixWith(
+  title: string,
+  meta: Pick<ParsedTabUrl, 'key' | 'host' | 'domain'>,
+): string {
+  const { key, host, domain: parentKey } = meta;
   const label = domainLabel(key);
   const appName = APP_SUBDOMAINS[key] ?? '';
-  const parentKey = registrableDomain(effectiveUrl) ?? '';
   const parentLabel = parentKey !== '' && parentKey !== key ? domainLabel(parentKey) : '';
-  const candidates: string[] = [appName, key, label, displayHost(effectiveUrl)];
+  const candidates: string[] = [appName, key, label, host];
   if (parentLabel !== '') {
     const sub = appName || label;
     candidates.push(parentLabel, `${parentLabel} ${sub}`, `${sub} ${parentLabel}`);
@@ -460,6 +501,20 @@ export function stripSiteSuffix(title: string, url: string): string {
   return out;
 }
 
+/**
+ * The title without the site's own name at the end (PLAN.md §7.2.1): " - YouTube",
+ * " | Medium", " · GitHub".
+ *
+ * The tail after the last separator is dropped when, ignoring case and punctuation, it is
+ * one of the ways this site spells itself — its readable name, its domain, its label or
+ * its host. Repeated, because a site can add two ("Issue #1 · user/repo · GitHub"), and
+ * it never empties the title: `lastSeparator` only answers past the first character of an
+ * already trimmed title, so what is kept always starts with that character.
+ */
+export function stripSiteSuffix(title: string, url: string): string {
+  return stripSiteSuffixWith(title, parseTabUrl(url));
+}
+
 function lastSeparator(title: string): { at: number; separator: string } | null {
   let best: { at: number; separator: string } | null = null;
   for (const separator of TITLE_SEPARATORS) {
@@ -467,29 +522,6 @@ function lastSeparator(title: string): { at: number; separator: string } | null 
     if (at > 0 && (best === null || at > best.at)) best = { at, separator };
   }
   return best;
-}
-
-/** The path (and any search query like `?q=` / `?search_query=`) of a URL, percent-decoded. */
-function pathOf(url: string): string {
-  const effectiveUrl = unwrapSuspendedUrl(url).trim();
-  let parsed: URL;
-  try {
-    parsed = new URL(effectiveUrl);
-  } catch {
-    return '';
-  }
-  const query =
-    parsed.searchParams.get('search_query') ??
-    parsed.searchParams.get('q') ??
-    parsed.searchParams.get('query') ??
-    '';
-  const rawPath = query !== '' ? `${parsed.pathname}/${query}` : parsed.pathname;
-  try {
-    return decodeURIComponent(rawPath);
-  } catch {
-    // A stray `%` is not an escape; the raw path still tokenizes.
-    return rawPath;
-  }
 }
 
 function collectTokens(text: string, isPath: boolean, minLength: number, into: string[]): void {
@@ -514,9 +546,10 @@ export function tokenize(
   options: ClusterOptions = {},
 ): readonly string[] {
   const minLength = options.minTokenLength ?? DEFAULT_CLUSTER_OPTIONS.minTokenLength;
+  const meta = parseTabUrl(tab.url);
   const tokens: string[] = [];
-  collectTokens(stripSiteSuffix(tab.title, tab.url), false, minLength, tokens);
-  collectTokens(pathOf(tab.url), true, minLength, tokens);
+  collectTokens(stripSiteSuffixWith(tab.title, meta), false, minLength, tokens);
+  collectTokens(meta.path, true, minLength, tokens);
   return tokens;
 }
 
@@ -671,11 +704,15 @@ function cosine(a: Vector, b: Vector): number {
 /** Weight of URL-path tokens relative to title tokens so long URL slugs do not drown titles. */
 const PATH_TOKEN_WEIGHT = 0.7;
 
-/** What one window's tabs add up to: a vector each, and the vocabulary behind them. */
+/** What one window's tabs add up to: a vector each, the vocabulary, and cached tab metadata. */
 interface Vectors {
   readonly vectors: readonly Vector[];
   /** Token id → the stem key (or `site:…` for domain tokens). */
   readonly vocabulary: readonly string[];
+  /** Site key per eligible tab, reused by `dominantSite` without re-parsing URLs. */
+  readonly siteKeys: readonly string[];
+  /** Optional `[stem, surfaceWord]` pairs per tab, populated when titles will be rendered. */
+  readonly surfacePairs: readonly (readonly (readonly [string, string])[])[];
 }
 
 /** Whether two stems differ by one edit (substitution, insertion, deletion, or adjacent swap). */
@@ -779,11 +816,17 @@ function snapTypoStems(
  * documents a small window has. Content words are stemmed conservatively for matching while
  * sublinear TF keeps repeated URL slugs from skewing norms against tabs with opaque paths.
  */
-function vectorize(tabs: readonly TabInfo[], options: Required<ClusterOptions>): Vectors {
+function vectorize(
+  tabs: readonly TabInfo[],
+  options: Required<ClusterOptions>,
+  collectSurface: boolean,
+): Vectors {
   const vocabulary: string[] = [];
   const ids = new Map<string, number>();
   const documentFrequency: number[] = [];
   const counts: Map<number, number>[] = [];
+  const siteKeys: string[] = [];
+  const surfacePairs: (readonly [string, string])[][] = [];
 
   const register = (key: string, weight: number, perTab: Map<number, number>): void => {
     let id = ids.get(key);
@@ -803,16 +846,27 @@ function vectorize(tabs: readonly TabInfo[], options: Required<ClusterOptions>):
   };
 
   for (const tab of tabs) {
+    const meta = parseTabUrl(tab.url);
     const titleTokens: string[] = [];
     const pathTokens: string[] = [];
-    collectTokens(stripSiteSuffix(tab.title, tab.url), false, options.minTokenLength, titleTokens);
-    collectTokens(pathOf(tab.url), true, options.minTokenLength, pathTokens);
+    collectTokens(stripSiteSuffixWith(tab.title, meta), false, options.minTokenLength, titleTokens);
+    collectTokens(meta.path, true, options.minTokenLength, pathTokens);
 
     const perTab = new Map<number, number>();
-    for (const raw of titleTokens) register(stemToken(raw), 1, perTab);
-    for (const raw of pathTokens) register(stemToken(raw), PATH_TOKEN_WEIGHT, perTab);
-    const key = siteKey(tab.url);
-    if (key !== '') register(`${DOMAIN_PREFIX}${key}`, 1, perTab);
+    const pairs: (readonly [string, string])[] | null = collectSurface ? [] : null;
+    for (const raw of titleTokens) {
+      const stem = stemToken(raw);
+      register(stem, 1, perTab);
+      if (pairs !== null) pairs.push([stem, raw]);
+    }
+    for (const raw of pathTokens) {
+      const stem = stemToken(raw);
+      register(stem, PATH_TOKEN_WEIGHT, perTab);
+      if (pairs !== null) pairs.push([stem, raw]);
+    }
+    siteKeys.push(meta.key);
+    if (meta.key !== '') register(`${DOMAIN_PREFIX}${meta.key}`, 1, perTab);
+    if (pairs !== null) surfacePairs.push(pairs);
 
     counts.push(perTab);
   }
@@ -850,52 +904,76 @@ function vectorize(tabs: readonly TabInfo[], options: Required<ClusterOptions>):
     vectors.push({ ids: vectorIds, values });
   }
 
-  return { vectors, vocabulary };
+  return { vectors, vocabulary, siteKeys, surfacePairs };
 }
 
 /**
  * Agglomerative clustering with average linkage (PLAN.md §7.2.3): the two most similar
  * clusters merge while that similarity is at least `threshold`.
  *
- * Average linkage is updated in place with Lance-Williams —
- * `sim(A∪B, C) = (|A|·sim(A,C) + |B|·sim(B,C)) / (|A|+|B|)` — which is exactly the mean
- * of the pairwise similarities and costs one pass per merge. Each live cluster also keeps
- * its nearest neighbour, so finding the pair to merge is a scan of the clusters rather
- * than of the whole matrix: that is what keeps 300 tabs inside the 50 ms of PLAN.md §11.
+ * The initial cosine matrix is filled through an inverted index over `vocabulary`, touching
+ * only tab pairs that share at least one token (in ascending token-id order, so the sums are
+ * bit-for-bit identical to pairwise dot products while skipping 90%+ zero pairs).
  *
- * Returns one sorted array of member indexes per cluster, in the order the clusters
- * started: the merge is driven by indexes throughout, so the answer cannot depend on the
- * iteration order of anything.
+ * Average linkage is updated in place with Lance-Williams —
+ * `sim(A∪B, C) = (|A|·sim(A,C) + |B|·sim(B,C)) / (|A|+|B|)` — over a compact sorted list of
+ * live cluster indices so `refresh()` and merge selection never scan dead slots.
  */
-function agglomerate(vectors: readonly Vector[], threshold: number): readonly number[][] {
+function agglomerate(
+  vectors: readonly Vector[],
+  vocabSize: number,
+  threshold: number,
+): readonly number[][] {
   const count = vectors.length;
   if (count === 0) return [];
 
   const sim = new Float64Array(count * count);
+  const postings: number[][] = Array.from({ length: vocabSize }, () => []);
   for (let i = 0; i < count; i += 1) {
-    const left = vectors[i] as Vector;
+    const vec = vectors[i] as Vector;
+    for (let at = 0; at < vec.ids.length; at += 1) {
+      (postings[vec.ids[at] as number] as number[]).push(i, vec.values[at] as number);
+    }
+  }
+  for (let tokenId = 0; tokenId < vocabSize; tokenId += 1) {
+    const list = postings[tokenId] as number[];
+    if (list.length <= 2) continue;
+    for (let a = 0; a < list.length; a += 2) {
+      const i = list[a] as number;
+      const wi = list[a + 1] as number;
+      const row = i * count;
+      for (let b = a + 2; b < list.length; b += 2) {
+        const j = list[b] as number;
+        sim[row + j] = (sim[row + j] as number) + wi * (list[b + 1] as number);
+      }
+    }
+  }
+  for (let i = 0; i < count; i += 1) {
+    const row = i * count;
     for (let j = i + 1; j < count; j += 1) {
-      const right = vectors[j] as Vector;
-      const value = cosine(left, right);
-      sim[i * count + j] = value;
-      sim[j * count + i] = value;
+      sim[j * count + i] = sim[row + j] as number;
     }
   }
 
-  const alive = new Uint8Array(count).fill(1);
+  const active: number[] = [];
   const size = new Int32Array(count).fill(1);
   const members: number[][] = [];
-  for (let i = 0; i < count; i += 1) members.push([i]);
+  for (let i = 0; i < count; i += 1) {
+    active.push(i);
+    members.push([i]);
+  }
   const nearest = new Int32Array(count).fill(-1);
   const nearestSim = new Float64Array(count);
 
-  /** The live cluster most similar to `i`, ties going to the lower index. */
+  /** The live cluster most similar to `i`, ties going to the lower index (`active` is sorted). */
   const refresh = (i: number): void => {
     let best = -1;
     let bestSim = Number.NEGATIVE_INFINITY;
-    for (let j = 0; j < count; j += 1) {
-      if (j === i || alive[j] === 0) continue;
-      const value = sim[i * count + j] as number;
+    const row = i * count;
+    for (let k = 0; k < active.length; k += 1) {
+      const j = active[k] as number;
+      if (j === i) continue;
+      const value = sim[row + j] as number;
       if (value > bestSim) {
         bestSim = value;
         best = j;
@@ -909,8 +987,9 @@ function agglomerate(vectors: readonly Vector[], threshold: number): readonly nu
   for (;;) {
     let from = -1;
     let bestSim = Number.NEGATIVE_INFINITY;
-    for (let i = 0; i < count; i += 1) {
-      if (alive[i] === 0 || nearest[i] === -1) continue;
+    for (let k = 0; k < active.length; k += 1) {
+      const i = active[k] as number;
+      if (nearest[i] === -1) continue;
       const value = nearestSim[i] as number;
       if (value > bestSim) {
         bestSim = value;
@@ -926,13 +1005,16 @@ function agglomerate(vectors: readonly Vector[], threshold: number): readonly nu
     const gone = Math.max(from, other);
     const keptSize = size[kept] as number;
     const goneSize = size[gone] as number;
-    for (let c = 0; c < count; c += 1) {
-      if (c === kept || c === gone || alive[c] === 0) continue;
+    const invTotal = 1 / (keptSize + goneSize);
+    const keptRow = kept * count;
+    const goneRow = gone * count;
+    for (let k = 0; k < active.length; k += 1) {
+      const c = active[k] as number;
+      if (c === kept || c === gone) continue;
       const merged =
-        ((sim[kept * count + c] as number) * keptSize +
-          (sim[gone * count + c] as number) * goneSize) /
-        (keptSize + goneSize);
-      sim[kept * count + c] = merged;
+        ((sim[keptRow + c] as number) * keptSize + (sim[goneRow + c] as number) * goneSize) *
+        invTotal;
+      sim[keptRow + c] = merged;
       sim[c * count + kept] = merged;
     }
     size[kept] = keptSize + goneSize;
@@ -941,33 +1023,32 @@ function agglomerate(vectors: readonly Vector[], threshold: number): readonly nu
     keptMembers.push(...goneMembers);
     keptMembers.sort((a, b) => a - b);
     goneMembers.length = 0;
-    alive[gone] = 0;
+    active.splice(active.indexOf(gone), 1);
     nearest[gone] = -1;
 
     refresh(kept);
     // Only the clusters whose nearest neighbour has just disappeared or changed.
-    for (let c = 0; c < count; c += 1) {
-      if (alive[c] === 0 || c === kept) continue;
+    for (let k = 0; k < active.length; k += 1) {
+      const c = active[k] as number;
+      if (c === kept) continue;
       if (nearest[c] === kept || nearest[c] === gone) refresh(c);
     }
   }
 
   const clusters: number[][] = [];
-  for (let i = 0; i < count; i += 1) {
-    if (alive[i] === 1) clusters.push(members[i] as number[]);
+  for (let k = 0; k < active.length; k += 1) {
+    clusters.push(members[active[k] as number] as number[]);
   }
   return clusters;
 }
 
-/** L2-normalised centroid of a cluster's sparse vectors, optionally excluding one member. */
+/** L2-normalised centroid of a cluster's sparse vectors together with its unnormalised norm. */
 function centroidOf(
   members: readonly number[],
   vectors: readonly Vector[],
-  excludeIndex = -1,
-): Vector {
+): { readonly centroid: Vector; readonly norm: number } {
   const sum = new Map<number, number>();
   for (const index of members) {
-    if (index === excludeIndex) continue;
     const vector = vectors[index] as Vector;
     for (let at = 0; at < vector.ids.length; at += 1) {
       const id = vector.ids[at] as number;
@@ -977,18 +1058,18 @@ function centroidOf(
   const sorted = [...sum.keys()].sort((a, b) => a - b);
   const ids = new Int32Array(sorted.length);
   const values = new Float64Array(sorted.length);
-  let norm = 0;
+  let normSq = 0;
   for (const [at, id] of sorted.entries()) {
     const weight = sum.get(id) as number;
     ids[at] = id;
     values[at] = weight;
-    norm += weight * weight;
+    normSq += weight * weight;
   }
-  const length = Math.sqrt(norm);
-  if (length > 0) {
-    for (let at = 0; at < values.length; at += 1) values[at] = (values[at] as number) / length;
+  const norm = Math.sqrt(normSq);
+  if (norm > 0) {
+    for (let at = 0; at < values.length; at += 1) values[at] = (values[at] as number) / norm;
   }
-  return { ids, values };
+  return { centroid: { ids, values }, norm };
 }
 
 /** Total cosine similarity and non-domain (content-only) cosine similarity in one linear pass. */
@@ -1020,6 +1101,10 @@ function splitCosine(
  * Post-agglomeration centroid refinement: rescues tabs that greedy pairwise linkage prematurely
  * locked into a weak 2-tab coincidence (e.g. sharing one high-IDF decorative word like "segreti"
  * or "incontro") when they strongly match a larger dominant cluster's core centroid.
+ *
+ * Leave-one-out similarity to a tab's own cluster uses the exact identity
+ * `cos(v, (S - v) / ‖S - v‖) = (d - 1) / sqrt(‖S‖² - 2d + 1)` with `d = (v · c) · ‖S‖`,
+ * avoiding O(K²) centroid rebuilds per cluster.
  */
 function refineClusters(
   initial: readonly number[][],
@@ -1035,10 +1120,16 @@ function refineClusters(
 
   let current: number[][] = initial.map((c) => [...c]);
   for (let pass = 0; pass < 2; pass += 1) {
-    const targets: { readonly idx: number; readonly centroid: Vector }[] = [];
+    const targets: { readonly idx: number; readonly centroid: Vector; readonly norm: number }[] =
+      [];
+    const targetByIdx = new Map<number, { readonly centroid: Vector; readonly norm: number }>();
     for (let c = 0; c < current.length; c += 1) {
       const members = current[c] as number[];
-      if (members.length >= 2) targets.push({ idx: c, centroid: centroidOf(members, vectors) });
+      if (members.length >= 2) {
+        const entry = centroidOf(members, vectors);
+        targets.push({ idx: c, ...entry });
+        targetByIdx.set(c, entry);
+      }
     }
     if (targets.length === 0) break;
 
@@ -1054,14 +1145,13 @@ function refineClusters(
       const ownMembers = current[ownIdx] as number[];
       const tabVec = vectors[i] as Vector;
       const isSingleton = ownMembers.length === 1;
-      const ownSim = isSingleton
-        ? 0
-        : ownMembers.length === 2
-          ? cosine(
-              tabVec,
-              vectors[(ownMembers[0] === i ? ownMembers[1] : ownMembers[0]) as number] as Vector,
-            )
-          : cosine(tabVec, centroidOf(ownMembers, vectors, i));
+      let ownSim = 0;
+      if (!isSingleton && tabVec.ids.length > 0) {
+        const own = targetByIdx.get(ownIdx) as { readonly centroid: Vector; readonly norm: number };
+        const d = cosine(tabVec, own.centroid) * own.norm;
+        const remSq = own.norm * own.norm - 2 * d + 1;
+        ownSim = remSq > 1e-18 ? (d - 1) / Math.sqrt(remSq) : 0;
+      }
 
       const minTotal = isSingleton ? Math.max(threshold, 0.32) : threshold;
       const minContent = isSingleton ? Math.max(threshold * 0.8, 0.2) : threshold * 0.6;
@@ -1110,10 +1200,9 @@ interface RankedToken {
  */
 function rankTokens(
   cluster: readonly number[],
-  eligible: readonly TabInfo[],
   vectors: readonly Vector[],
   vocabulary: readonly string[],
-  minTokenLength: number,
+  surfacePairs: readonly (readonly (readonly [string, string])[])[],
 ): readonly RankedToken[] {
   const weights = new Map<string, number>();
   const formCounts = new Map<string, Map<string, number>>();
@@ -1124,9 +1213,7 @@ function rankTokens(
       if (key.startsWith(DOMAIN_PREFIX)) continue;
       weights.set(key, (weights.get(key) ?? 0) + (vector.values[at] as number));
     }
-    const tab = eligible[index] as TabInfo;
-    for (const word of tokenize(tab, { minTokenLength })) {
-      const stem = stemToken(word);
+    for (const [stem, word] of surfacePairs[index] as readonly (readonly [string, string])[]) {
       let agg = formCounts.get(stem);
       if (agg === undefined) {
         agg = new Map<string, number>();
@@ -1196,10 +1283,10 @@ function titleOf(ranked: readonly RankedToken[], site: string, taken: ReadonlySe
  * The site most of the cluster's tabs are on, as a readable name: the last resort of a
  * title, and `''` when no site has more tabs there than another.
  */
-function dominantSite(cluster: readonly number[], tabs: readonly TabInfo[]): string {
+function dominantSite(cluster: readonly number[], siteKeys: readonly string[]): string {
   const counts = new Map<string, number>();
   for (const index of cluster) {
-    const key = siteKey((tabs[index] as TabInfo).url);
+    const key = siteKeys[index] as string;
     if (key !== '') counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   let best = '';
@@ -1231,9 +1318,10 @@ function hasContentToken(
 
 interface TopicWindowResult {
   readonly windowId: number;
-  readonly eligible: readonly TabInfo[];
   readonly vectors: readonly Vector[];
   readonly vocabulary: readonly string[];
+  readonly siteKeys: readonly string[];
+  readonly surfacePairs: readonly (readonly (readonly [string, string])[])[];
   readonly kept: readonly {
     readonly indexes: readonly number[];
     readonly tabIds: readonly number[];
@@ -1246,9 +1334,14 @@ function topicWindowClusters(
   windowId: number,
   own: readonly TabInfo[],
   resolved: Required<ClusterOptions>,
+  collectSurface: boolean,
 ): TopicWindowResult {
   const eligible = own.filter((tab) => isEligible(tab, resolved));
-  const { vectors, vocabulary } = vectorize(eligible, resolved);
+  const { vectors, vocabulary, siteKeys, surfacePairs } = vectorize(
+    eligible,
+    resolved,
+    collectSurface,
+  );
   const ungrouped: number[] = [];
   const candidates: {
     readonly indexes: readonly number[];
@@ -1256,7 +1349,7 @@ function topicWindowClusters(
     readonly firstAt: number;
   }[] = [];
 
-  const rawClusters = agglomerate(vectors, resolved.threshold);
+  const rawClusters = agglomerate(vectors, vocabulary.length, resolved.threshold);
   const refined = refineClusters(rawClusters, vectors, vocabulary, resolved.threshold);
   for (const cluster of refined) {
     const tabIds = cluster.map((index) => (eligible[index] as TabInfo).id);
@@ -1277,7 +1370,7 @@ function topicWindowClusters(
     }
     kept.push(entry);
   }
-  return { windowId, eligible, vectors, vocabulary, kept, ungrouped };
+  return { windowId, vectors, vocabulary, siteKeys, surfacePairs, kept, ungrouped };
 }
 
 /**
@@ -1298,7 +1391,7 @@ export function clusterTabIds(
   const groups: (readonly number[])[] = [];
   const ungrouped: number[] = [];
   for (const { windowId, tabs: own } of byWindow(tabs)) {
-    const result = topicWindowClusters(windowId, own, resolved);
+    const result = topicWindowClusters(windowId, own, resolved, false);
     for (const entry of result.kept) groups.push(entry.tabIds);
     ungrouped.push(...result.ungrouped);
   }
@@ -1320,24 +1413,19 @@ export function groupByTopic(
 
   for (const { windowId, tabs: own } of byWindow(tabs)) {
     const {
-      eligible,
       vectors,
       vocabulary,
+      siteKeys,
+      surfacePairs,
       kept,
       ungrouped: dropped,
-    } = topicWindowClusters(windowId, own, resolved);
+    } = topicWindowClusters(windowId, own, resolved, true);
     ungrouped.push(...dropped);
 
     const taken = new Set<string>();
     for (const entry of kept) {
-      const ranked = rankTokens(
-        entry.indexes,
-        eligible,
-        vectors,
-        vocabulary,
-        resolved.minTokenLength,
-      );
-      const title = titleOf(ranked, dominantSite(entry.indexes, eligible), taken);
+      const ranked = rankTokens(entry.indexes, vectors, vocabulary, surfacePairs);
+      const title = titleOf(ranked, dominantSite(entry.indexes, siteKeys), taken);
       taken.add(title);
       groups.push({
         windowId,

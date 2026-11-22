@@ -91,36 +91,47 @@ export async function removeBookmarksPermission(given?: BookmarksApi): Promise<b
  */
 export async function bookmarkedKeys(given?: BookmarksApi): Promise<ReadonlySet<string>> {
   if (cache !== null) return cache;
+  if (inflight !== null) return inflight;
   const browserApi = api(given);
-  // The answer is cached whatever it is, including "no permission": the panel asks on every
-  // refresh, and a grant made elsewhere arrives through `permissions.onAdded` below.
+  // Register permission listeners up front: "no permission" is cached too, and a grant made
+  // elsewhere invalidates the cache via `permissions.onAdded`.
   watchPermissions(browserApi);
-  cache = EMPTY;
 
-  if (!(await hasBookmarksPermission(browserApi))) return EMPTY;
-  const bookmarks = browserApi.bookmarks;
-  if (bookmarks === undefined) return EMPTY;
-
-  try {
-    const keys = new Set<string>();
-    collect(await bookmarks.getTree(), keys);
-    watch(bookmarks);
-    cache = keys;
-    return keys;
-  } catch {
-    return EMPTY;
+  const pending = (async (): Promise<ReadonlySet<string>> => {
+    if (!(await hasBookmarksPermission(browserApi))) return EMPTY;
+    const bookmarks = browserApi.bookmarks;
+    if (bookmarks === undefined) return EMPTY;
+    try {
+      const keys = new Set<string>();
+      collect(await bookmarks.getTree(), keys);
+      watch(bookmarks);
+      return keys;
+    } catch {
+      return EMPTY;
+    }
+  })();
+  inflight = pending;
+  const resolved = await pending;
+  // Only store if `forget()` did not invalidate this walk while it was in flight.
+  if (inflight === pending) {
+    cache = resolved;
+    inflight = null;
   }
+  return resolved;
 }
 
 /** Drops the cached set, so the next read walks the tree again. */
 export function forget(): void {
   cache = null;
+  inflight = null;
 }
 
 const EMPTY: ReadonlySet<string> = new Set<string>();
 
 /** The walked tree, until a bookmark changes. */
 let cache: ReadonlySet<string> | null = null;
+/** Shared in-flight walk so concurrent panel reloads never observe a premature empty set. */
+let inflight: Promise<ReadonlySet<string>> | null = null;
 
 /** Whether the invalidating listeners are in place. Registered once per context. */
 let watching = false;
@@ -131,8 +142,12 @@ let watchingPermissions = false;
 function watchPermissions(browserApi: BookmarksApi): void {
   if (watchingPermissions) return;
   watchingPermissions = true;
-  browserApi.permissions.onAdded?.addListener(forget);
-  browserApi.permissions.onRemoved?.addListener(forget);
+  try {
+    browserApi.permissions.onAdded?.addListener(forget);
+    browserApi.permissions.onRemoved?.addListener(forget);
+  } catch {
+    // Environments without optional permission events still fall back cleanly on next open.
+  }
 }
 
 function collect(nodes: readonly BookmarkNode[], into: Set<string>): void {
@@ -162,6 +177,7 @@ function watch(bookmarks: NonNullable<BookmarksApi['bookmarks']>): void {
 /** Forgets the listeners too, which only a test needs. */
 export function resetBookmarks(): void {
   cache = null;
+  inflight = null;
   watching = false;
   watchingPermissions = false;
 }

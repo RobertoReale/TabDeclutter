@@ -3454,3 +3454,56 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Why:** Gemini Nano cold starts no longer starve inference, slow constrained decoding gracefully
   hands off to validated unconstrained JSON on medium-class GPUs, Cancel remains immediate during
   both warmup and inference, and `chrome://extensions` stays free of false error entries.
+
+## Post-release — Classic MV3 service worker bundling (no dynamic `import()`) and 30 KB background budget
+- **Context:** commit `fdfc3db` switched `src/entrypoints/background/index.ts` to `type: 'module'`
+  with dynamic `import()` calls for `@/platform/windows`, `@/platform/llm`, and
+  `@/core/ai-grouping` to stay under the 25 KB background budget. In Chrome MV3 that crashed at
+  runtime with `ReferenceError: document is not defined` (Vite's `__vitePreload` helper touches
+  `document`), and per the HTML specification dynamic `import()` is unconditionally disallowed in
+  `ServiceWorkerGlobalScope`
+  (https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/basics).
+- **Decision:** reverted `background/index.ts` to a classic single-file bundle with static imports
+  only; extracted pure prompt building and resilient JSON validation into `src/core/ai-prompt.ts`
+  so the background worker prompts `LanguageModel` directly and always destroys its ephemeral
+  session in `finally` without pulling panel-only grouping/LLM code; and, with the owner's
+  approval, amended `BUDGETS.background` in `tools/size.mjs` from 25 KB to 30 KB (measuring
+  ~28.8 KB gzip without `tldts`; panel shrank to ~37.0 KB / 60 KB).
+- **Why:** eliminates both `ReferenceError: document is not defined` and the spec-illegal dynamic
+  `import()`, prevents background VRAM/keep-alive leaks, and keeps an honest bundle-size gate that
+  measures everything the service worker actually executes.
+
+## Post-release — Cross-context Web Locks, batched storage IPC, MV3 durability, and 2× core speedups
+- **Context:** profiling and a review against Chrome MV3, Firefox WebExtensions, W3C Web Locks,
+  and Chrome Prompt API documentation found six reliability/performance gaps: (1) per-key storage
+  serialization only locked within one context, leaving background/panel read-modify-write races;
+  (2) `state/tabs.ts`, `badge.ts`, `autopilot.ts`, `guard.ts`, and `organize.ts` issued 2–5
+  separate `storage.get`/`set` IPCs per reload; (3) `autopilot.ts` held cooldowns only in SW
+  memory, used `setTimeout` on `onStartup`, and did not re-check settings after 30–90 s AI
+  inference; (4) `bookmarks.ts` cached `EMPTY` before `getTree()` finished, `state/ai.ts` awaited
+  storage before `downloadModel()` (risking user-gesture expiry), and non-tracker background
+  listeners logged shutdown errors directly to `console.error`; (5) `windows.ts` queried tabs
+  twice when nothing was grouped and moved already-positioned leading tabs; and (6) `scoring.ts`
+  and `cluster.ts` repeatedly parsed URLs / queried PSL and built dense O(N²) similarity matrices
+  and O(K²) leave-one-out centroids.
+- **Decision:** upgraded `storage.ts` serialization and cross-context GPU coordination (`withAiLock`)
+  to the Web Locks API (`navigator.locks`, https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API)
+  with in-process fallback for tests; added batched `storage.getItems`/`setItems` helpers; persisted
+  background AI cooldown in `session:aiBgCooldownUntil`, replaced `onStartup` `setTimeout` with a
+  30 s `chrome.alarms` alarm (`autopilot-startup`, meeting Chrome 120+'s 0.5 min minimum:
+  https://developer.chrome.com/docs/extensions/reference/api/alarms), and shared F.2 shutdown-aware
+  `reportBackgroundError` across all background listeners; coalesced concurrent `bookmarkedKeys()`
+  walks and started `downloadModel()` immediately in `enableAi()`; eliminated double `tabs.query`
+  and already-positioned prefix moves in `windows.ts`; optimized `url.ts`, `classify.ts`,
+  `scoring.ts`, and `cluster.ts` with single-pass URL/domain caching, sparse inverted-index
+  agglomeration, and O(1) exact leave-one-out centroid updates; added
+  `BroadcastChannel('td:ai-control')` preemption so interactive side-panel AI runs abort
+  background inference immediately instead of blocking on `td:on-device-ai`; and switched
+  `AiSession` unconstrained calls to `session.promptStreaming()` with live sub-stage telemetry
+  (`lock` → `warmup` → `measure` → `clone` → `prefill` → `streaming`), early balanced-JSON
+  completion, repetition-loop breaking, and `inputQuota`/`inputUsage` support
+  (https://developer.chrome.com/docs/ai/prompt-api).
+- **Why:** cuts CPU medians ~2× (`scoring 1000 tabs` from 13.45 ms normalized to 6.34 ms vs 15 ms
+  budget; `clustering 300 tabs` 1-window from 12.58 ms to 6.34 ms and 6-window from 8.23 ms to
+  3.91 ms vs 50 ms budget), eliminates cross-context storage and GPU races, and aligns every
+  lifecycle and API pattern with official MV3 specifications.

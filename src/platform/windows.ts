@@ -92,6 +92,17 @@ export interface OrganizeWindowsResult {
   readonly undo?: OrganizeWindowsSnapshot;
 }
 
+async function ungroupIds(api: WindowsOrganizeApi, groupedIds: readonly number[]): Promise<number> {
+  if (typeof api.tabs.ungroup !== 'function' || groupedIds.length === 0) return 0;
+  const batch = await attempt(() => api.tabs.ungroup!(groupedIds));
+  if (!batch.ok) {
+    for (const id of groupedIds) {
+      await attempt(() => api.tabs.ungroup!([id]));
+    }
+  }
+  return groupedIds.length;
+}
+
 /**
  * Ungroups every tab that is currently inside a native tab group, so the tab strip has
  * no coloured group pills when `useTabGroups` is off.
@@ -102,15 +113,7 @@ export async function ungroupAllOpenTabs(api: WindowsOrganizeApi = defaultApi())
   if (!queried.ok) return 0;
   const tabs = asTabInfos(queried.value);
   const groupedIds = tabs.filter((tab) => tab.groupId !== NO_GROUP_ID).map((tab) => tab.id);
-  if (groupedIds.length === 0) return 0;
-
-  const batch = await attempt(() => api.tabs.ungroup!(groupedIds));
-  if (!batch.ok) {
-    for (const id of groupedIds) {
-      await attempt(() => api.tabs.ungroup!([id]));
-    }
-  }
-  return groupedIds.length;
+  return ungroupIds(api, groupedIds);
 }
 
 /**
@@ -124,15 +127,21 @@ export async function organizeWindows(
   const api = options.api ?? defaultApi();
   let ungroupedTabs = 0;
 
-  if (!options.useTabGroups) {
-    ungroupedTabs = await ungroupAllOpenTabs(api);
+  let queried = await attempt(() => api.tabs.query({}));
+  if (!queried.ok) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
+  let rawTabs = asTabInfos(queried.value);
+
+  if (!options.useTabGroups && typeof api.tabs.ungroup === 'function') {
+    const groupedIds = rawTabs.filter((tab) => tab.groupId !== NO_GROUP_ID).map((tab) => tab.id);
+    if (groupedIds.length > 0) {
+      ungroupedTabs = await ungroupIds(api, groupedIds);
+      queried = await attempt(() => api.tabs.query({}));
+      if (!queried.ok) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
+      rawTabs = asTabInfos(queried.value);
+    }
   }
 
-  const queried = await attempt(() => api.tabs.query({}));
-  if (!queried.ok) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
-  const allTabs = asTabInfos(queried.value).filter(
-    (tab) => !tab.incognito && tab.windowId !== NO_WINDOW,
-  );
+  const allTabs = rawTabs.filter((tab) => !tab.incognito && tab.windowId !== NO_WINDOW);
   if (allTabs.length === 0) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
 
   const snapshot: OrganizeWindowsSnapshot = {
@@ -311,7 +320,8 @@ async function mergeAndSortIntoOneWindow(
     return 0;
   }
 
-  const moved = await moveSequence(api, sortedIds, targetWindowId, pinnedInTarget);
+  const byId = new Map(movable.map((tab) => [tab.id, tab]));
+  const moved = await moveSequence(api, sortedIds, targetWindowId, pinnedInTarget, byId);
 
   // If the user was looking at an active tab in a secondary window that just got merged into
   // `targetWindowId`, keep that tab active in `targetWindowId` so their current page stays on screen.
@@ -515,7 +525,7 @@ async function splitIntoThematicWindows(
     const pinnedCount = allTabs.filter(
       (tab) => tab.windowId === existingWindowId && tab.pinned,
     ).length;
-    movedTabs += await moveSequence(api, safeTabIds, existingWindowId, pinnedCount);
+    movedTabs += await moveSequence(api, safeTabIds, existingWindowId, pinnedCount, byId);
   }
 
   return { movedTabs, windowsCount: assignments.length };
@@ -526,10 +536,28 @@ async function moveSequence(
   tabIds: readonly number[],
   windowId: number,
   startIndex: number,
+  currentById?: ReadonlyMap<number, TabInfo>,
 ): Promise<number> {
+  // Skip any leading prefix of tabs that are already sitting at their exact target indices in
+  // `windowId`, so placing 1 new tab into an already-sorted 20-tab window costs 1 move, not 21.
+  let offset = 0;
+  if (currentById !== undefined) {
+    while (offset < tabIds.length) {
+      const existing = currentById.get(tabIds[offset] as number);
+      if (
+        existing === undefined ||
+        existing.windowId !== windowId ||
+        existing.index !== startIndex + offset
+      ) {
+        break;
+      }
+      offset += 1;
+    }
+  }
   let moved = 0;
-  let idx = startIndex;
-  for (const tabId of tabIds) {
+  let idx = startIndex + offset;
+  for (let i = offset; i < tabIds.length; i += 1) {
+    const tabId = tabIds[i] as number;
     const ok = await attempt(() => api.tabs.move(tabId, { windowId, index: idx }));
     if (ok.ok) {
       moved += 1;

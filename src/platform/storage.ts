@@ -40,6 +40,7 @@ import type {
   GuardState,
   Keeps,
   Settings,
+  TabActivity,
 } from '../core/types';
 import {
   ARCHIVE_CAP,
@@ -129,6 +130,12 @@ export const aiProposalSignatureItem = defineVersioned<string>('session:aiPropos
 export const aiBusyUntilItem = defineVersioned<number>('session:aiBusyUntil', 0);
 
 /**
+ * Timestamp (ms epoch) until which background AI refreshes cool down after a failure,
+ * stored in `storage.session` so MV3 service worker restarts never trigger retry storms.
+ */
+export const aiBgCooldownUntilItem = defineVersioned<number>('session:aiBgCooldownUntil', 0);
+
+/**
  * Timestamp (ms epoch) until which background `autoOrganize` pauses after the user clicks
  * Undo on a window organization, so autopilot does not immediately re-organize the tabs
  * without touching the user's persisted `autoOrganize` setting.
@@ -136,16 +143,26 @@ export const aiBusyUntilItem = defineVersioned<number>('session:aiBusyUntil', 0)
 export const organizeSnoozeUntilItem = defineVersioned<number>('session:organizeSnoozeUntil', 0);
 
 /**
- * One read-modify-write at a time per key.
+ * One read-modify-write at a time per key, coordinated across extension contexts (background
+ * service worker and side panel) via the Web Locks API (`navigator.locks`) when supported,
+ * falling back to an in-process promise queue in test/non-DOM environments.
  *
- * Two closes a few milliseconds apart would otherwise both read the same archive and the
- * second write would lose the first one's entries. The extension runs in several contexts
- * (PLAN.md §5.2), so this only orders the writes made by one of them; it is what makes
- * "one write per action" safe for the actions a single context can start at once.
+ * Because the browser automatically releases a Web Lock if its owning context terminates or
+ * closes mid-operation, a closed side panel can never deadlock the background worker.
  */
 const queues = new Map<string, Promise<unknown>>();
 
+function webLocks(): LockManager | undefined {
+  return typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function'
+    ? navigator.locks
+    : undefined;
+}
+
 function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T> {
+  const locks = webLocks();
+  if (locks !== undefined) {
+    return locks.request(`td:storage:${key}`, () => action());
+  }
   const previous = queues.get(key) ?? Promise.resolve();
   // `action` runs whether the operation before it resolved or rejected: one failed write
   // must not block the key forever.
@@ -157,6 +174,80 @@ function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T>
   return next;
 }
 
+const AI_LOCK_NAME = 'td:on-device-ai';
+const AI_CONTROL_CHANNEL = 'td:ai-control';
+
+/**
+ * Coordinates exclusive access to Chrome's on-device AI (`LanguageModel`) across the side panel
+ * and the background service worker using the Web Locks API. With `ifAvailable: true`, the
+ * background autopilot immediately skips when another context is already using the GPU, and
+ * closing the side panel mid-run automatically releases the lock without waiting on a TTL.
+ */
+export async function withAiLock<T>(
+  ifAvailable: boolean,
+  action: () => Promise<T>,
+): Promise<{ readonly acquired: true; readonly value: T } | { readonly acquired: false }> {
+  const locks = webLocks();
+  if (locks !== undefined) {
+    return locks.request(AI_LOCK_NAME, { ifAvailable }, async (lock) => {
+      if (lock === null) return { acquired: false as const };
+      return { acquired: true as const, value: await action() };
+    });
+  }
+  return { acquired: true, value: await action() };
+}
+
+/**
+ * Signals any background on-device AI run in the service worker to abort and release the GPU
+ * lock immediately when the user starts an interactive AI run in the side panel.
+ */
+export function preemptBackgroundAi(): void {
+  if (typeof BroadcastChannel !== 'function') return;
+  try {
+    const channel = new BroadcastChannel(AI_CONTROL_CHANNEL);
+    channel.postMessage('preempt');
+    channel.close();
+  } catch {
+    // Ignore environments where BroadcastChannel is restricted.
+  }
+}
+
+/**
+ * Subscribes to foreground preemption requests from the side panel so background AI inference
+ * aborts its session immediately instead of holding `td:on-device-ai` for up to 90 s.
+ */
+export function onBackgroundAiPreempt(listener: () => void): () => void {
+  if (typeof BroadcastChannel !== 'function') return () => undefined;
+  try {
+    const channel = new BroadcastChannel(AI_CONTROL_CHANNEL);
+    channel.onmessage = (event: MessageEvent) => {
+      if (event.data === 'preempt') listener();
+    };
+    return () => {
+      channel.close();
+    };
+  } catch {
+    return () => undefined;
+  }
+}
+
+function mergeSettings(stored: Partial<Settings> | null | undefined): Settings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...stored,
+    guard: { ...DEFAULT_GUARD_SETTINGS, ...stored?.guard },
+    match: { ...DEFAULT_MATCH_OPTIONS, ...stored?.match },
+  };
+}
+
+function filterActiveKeeps(stored: Keeps, now: number): Keeps {
+  const active: Keeps = {};
+  for (const [key, until] of Object.entries(stored)) {
+    if (!isExpired(until, now)) active[key] = until;
+  }
+  return active;
+}
+
 /**
  * The whole settings object, with every default filled in.
  *
@@ -165,13 +256,90 @@ function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T>
  * The result is a fresh object: the caller may edit it and hand it back to `saveSettings`.
  */
 export async function readSettings(): Promise<Settings> {
-  const stored = await settingsItem.getValue();
+  return mergeSettings(await settingsItem.getValue());
+}
+
+/** Everything `scoreTabs` reads from `storage.local`, fetched in a single batched IPC call. */
+export interface ScoringStoreSnapshot {
+  readonly activity: ActivityStore;
+  readonly settings: Settings;
+  readonly keeps: Keeps;
+  readonly protectedSites: readonly string[];
+  readonly whitelist: readonly string[];
+}
+
+export async function readScoringStore(now: number): Promise<ScoringStoreSnapshot> {
+  const items = await storage.getItems([
+    activityItem,
+    settingsItem,
+    keepsItem,
+    protectedDomainsItem,
+    duplicateWhitelistItem,
+  ]);
   return {
-    ...DEFAULT_SETTINGS,
-    ...stored,
-    guard: { ...DEFAULT_GUARD_SETTINGS, ...stored.guard },
-    match: { ...DEFAULT_MATCH_OPTIONS, ...stored.match },
+    activity: (items[0]?.value ?? {}) as ActivityStore,
+    settings: mergeSettings(items[1]?.value as Partial<Settings> | undefined),
+    keeps: filterActiveKeeps((items[2]?.value ?? {}) as Keeps, now),
+    protectedSites: (items[3]?.value ?? []) as string[],
+    whitelist: (items[4]?.value ?? []) as string[],
   };
+}
+
+/**
+ * The four non-settings scoring inputs from `storage.local`, fetched in one batched IPC call
+ * after a fast-path `readSettings()` check (used by `badge.ts` and `autopilot.ts` so disabled
+ * features never deserialize the activity store).
+ */
+export async function readScoringInputs(
+  now: number,
+): Promise<Omit<ScoringStoreSnapshot, 'settings'>> {
+  const items = await storage.getItems([
+    activityItem,
+    keepsItem,
+    protectedDomainsItem,
+    duplicateWhitelistItem,
+  ]);
+  return {
+    activity: (items[0]?.value ?? {}) as ActivityStore,
+    keeps: filterActiveKeeps((items[1]?.value ?? {}) as Keeps, now),
+    protectedSites: (items[2]?.value ?? []) as string[],
+    whitelist: (items[3]?.value ?? []) as string[],
+  };
+}
+
+/** Settings + duplicate whitelist in one batched `storage.local.get` IPC call for `guard.ts`. */
+export async function readSettingsAndWhitelist(): Promise<{
+  readonly settings: Settings;
+  readonly whitelist: readonly string[];
+}> {
+  const items = await storage.getItems([settingsItem, duplicateWhitelistItem]);
+  return {
+    settings: mergeSettings(items[0]?.value as Partial<Settings> | undefined),
+    whitelist: (items[1]?.value ?? []) as string[],
+  };
+}
+
+/** Reads the cached session AI proposal and its tab signature in one batched IPC call. */
+export async function readAiProposalState(): Promise<{
+  readonly proposal: GroupProposal | null;
+  readonly signature: string;
+}> {
+  const items = await storage.getItems([aiProposalItem, aiProposalSignatureItem]);
+  return {
+    proposal: (items[0]?.value ?? null) as GroupProposal | null,
+    signature: (items[1]?.value ?? '') as string,
+  };
+}
+
+/** Writes the cached session AI proposal and its tab signature in one atomic batched IPC call. */
+export async function saveAiProposalState(
+  proposal: GroupProposal | null,
+  signature: string,
+): Promise<void> {
+  await storage.setItems([
+    { item: aiProposalItem, value: proposal },
+    { item: aiProposalSignatureItem, value: signature },
+  ]);
 }
 
 /** Stores the settings as one value, serialized so rapid updates never clobber each other. */
@@ -272,6 +440,32 @@ export function pruneActivity(openTabIds: readonly number[]): Promise<number> {
   });
 }
 
+/**
+ * Applies a set of per-tab activity updates/deletions on top of the latest stored `local:activity`
+ * under the same per-key Web Lock as `pruneActivity`, so incremental tracker flushes never
+ * resurrect pruned tabs or clobber concurrent writes from other contexts.
+ */
+export function patchActivity(
+  changes: ReadonlyMap<number, TabActivity | undefined>,
+): Promise<ActivityStore> {
+  return serialize(activityItem.key, async () => {
+    const next: ActivityStore = { ...(await activityItem.getValue()) };
+    for (const [tabId, record] of changes) {
+      if (record === undefined) delete next[tabId];
+      else next[tabId] = record;
+    }
+    await activityItem.setValue(next);
+    return next;
+  });
+}
+
+/** Replaces `local:activity` atomically under the per-key Web Lock (startup / install rebuild). */
+export function replaceActivity(next: ActivityStore): Promise<void> {
+  return serialize(activityItem.key, async () => {
+    await activityItem.setValue(next);
+  });
+}
+
 /** A keep is over when its moment has come: the scoring reads it the same way. */
 function isExpired(until: number | null, now: number): boolean {
   return until !== null && until <= now;
@@ -309,12 +503,7 @@ export function removeKeep(url: string): Promise<void> {
 
 /** The keeps still standing at `now`. A read never writes: `pruneKeeps` does that. */
 export async function readKeeps(now: number): Promise<Keeps> {
-  const stored = await keepsItem.getValue();
-  const active: Keeps = {};
-  for (const [key, until] of Object.entries(stored)) {
-    if (!isExpired(until, now)) active[key] = until;
-  }
-  return active;
+  return filterActiveKeeps(await keepsItem.getValue(), now);
 }
 
 export async function isKept(url: string, now: number): Promise<boolean> {

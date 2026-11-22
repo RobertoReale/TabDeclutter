@@ -1,5 +1,7 @@
 // The JS budgets of PLAN.md §11, as a gate: gzip of the side panel's initial JS ≤ 60 KB and
-// of the background ≤ 18 KB, both without tldts, on the Chrome and on the Firefox build.
+// of the background ≤ 30 KB (amended by owner from 18 KB → 25 KB → 30 KB to cover static
+// autopilot clustering and background AI without MV3-incompatible dynamic imports), both
+// without tldts, on the Chrome and on the Firefox build.
 //
 //   pnpm size
 //
@@ -23,7 +25,7 @@ import { gzipSync } from 'node:zlib';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** 1 KB = 1000 B: the stricter reading of PLAN.md §11. */
-const BUDGETS = { panel: 60_000, background: 25_000 };
+const BUDGETS = { panel: 60_000, background: 30_000 };
 const BROWSERS = ['chrome', 'firefox'];
 
 function build(browser, { withoutTldts }) {

@@ -34,7 +34,9 @@ import type { ActivityStore, TabActivity } from '@/core/types';
 import { unwrapSuspendedUrl } from '@/core/url';
 import type { Capabilities } from '@/platform/capabilities';
 import { caps } from '@/platform/capabilities';
-import { activityItem, foregroundItem } from '@/platform/storage';
+import { activityItem, foregroundItem, patchActivity, replaceActivity } from '@/platform/storage';
+
+import { reportBackgroundError } from './report';
 
 /** PLAN.md §6.1 allows 1–2 s. The short end: on Chrome the flush is best effort. */
 const WRITE_DEBOUNCE_MS = 1_000;
@@ -93,6 +95,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
   /** Records changed since the last write: what Firefox has to re-save, tab by tab. */
   const touched = new Set<number>();
   let dirty = false;
+  let replaceAll = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** One handler at a time: they all read-modify-write the same store. */
   let chain: Promise<unknown> = Promise.resolve();
@@ -139,6 +142,8 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
   async function writeNow(): Promise<void> {
     if (!dirty || store === null) return;
     dirty = false;
+    const fullReplace = replaceAll;
+    replaceAll = false;
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
@@ -146,8 +151,11 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
     const snapshot = { ...store };
     const saved = [...touched];
     touched.clear();
-    if (!(await writeStore(snapshot))) return;
-    if (sessions !== undefined) await saveSessionValues(sessions, snapshot, saved);
+    const written = await writeStore(snapshot, saved, fullReplace);
+    if (written === null) return;
+    // Preserve any fresher edits made to `store` while storage I/O was in flight.
+    if (!fullReplace && !dirty) store = { ...written };
+    if (sessions !== undefined) await saveSessionValues(sessions, written, saved);
   }
 
   /**
@@ -309,6 +317,8 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
       // The whole store was rebuilt, so every id in it is worth re-saving and none of the
       // ids from the previous run are.
       touched.clear();
+      replaceAll = true;
+      dirty = true;
       for (const tab of tabs) mark(tab.id);
       await writeNow();
     });
@@ -322,6 +332,8 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
       const tabs = await currentTabs();
       store = bootstrapActivity(await activityItem.getValue(), tabs, at).activity;
       touched.clear();
+      replaceAll = true;
+      dirty = true;
       for (const tab of tabs) mark(tab.id);
       await writeNow();
     });
@@ -380,39 +392,27 @@ async function readSessionValues(
 }
 
 /** The store, written unless there is no browser left to write to (see `report`). */
-async function writeStore(snapshot: ActivityStore): Promise<boolean> {
+async function writeStore(
+  snapshot: ActivityStore,
+  touchedIds: readonly number[],
+  fullReplace: boolean,
+): Promise<ActivityStore | null> {
   try {
-    await activityItem.setValue(snapshot);
-    return true;
+    if (fullReplace) {
+      await replaceActivity(snapshot);
+      return snapshot;
+    }
+    const patch = new Map<number, TabActivity | undefined>();
+    for (const tabId of touchedIds) patch.set(tabId, snapshot[tabId]);
+    return await patchActivity(patch);
   } catch (error: unknown) {
     await report(error);
-    return false;
+    return null;
   }
 }
 
-/**
- * A failure, unless the browser is on its way out (F.2).
- *
- * A browser shutting down rejects whichever call the tracker happens to have in flight —
- * the debounced write, a read of the foreground clock — and an extension that did nothing
- * wrong must not leave an error in the console for it (PLAN.md §14). As in
- * `saveSessionValues`, the question goes to the browser and never to the error's message,
- * which differs between Chrome and Firefox: a store that no longer answers at all is a
- * browser that is gone, while one that answers means the failure was the extension's own
- * (no space, a quota) and still reports.
- */
 async function report(error: unknown): Promise<void> {
-  if (await storageAnswers()) failed(error);
-}
-
-/** Whether the browser still answers at all, asked of the store the tracker writes to. */
-async function storageAnswers(): Promise<boolean> {
-  try {
-    await activityItem.getValue();
-    return true;
-  } catch {
-    return false;
-  }
+  await reportBackgroundError('tracker', error);
 }
 
 /** Only the records that changed, and only inside a write, never once per event. */

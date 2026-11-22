@@ -98,12 +98,25 @@ export function isOwnPage(url: string, ownOrigin?: string): boolean {
  * `pattern` against a host: a host matches itself and its subdomains, and `label.*`
  * matches that label under any public suffix (`google.*` → `google.co.uk`).
  */
-function matchesHostPattern(pattern: string, host: string): boolean {
+function matchesHostPattern(pattern: string, host: string, domainOf: () => string | null): boolean {
   if (pattern.endsWith('.*')) {
-    const domain = registrableDomain(host);
+    const domain = domainOf();
     return domain !== null && domain.split('.')[0] === pattern.slice(0, -2);
   }
   return host === pattern || host.endsWith(`.${pattern}`);
+}
+
+/** Lazy per-tab eTLD+1 cache so multi-pattern host checks pay one PSL lookup instead of many. */
+function cachedDomainOf(host: string): () => string | null {
+  let computed = false;
+  let value: string | null = null;
+  return () => {
+    if (!computed) {
+      computed = true;
+      value = registrableDomain(host);
+    }
+    return value;
+  };
 }
 
 /** `prefix` against a path, by whole segments: `/s` matches `/s/x`, never `/sport`. */
@@ -133,21 +146,27 @@ function tokenizePath(pathname: string): string {
   return `-${tokens}-`;
 }
 
-/** A sign-in, sign-out or redirection page (PLAN.md §6.3 "auth"). */
-export function isAuthUrl(url: string): boolean {
-  const parsed = parse(url);
-  if (parsed === null) return false;
-  if (AUTH_HOSTS.some((pattern) => matchesHostPattern(pattern, parsed.hostname))) return true;
+function isAuthParsed(parsed: URL, domainOf: () => string | null): boolean {
+  if (AUTH_HOSTS.some((pattern) => matchesHostPattern(pattern, parsed.hostname, domainOf))) {
+    return true;
+  }
   const tokens = tokenizePath(parsed.pathname);
   return AUTH_PATH_TOKENS.some((token) => tokens.includes(`-${token}-`));
 }
 
+/** A sign-in, sign-out or redirection page (PLAN.md §6.3 "auth"). */
+export function isAuthUrl(url: string): boolean {
+  const parsed = parse(url);
+  if (parsed === null) return false;
+  return isAuthParsed(parsed, cachedDomainOf(parsed.hostname));
+}
+
 /** A list of results, on a search engine or inside a known site (PLAN.md §6.3). */
-function isSearchUrl(parsed: URL): boolean {
+function isSearchUrl(parsed: URL, domainOf: () => string | null): boolean {
   const host = parsed.hostname;
   const path = normalizePath(parsed.pathname);
 
-  if (SEARCH_ENGINE_HOSTS.some((pattern) => matchesHostPattern(pattern, host))) {
+  if (SEARCH_ENGINE_HOSTS.some((pattern) => matchesHostPattern(pattern, host, domainOf))) {
     if (SEARCH_ENGINE_PATHS.some((prefix) => isPathUnder(path, prefix))) return true;
     // On the root path only: an engine that is also something else puts that something
     // else under a path of its own, and its query parameter is not a search there.
@@ -158,7 +177,7 @@ function isSearchUrl(parsed: URL): boolean {
 
   return SITE_SEARCH_RULES.some(
     (rule) =>
-      rule.hosts.some((pattern) => matchesHostPattern(pattern, host)) &&
+      rule.hosts.some((pattern) => matchesHostPattern(pattern, host, domainOf)) &&
       rule.paths.some((prefix) => isPathUnder(path, prefix)),
   );
 }
@@ -216,8 +235,9 @@ export function classify(tab: ClassifiableTab, context: ClassifyContext = {}): P
   if (parsed === null) return 'content';
 
   if (isMediaUrl(parsed)) return 'media';
-  if (isAuthUrl(url)) return 'auth';
-  if (isSearchUrl(parsed)) return 'search';
+  const domainOf = cachedDomainOf(parsed.hostname);
+  if (isAuthParsed(parsed, domainOf)) return 'auth';
+  if (isSearchUrl(parsed, domainOf)) return 'search';
   if (tab.title !== undefined && looksLikeErrorTitle(tab.title)) return 'error';
 
   return 'content';

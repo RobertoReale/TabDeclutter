@@ -28,14 +28,20 @@ import {
   pruneActivity,
   pruneArchive,
   pruneKeeps,
+  readAiProposalState,
   readArchive,
   readExemptions,
   readKeeps,
+  readScoringInputs,
+  readScoringStore,
   readSettings,
+  readSettingsAndWhitelist,
   removeFromArchive,
   removeKeep,
+  saveAiProposalState,
   saveSettings,
   settingsItem,
+  withAiLock,
 } from '../../src/platform/storage';
 
 /** A fixed clock: every helper takes `now`, so no test depends on the real one. */
@@ -539,5 +545,98 @@ describe("the guard's exemptions", () => {
     await Promise.all([addExemption({ tabId: 1 }, NOW), addExemption({ tabId: 2 }, NOW)]);
 
     expect(await readExemptions(NOW)).toHaveLength(2);
+  });
+});
+
+describe('batched storage IPC and Web Locks coordination', () => {
+  it('reads all five scoring keys in a single storage.local.get call', async () => {
+    await activityItem.setValue({ 1: activity(1) });
+    await addKeep('https://example.com/fresh', NOW);
+    await addKeep('https://example.com/expired', NOW - 8 * DAY);
+    await protectedDomainsItem.setValue(['atlassian.net']);
+    await duplicateWhitelistItem.setValue(['*://mail.google.com/*']);
+    await saveSettings({ ...DEFAULT_SETTINGS, staleDays: 14 });
+    const reads = vi.spyOn(fakeBrowser.storage.local, 'get');
+
+    const snapshot = await readScoringStore(NOW);
+
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(snapshot.settings.staleDays).toBe(14);
+    expect(Object.keys(snapshot.activity)).toEqual(['1']);
+    expect(Object.keys(snapshot.keeps)).toEqual([keepKey('https://example.com/fresh')]);
+    expect(snapshot.protectedSites).toEqual(['atlassian.net']);
+    expect(snapshot.whitelist).toEqual(['*://mail.google.com/*']);
+  });
+
+  it('reads scoring inputs and settings+whitelist in one call each', async () => {
+    await protectedDomainsItem.setValue(['docs.rs']);
+    await duplicateWhitelistItem.setValue(['*://example.com/*']);
+    const reads = vi.spyOn(fakeBrowser.storage.local, 'get');
+
+    const inputs = await readScoringInputs(NOW);
+    const guardCfg = await readSettingsAndWhitelist();
+
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(inputs.protectedSites).toEqual(['docs.rs']);
+    expect(guardCfg.whitelist).toEqual(['*://example.com/*']);
+  });
+
+  it('reads and writes the session AI proposal + signature in one call each', async () => {
+    const writes = vi.spyOn(fakeBrowser.storage.session, 'set');
+    const reads = vi.spyOn(fakeBrowser.storage.session, 'get');
+    const proposal = {
+      mode: 'topic' as const,
+      groups: [{ key: 'ai:1', title: 'Math', color: 'blue' as const, windowId: 1, tabIds: [1, 2] }],
+      ungrouped: [],
+    };
+
+    await saveAiProposalState(proposal, 'sig-1');
+    const loaded = await readAiProposalState();
+
+    expect(writes).toHaveBeenCalledTimes(1);
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(loaded).toEqual({ proposal, signature: 'sig-1' });
+  });
+
+  it('routes cross-context writes and AI locking through navigator.locks when present', async () => {
+    const held = new Set<string>();
+    const requested: { name: string; ifAvailable?: boolean }[] = [];
+    const fakeLocks = {
+      async request<T>(
+        name: string,
+        optsOrCb: { ifAvailable?: boolean } | ((lock: object | null) => Promise<T>),
+        maybeCb?: (lock: object | null) => Promise<T>,
+      ): Promise<T> {
+        const opts = typeof optsOrCb === 'function' ? {} : optsOrCb;
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+        requested.push({ name, ifAvailable: opts.ifAvailable });
+        if (opts.ifAvailable === true && held.has(name)) {
+          return cb(null);
+        }
+        held.add(name);
+        try {
+          return await cb({ name });
+        } finally {
+          held.delete(name);
+        }
+      },
+    };
+    const origNav = globalThis.navigator;
+    vi.stubGlobal('navigator', { ...origNav, locks: fakeLocks });
+
+    try {
+      await addToArchive([archived('locked')]);
+      expect(requested.some((r) => r.name === 'td:storage:local:archive')).toBe(true);
+
+      let skippedInside: unknown;
+      const outer = await withAiLock(false, async () => {
+        skippedInside = await withAiLock(true, async () => 'should-not-run');
+        return 'ran';
+      });
+      expect(outer).toEqual({ acquired: true, value: 'ran' });
+      expect(skippedInside).toEqual({ acquired: false });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

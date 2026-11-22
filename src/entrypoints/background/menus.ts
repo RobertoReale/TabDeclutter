@@ -39,6 +39,7 @@ import { addDuplicateWhitelistPattern } from '@/platform/storage';
 import { keepTab, protectSite } from '@/platform/tabs';
 
 import type { GuardActions } from './guard';
+import { reportBackgroundError } from './report';
 
 /** The ids are ours and stable: `onClicked` reports the one that was chosen. */
 export const KEEP_ALWAYS_ID = 'keep-always';
@@ -231,7 +232,10 @@ export function registerMenus(options: MenusOptions): Menus {
   // A profile with no menus API at all keeps the rest of the extension: three items the
   // browser will not show are not worth taking the background script down for.
   if (api === undefined) {
-    failed(new Error('no menus API: neither browser.menus nor browser.contextMenus'));
+    console.error(
+      'TabDeclutter: menus',
+      new Error('no menus API: neither browser.menus nor browser.contextMenus'),
+    );
     return { install, clicked };
   }
 
@@ -288,5 +292,5 @@ function menusApi(): MenusApi | undefined {
 }
 
 function failed(error: unknown): void {
-  console.error('TabDeclutter: menus', error);
+  void reportBackgroundError('menus', error);
 }

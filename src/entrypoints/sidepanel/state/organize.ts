@@ -45,6 +45,10 @@ import {
   aiProposalItem,
   aiProposalSignatureItem,
   organizeSnoozeUntilItem,
+  preemptBackgroundAi,
+  readAiProposalState,
+  saveAiProposalState,
+  withAiLock,
 } from '@/platform/storage';
 import { NO_WINDOW } from '@/platform/tabs';
 import {
@@ -160,9 +164,14 @@ function formatSeconds(ms: number): string {
   return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
 }
 
-function startStageTicker(label: string, budgetMs: number, signal?: AbortSignal): () => void {
+function startStageTicker(
+  initialLabel: string,
+  budgetMs: number,
+  signal?: AbortSignal,
+): { readonly stop: () => void; readonly setLabel: (next: string) => void } {
   const startedAt = Date.now();
   const budgetSec = Math.round(budgetMs / 1000);
+  let label = initialLabel;
   const update = (): void => {
     const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
     aiStageDetail.value = `${label} · ${elapsedSec}s / ${budgetSec}s`;
@@ -174,9 +183,15 @@ function startStageTicker(label: string, budgetMs: number, signal?: AbortSignal)
     clearInterval(interval);
   };
   signal?.addEventListener('abort', stop, { once: true });
-  return () => {
-    signal?.removeEventListener('abort', stop);
-    stop();
+  return {
+    stop: () => {
+      signal?.removeEventListener('abort', stop);
+      stop();
+    },
+    setLabel: (next: string) => {
+      label = next;
+      update();
+    },
   };
 }
 
@@ -306,56 +321,73 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
   clearAiFallbackNotice();
   let drafted: Draft | null = null;
   let usedModel: Llm | undefined;
-  let stopTicker: (() => void) | undefined;
-  const runStartedAt = Date.now();
+  let ticker: { readonly stop: () => void; readonly setLabel: (next: string) => void } | undefined;
+  const lockStartedAt = Date.now();
+  let warmupStartedAt = lockStartedAt;
+  let lockMs = 0;
   let wasWarm = false;
   try {
-    const groupBy = deps.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
-    const model = deps.model ?? (await aiModel());
-    usedModel = model;
-    wasWarm = (model as { isOpen?: boolean }).isOpen === true;
-    stopTicker = startStageTicker(
-      `warmup (LanguageModel.create, ${wasWarm ? 'warm' : 'cold'})`,
-      PANEL_AI_WARMUP_TIMEOUT_MS,
-    );
-    await warmModel(model, controller.signal);
-    stopTicker();
-    stopTicker = undefined;
-    if (running !== controller || controller.signal.aborted) return;
-    const warmupMs = Date.now() - runStartedAt;
-    const mapped = withCompactTabIds(tabs);
-    const promptStartedAt = Date.now();
-    stopTicker = startStageTicker(
-      `prompt (${mapped.compact.length} tabs, warm=${formatSeconds(warmupMs)})`,
-      PANEL_AI_TIMEOUT_MS,
-    );
-    const result = await groupBy(mapped.compact, model, {
-      ...chosen,
-      timeoutMs: PANEL_AI_TIMEOUT_MS,
-      signal: controller.signal,
-    });
-    stopTicker();
-    stopTicker = undefined;
-    const promptMs = Date.now() - promptStartedAt;
-    // A newer run, or a changed question, owns the answer now: this one is stale.
-    if (running !== controller) return;
-    if (result.source === 'ai') {
-      drafted = draftOf(mapped.restore(result.proposal));
-      clearAiFallbackNotice();
-    } else if (result.fallbackReason !== 'empty' && result.fallbackReason !== 'aborted') {
-      const timing = `warmup=${formatSeconds(warmupMs)} · prompt=${formatSeconds(promptMs)}/${Math.round(PANEL_AI_TIMEOUT_MS / 1000)}s · tabs=${mapped.compact.length}`;
-      recordAiFallback(
-        result.fallbackReason,
-        result.fallbackDetail !== undefined ? `${result.fallbackDetail} (${timing})` : timing,
+    ticker = startStageTicker('lock (waiting for background AI)', PANEL_AI_WARMUP_TIMEOUT_MS);
+    preemptBackgroundAi();
+    await withAiLock(false, async () => {
+      ticker?.stop();
+      ticker = undefined;
+      if (running !== controller || controller.signal.aborted) return;
+      lockMs = Date.now() - lockStartedAt;
+      warmupStartedAt = Date.now();
+      const groupBy = deps.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
+      const model = deps.model ?? (await aiModel());
+      usedModel = model;
+      wasWarm = (model as { isOpen?: boolean }).isOpen === true;
+      ticker = startStageTicker(
+        `warmup (LanguageModel.create, ${wasWarm ? 'warm' : 'cold'})`,
+        PANEL_AI_WARMUP_TIMEOUT_MS,
       );
-    }
+      await warmModel(model, controller.signal);
+      ticker.stop();
+      ticker = undefined;
+      if (running !== controller || controller.signal.aborted) return;
+      const warmupMs = Date.now() - warmupStartedAt;
+      const mapped = withCompactTabIds(tabs);
+      const promptStartedAt = Date.now();
+      const promptTicker = startStageTicker(
+        `prompt (${mapped.compact.length} tabs, warm=${formatSeconds(warmupMs)})`,
+        PANEL_AI_TIMEOUT_MS,
+      );
+      ticker = promptTicker;
+      const result = await groupBy(mapped.compact, model, {
+        ...chosen,
+        timeoutMs: PANEL_AI_TIMEOUT_MS,
+        signal: controller.signal,
+        onStage: (stage) => {
+          promptTicker.setLabel(`${stage} (${mapped.compact.length} tabs)`);
+        },
+      });
+      promptTicker.stop();
+      ticker = undefined;
+      const promptMs = Date.now() - promptStartedAt;
+      // A newer run, or a changed question, owns the answer now: this one is stale.
+      if (running !== controller) return;
+      if (result.source === 'ai') {
+        drafted = draftOf(mapped.restore(result.proposal));
+        clearAiFallbackNotice();
+      } else if (result.fallbackReason !== 'empty' && result.fallbackReason !== 'aborted') {
+        const lockTag = lockMs >= 100 ? `lock=${formatSeconds(lockMs)} · ` : '';
+        const timing = `${lockTag}warmup=${formatSeconds(warmupMs)} · prompt=${formatSeconds(promptMs)}/${Math.round(PANEL_AI_TIMEOUT_MS / 1000)}s · tabs=${mapped.compact.length}`;
+        recordAiFallback(
+          result.fallbackReason,
+          result.fallbackDetail !== undefined ? `${result.fallbackDetail} (${timing})` : timing,
+        );
+      }
+    });
   } catch (error: unknown) {
     // A model that cannot even be reached is not fatal: §7.2 has already answered,
     // and we surface a warning without changing the user's AI setting.
     if (running === controller && !controller.signal.aborted) {
-      const elapsed = formatSeconds(Date.now() - runStartedAt);
+      const elapsed = formatSeconds(Date.now() - warmupStartedAt);
       const budget = `${Math.round(PANEL_AI_WARMUP_TIMEOUT_MS / 1000)}s`;
-      const meta = `LanguageModel.create · ${elapsed}/${budget} · session=${wasWarm ? 'warm' : 'cold'} · tabs=${tabs.length}`;
+      const lockTag = lockMs >= 100 ? `lock=${formatSeconds(lockMs)} · ` : '';
+      const meta = `LanguageModel.create · ${lockTag}${elapsed}/${budget} · session=${wasWarm ? 'warm' : 'cold'} · tabs=${tabs.length}`;
       if (isTimeoutError(error)) {
         recordAiFallback('timeout', `model warmup (${meta})`);
         // If background warmup finishes after our timer gave up, automatically retry once warm.
@@ -371,7 +403,7 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
       }
     }
   } finally {
-    stopTicker?.();
+    ticker?.stop();
     if (running === controller) {
       running = null;
       aiWorking.value = false;
@@ -440,12 +472,9 @@ export async function loadSavedAiProposal(): Promise<void> {
       // Fallback when storage watching is unavailable in lightweight test stubs.
     }
   }
-  const [stored, sig] = await Promise.all([
-    aiProposalItem.getValue().catch(() => null),
-    aiProposalSignatureItem.getValue().catch(() => ''),
-  ]);
-  savedAiProposal.value = stored;
-  savedAiProposalSignature.value = sig;
+  const state = await readAiProposalState().catch(() => ({ proposal: null, signature: '' }));
+  savedAiProposal.value = state.proposal;
+  savedAiProposalSignature.value = state.signature;
   savedAiProposalLoaded.value = true;
 }
 
@@ -454,8 +483,7 @@ export function clearSavedAiProposal(): void {
   savedAiProposal.value = null;
   savedAiProposalSignature.value = '';
   lastAutoWindowAiSignature.value = null;
-  void aiProposalItem.setValue(null).catch(() => undefined);
-  void aiProposalSignatureItem.setValue('').catch(() => undefined);
+  void saveAiProposalState(null, '').catch(() => undefined);
 }
 
 /** All currently open, non-incognito tabs eligible for window organization. */
@@ -713,84 +741,104 @@ export async function organizeWindowsWithAi(
   clearAiFallbackNotice();
   let proposal: GroupProposal | undefined;
   let usedModel: Llm | undefined;
-  let stopTicker: (() => void) | undefined;
-  const runStartedAt = Date.now();
+  let ticker: { readonly stop: () => void; readonly setLabel: (next: string) => void } | undefined;
+  const lockStartedAt = Date.now();
+  let warmupStartedAt = lockStartedAt;
+  let lockMs = 0;
   let wasWarm = false;
 
+  let cancelled = false;
   try {
-    const groupBy = request.deps?.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
-    const model = request.deps?.model ?? (await aiModel());
-    usedModel = model;
-    wasWarm = (model as { isOpen?: boolean }).isOpen === true;
-    stopTicker = startStageTicker(
-      `warmup (LanguageModel.create, ${wasWarm ? 'warm' : 'cold'})`,
-      PANEL_AI_WARMUP_TIMEOUT_MS,
-    );
-    await warmModel(model, controller.signal);
-    stopTicker();
-    stopTicker = undefined;
-    if (running !== controller || controller.signal.aborted) {
-      return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
-    }
-    const warmupMs = Date.now() - runStartedAt;
-    const promptStartedAt = Date.now();
-    stopTicker = startStageTicker(
-      `prompt (${mapped.compact.length} tabs, warm=${formatSeconds(warmupMs)})`,
-      PANEL_AI_TIMEOUT_MS,
-    );
-    const result = await groupBy(mapped.compact, model, {
-      minSiteTabs: 2,
-      minClusterTabs: 2,
-      includePinned: false,
-      includeGrouped: true,
-      timeoutMs: PANEL_AI_TIMEOUT_MS,
-      signal: controller.signal,
-    });
-    stopTicker();
-    stopTicker = undefined;
-    const promptMs = Date.now() - promptStartedAt;
-    if (
-      running !== controller ||
-      controller.signal.aborted ||
-      result.fallbackReason === 'aborted'
-    ) {
-      return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
-    }
-    const timing = `warmup=${formatSeconds(warmupMs)} · prompt=${formatSeconds(promptMs)}/${Math.round(PANEL_AI_TIMEOUT_MS / 1000)}s · tabs=${mapped.compact.length}`;
-    if (result.source === 'ai') {
-      const restored = mapped.restore(result.proposal);
-      if (restored.groups.length > 0) {
-        proposal = restored;
-        clearAiAutoCooldown();
-        clearAiFallbackNotice();
-        savedAiProposal.value = restored;
-        savedAiProposalSignature.value = currentSignature;
-        savedAiProposalLoaded.value = true;
-        void aiProposalItem.setValue(restored).catch(() => undefined);
-        void aiProposalSignatureItem.setValue(currentSignature).catch(() => undefined);
-      } else {
+    ticker = startStageTicker('lock (waiting for background AI)', PANEL_AI_WARMUP_TIMEOUT_MS);
+    preemptBackgroundAi();
+    await withAiLock(false, async () => {
+      ticker?.stop();
+      ticker = undefined;
+      if (running !== controller || controller.signal.aborted) {
+        cancelled = true;
+        return;
+      }
+      lockMs = Date.now() - lockStartedAt;
+      warmupStartedAt = Date.now();
+      const groupBy = request.deps?.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
+      const model = request.deps?.model ?? (await aiModel());
+      usedModel = model;
+      wasWarm = (model as { isOpen?: boolean }).isOpen === true;
+      ticker = startStageTicker(
+        `warmup (LanguageModel.create, ${wasWarm ? 'warm' : 'cold'})`,
+        PANEL_AI_WARMUP_TIMEOUT_MS,
+      );
+      await warmModel(model, controller.signal);
+      ticker.stop();
+      ticker = undefined;
+      if (running !== controller || controller.signal.aborted) {
+        cancelled = true;
+        return;
+      }
+      const warmupMs = Date.now() - warmupStartedAt;
+      const promptStartedAt = Date.now();
+      const promptTicker = startStageTicker(
+        `prompt (${mapped.compact.length} tabs, warm=${formatSeconds(warmupMs)})`,
+        PANEL_AI_TIMEOUT_MS,
+      );
+      ticker = promptTicker;
+      const result = await groupBy(mapped.compact, model, {
+        minSiteTabs: 2,
+        minClusterTabs: 2,
+        includePinned: false,
+        includeGrouped: true,
+        timeoutMs: PANEL_AI_TIMEOUT_MS,
+        signal: controller.signal,
+        onStage: (stage) => {
+          promptTicker.setLabel(`${stage} (${mapped.compact.length} tabs)`);
+        },
+      });
+      promptTicker.stop();
+      ticker = undefined;
+      const promptMs = Date.now() - promptStartedAt;
+      if (
+        running !== controller ||
+        controller.signal.aborted ||
+        result.fallbackReason === 'aborted'
+      ) {
+        cancelled = true;
+        return;
+      }
+      const lockTag = lockMs >= 100 ? `lock=${formatSeconds(lockMs)} · ` : '';
+      const timing = `${lockTag}warmup=${formatSeconds(warmupMs)} · prompt=${formatSeconds(promptMs)}/${Math.round(PANEL_AI_TIMEOUT_MS / 1000)}s · tabs=${mapped.compact.length}`;
+      if (result.source === 'ai') {
+        const restored = mapped.restore(result.proposal);
+        if (restored.groups.length > 0) {
+          proposal = restored;
+          clearAiAutoCooldown();
+          clearAiFallbackNotice();
+          savedAiProposal.value = restored;
+          savedAiProposalSignature.value = currentSignature;
+          savedAiProposalLoaded.value = true;
+          void saveAiProposalState(restored, currentSignature).catch(() => undefined);
+        } else {
+          if (request.automatic === true) {
+            aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
+          }
+          savedAiProposal.value = null;
+          savedAiProposalSignature.value = '';
+          void saveAiProposalState(null, '').catch(() => undefined);
+          recordAiFallback('no-groups', timing);
+        }
+      } else if (result.fallbackReason !== 'empty') {
         if (request.automatic === true) {
           aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
         }
         savedAiProposal.value = null;
         savedAiProposalSignature.value = '';
-        void aiProposalItem.setValue(null).catch(() => undefined);
-        void aiProposalSignatureItem.setValue('').catch(() => undefined);
-        recordAiFallback('no-groups', timing);
+        void saveAiProposalState(null, '').catch(() => undefined);
+        recordAiFallback(
+          result.fallbackReason,
+          result.fallbackDetail !== undefined ? `${result.fallbackDetail} (${timing})` : timing,
+        );
       }
-    } else if (result.fallbackReason !== 'empty') {
-      if (request.automatic === true) {
-        aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
-      }
-      savedAiProposal.value = null;
-      savedAiProposalSignature.value = '';
-      void aiProposalItem.setValue(null).catch(() => undefined);
-      void aiProposalSignatureItem.setValue('').catch(() => undefined);
-      recordAiFallback(
-        result.fallbackReason,
-        result.fallbackDetail !== undefined ? `${result.fallbackDetail} (${timing})` : timing,
-      );
-    }
+    });
+    if (cancelled) return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
   } catch (error: unknown) {
     if (running !== controller || controller.signal.aborted) {
       return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
@@ -800,11 +848,11 @@ export async function organizeWindowsWithAi(
     }
     savedAiProposal.value = null;
     savedAiProposalSignature.value = '';
-    void aiProposalItem.setValue(null).catch(() => undefined);
-    void aiProposalSignatureItem.setValue('').catch(() => undefined);
-    const elapsed = formatSeconds(Date.now() - runStartedAt);
+    void saveAiProposalState(null, '').catch(() => undefined);
+    const elapsed = formatSeconds(Date.now() - warmupStartedAt);
     const budget = `${Math.round(PANEL_AI_WARMUP_TIMEOUT_MS / 1000)}s`;
-    const meta = `LanguageModel.create · ${elapsed}/${budget} · session=${wasWarm ? 'warm' : 'cold'} · tabs=${mapped.compact.length}`;
+    const lockTag = lockMs >= 100 ? `lock=${formatSeconds(lockMs)} · ` : '';
+    const meta = `LanguageModel.create · ${lockTag}${elapsed}/${budget} · session=${wasWarm ? 'warm' : 'cold'} · tabs=${mapped.compact.length}`;
     if (isTimeoutError(error)) {
       recordAiFallback('timeout', `model warmup (${meta})`);
       // When the in-flight background `LanguageModel.create()` finishes warming after the
@@ -821,7 +869,7 @@ export async function organizeWindowsWithAi(
       recordAiFallback('error', `${msg} (${meta})`);
     }
   } finally {
-    stopTicker?.();
+    ticker?.stop();
     if (running === controller) {
       running = null;
       aiWorking.value = false;
@@ -847,8 +895,7 @@ export async function undoWindowOrganize(
       .catch(() => undefined);
     savedAiProposal.value = null;
     savedAiProposalSignature.value = '';
-    await aiProposalItem.setValue(null).catch(() => undefined);
-    await aiProposalSignatureItem.setValue('').catch(() => undefined);
+    await saveAiProposalState(null, '').catch(() => undefined);
     await undoFn(last.undo);
   } catch (error: unknown) {
     console.error('TabDeclutter: undo window organize', error);

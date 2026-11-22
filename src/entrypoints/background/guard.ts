@@ -48,6 +48,7 @@ import {
   readArchive,
   readGuardState,
   readSettings,
+  readSettingsAndWhitelist,
   rememberAutoClosed,
   resumeGuard,
   settingsItem,
@@ -62,6 +63,8 @@ import {
   queryTabs,
   restoreTabs,
 } from '@/platform/tabs';
+
+import { reportBackgroundError } from './report';
 
 /** The alarm that ends a timed pause (PLAN.md §8.1). */
 const RESUME_ALARM = 'guard-resume';
@@ -344,10 +347,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
   }
 
   async function load(): Promise<Loaded> {
-    const [settings, whitelist] = await Promise.all([
-      readSettings(),
-      duplicateWhitelistItem.getValue(),
-    ]);
+    const { settings, whitelist } = await readSettingsAndWhitelist();
     const guard: GuardSettings = {
       ...settings.guard,
       // The "Duplicate tab" heuristic of §8.6 reads an opener and a URL set at creation,
@@ -880,7 +880,7 @@ function noFlash(): Promise<void> {
 }
 
 function failed(error: unknown): void {
-  console.error('TabDeclutter: guard', error);
+  void reportBackgroundError('guard', error);
 }
 
 function ignore(): void {

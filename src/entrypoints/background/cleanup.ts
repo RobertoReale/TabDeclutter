@@ -25,6 +25,8 @@
 import { pruneActivity, pruneArchive, pruneKeeps, readSettings } from '@/platform/storage';
 import { queryTabs } from '@/platform/tabs';
 
+import { reportBackgroundError } from './report';
+
 /** PLAN.md §10: "cleanup through `chrome.alarms` every 6 h". */
 const CLEANUP_PERIOD_MINUTES = 6 * 60;
 
@@ -126,7 +128,7 @@ function api(): CleanupApi {
 }
 
 function failed(error: unknown): void {
-  console.error('TabDeclutter: cleanup', error);
+  void reportBackgroundError('cleanup', error);
 }
 
 function ignore(): void {

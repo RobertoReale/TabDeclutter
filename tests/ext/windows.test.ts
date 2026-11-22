@@ -16,11 +16,15 @@ function fakeApi(initialTabs: BrowserTab[]) {
   const tabs = initialTabs.map((t) => ({ ...t }));
   const moves: { tabId: number; windowId?: number; index: number }[] = [];
   const ungrouped: number[] = [];
+  let queryCalls = 0;
   let nextWindowId = 10;
 
   const api: WindowsOrganizeApi = {
     tabs: {
-      query: async () => tabs.map((t) => ({ ...t })),
+      query: async () => {
+        queryCalls += 1;
+        return tabs.map((t) => ({ ...t }));
+      },
       move: async (tabId, props) => {
         moves.push({ tabId, ...props });
         const found = tabs.find((t) => t.id === tabId);
@@ -52,7 +56,7 @@ function fakeApi(initialTabs: BrowserTab[]) {
     },
   };
 
-  return { api, tabs, moves, ungrouped };
+  return { api, tabs, moves, ungrouped, getQueryCalls: () => queryCalls };
 }
 
 describe('platform/windows', () => {
@@ -779,6 +783,49 @@ describe('platform/windows', () => {
     expect(tabs.find((t) => t.id === 8)?.windowId).toBe(youtubeMiscWin);
     // Gemini and GitHub must never be mixed into the miscellaneous YouTube window.
     expect(new Set([augiasWin, geminiWin, githubWin, youtubeMiscWin]).size).toBe(4);
+  });
+
+  it('queries browser tabs only once when no tabs are grouped and skips already-positioned leading tabs', async () => {
+    const { api, moves, getQueryCalls } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://github.com/org/repo1',
+        title: 'Repo 1',
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 2,
+        windowId: 1,
+        index: 1,
+        url: 'https://github.com/org/repo2',
+        title: 'Repo 2',
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 3,
+        windowId: 2,
+        index: 0,
+        url: 'https://github.com/org/repo3',
+        title: 'Repo 3',
+        groupId: NO_GROUP_ID,
+      },
+    ]);
+
+    const result = await organizeWindows({
+      windowMode: 'merge-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    // No tabs had a groupId, so organizeWindows must not re-query after skipping ungroup.
+    expect(getQueryCalls()).toBe(1);
+    // Tabs 1 and 2 are already at indices 0 and 1 in window 1, so only tab 3 needs to move.
+    expect(moves).toEqual([{ tabId: 3, windowId: 1, index: 2 }]);
+    expect(result.movedTabs).toBe(1);
   });
 });
 

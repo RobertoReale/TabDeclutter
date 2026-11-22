@@ -28,11 +28,13 @@ import {
   duplicateWhitelistItem,
   keepsItem,
   protectedDomainsItem,
-  readKeeps,
+  readScoringInputs,
   readSettings,
   settingsItem,
 } from '@/platform/storage';
 import { queryTabs } from '@/platform/tabs';
+
+import { reportBackgroundError } from './report';
 
 /** PLAN.md §11 asks for a 2 s debounce on the tab events. */
 const RECOMPUTE_DEBOUNCE_MS = 2_000;
@@ -130,20 +132,17 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
     }
 
     const at = now();
-    const [tabs, activity, keeps, protectedSites, whitelist, focusedWindowId] = await Promise.all([
+    const [tabs, inputs, focusedWindowId] = await Promise.all([
       queryTabs(),
-      activityItem.getValue(),
-      readKeeps(at),
-      protectedDomainsItem.getValue(),
-      duplicateWhitelistItem.getValue(),
+      readScoringInputs(at),
       focusedWindow(),
     ]);
 
-    const scoring = scoreTabs(tabs, activity, settings, at, {
+    const scoring = scoreTabs(tabs, inputs.activity, settings, at, {
       // Compiled once per score, never once per tab (PLAN.md §8.3).
-      isWhitelisted: compile(whitelist).match,
-      protectedSites,
-      keeps,
+      isWhitelisted: compile(inputs.whitelist).match,
+      protectedSites: inputs.protectedSites,
+      keeps: inputs.keeps,
       ownOrigin: browser.runtime.getURL(''),
       focusedWindowId,
     });
@@ -180,7 +179,9 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
   browser.tabs.onCreated.addListener(schedule);
   browser.tabs.onRemoved.addListener(schedule);
   browser.tabs.onMoved.addListener(schedule);
-  browser.tabs.onUpdated.addListener(schedule);
+  browser.tabs.onUpdated.addListener((_tabId: number, change?: object) => {
+    if (isScoringTabUpdate(change as Record<string, unknown> | undefined)) schedule();
+  });
   browser.tabs.onActivated.addListener(schedule);
   browser.tabs.onAttached.addListener(schedule);
   browser.tabs.onDetached.addListener(schedule);
@@ -284,8 +285,20 @@ function api(): BadgeApi {
   return browser as unknown as BadgeApi;
 }
 
+const IGNORED_TAB_UPDATE_KEYS: ReadonlySet<string> = new Set([
+  'favIconUrl',
+  'mutedInfo',
+  'autoDiscardable',
+]);
+
+function isScoringTabUpdate(change: Record<string, unknown> | undefined): boolean {
+  if (change === undefined) return true;
+  const keys = Object.keys(change);
+  return keys.length === 0 || keys.some((key) => !IGNORED_TAB_UPDATE_KEYS.has(key));
+}
+
 function failed(error: unknown): void {
-  console.error('TabDeclutter: badge', error);
+  void reportBackgroundError('badge', error);
 }
 
 function ignore(): void {
