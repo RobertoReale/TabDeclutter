@@ -53,6 +53,7 @@ import {
   availability,
   checkAi,
   PANEL_AI_TIMEOUT_MS,
+  PANEL_AI_WARMUP_TIMEOUT_MS,
   useAi,
   type AiAvailability,
 } from './ai';
@@ -137,10 +138,37 @@ export const aiFallbackNotice = signal(false);
 /** Short diagnostic reason for the last AI fallback (e.g. `timeout`, `error (NotSupportedError)`). */
 export const aiFallbackDetail = signal<string | null>(null);
 
+/** Live diagnostic stage and elapsed timer shown while `aiWorking` is true. */
+export const aiStageDetail = signal<string | null>(null);
+
 /** Clears the AI fallback warning (e.g. when the user disables AI or switches away from topic). */
 export function clearAiFallbackNotice(): void {
   aiFallbackNotice.value = false;
   aiFallbackDetail.value = null;
+}
+
+function formatSeconds(ms: number): string {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+}
+
+function startStageTicker(label: string, budgetMs: number, signal?: AbortSignal): () => void {
+  const startedAt = Date.now();
+  const budgetSec = Math.round(budgetMs / 1000);
+  const update = (): void => {
+    const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+    aiStageDetail.value = `${label} · ${elapsedSec}s / ${budgetSec}s`;
+  };
+  update();
+  const interval = setInterval(update, 1_000);
+  (interval as unknown as { unref?: () => void }).unref?.();
+  const stop = (): void => {
+    clearInterval(interval);
+  };
+  signal?.addEventListener('abort', stop, { once: true });
+  return () => {
+    signal?.removeEventListener('abort', stop);
+    stop();
+  };
 }
 
 function recordAiFallback(reason: AiFallbackReason | undefined, detail?: string): void {
@@ -152,7 +180,54 @@ function recordAiFallback(reason: AiFallbackReason | undefined, detail?: string)
         : detail
       : (reason ?? null);
   aiFallbackDetail.value = summary;
-  console.warn('TabDeclutter: on-device AI fallback:', summary ?? 'unknown');
+  // Use console.info rather than console.warn so expected graceful fallbacks (already shown in
+  // the side panel UI) do not populate Chrome's chrome://extensions "Errors" dashboard.
+  console.info('TabDeclutter: on-device AI fallback:', summary ?? 'unknown');
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === 'object' &&
+    'name' in error &&
+    String((error as { name: unknown }).name) === 'TimeoutError'
+  );
+}
+
+/**
+ * Loads/warms the on-device model session under its own bounded deadline before `groupByAi`
+ * starts its prompt clock, so cold-loading weights into VRAM never steals inference time.
+ */
+async function warmModel(model: Llm, outer: AbortSignal): Promise<void> {
+  if (typeof model.open !== 'function') return;
+  const controller = new AbortController();
+  const onAbort = (): void => {
+    controller.abort(outer.reason);
+  };
+  outer.addEventListener('abort', onAbort, { once: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await new Promise<void>((keep, reject) => {
+      const give = (): void => {
+        reject(controller.signal.reason as Error);
+      };
+      if (outer.aborted) controller.abort(outer.reason);
+      if (controller.signal.aborted) {
+        give();
+        return;
+      }
+      controller.signal.addEventListener('abort', give, { once: true });
+      timer = setTimeout(() => {
+        controller.abort(
+          new DOMException('the on-device model took too long to load', 'TimeoutError'),
+        );
+      }, PANEL_AI_WARMUP_TIMEOUT_MS);
+      model.open!({ signal: controller.signal }).then(keep, reject);
+    });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    outer.removeEventListener('abort', onAbort);
+  }
 }
 
 /**
@@ -221,36 +296,77 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
   aiWorking.value = true;
   clearAiFallbackNotice();
   let drafted: Draft | null = null;
+  let usedModel: Llm | undefined;
+  let stopTicker: (() => void) | undefined;
+  const runStartedAt = Date.now();
+  let wasWarm = false;
   try {
     const groupBy = deps.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
     const model = deps.model ?? (await aiModel());
+    usedModel = model;
+    wasWarm = (model as { isOpen?: boolean }).isOpen === true;
+    stopTicker = startStageTicker(
+      `warmup (LanguageModel.create, ${wasWarm ? 'warm' : 'cold'})`,
+      PANEL_AI_WARMUP_TIMEOUT_MS,
+    );
+    await warmModel(model, controller.signal);
+    stopTicker();
+    stopTicker = undefined;
+    if (running !== controller || controller.signal.aborted) return;
+    const warmupMs = Date.now() - runStartedAt;
     const mapped = withCompactTabIds(tabs);
+    const promptStartedAt = Date.now();
+    stopTicker = startStageTicker(
+      `prompt (${mapped.compact.length} tabs, warm=${formatSeconds(warmupMs)})`,
+      PANEL_AI_TIMEOUT_MS,
+    );
     const result = await groupBy(mapped.compact, model, {
       ...chosen,
       timeoutMs: PANEL_AI_TIMEOUT_MS,
       signal: controller.signal,
     });
+    stopTicker();
+    stopTicker = undefined;
+    const promptMs = Date.now() - promptStartedAt;
     // A newer run, or a changed question, owns the answer now: this one is stale.
     if (running !== controller) return;
     if (result.source === 'ai') {
       drafted = draftOf(mapped.restore(result.proposal));
       clearAiFallbackNotice();
     } else if (result.fallbackReason !== 'empty' && result.fallbackReason !== 'aborted') {
-      recordAiFallback(result.fallbackReason, result.fallbackDetail);
+      const timing = `warmup=${formatSeconds(warmupMs)} · prompt=${formatSeconds(promptMs)}/${Math.round(PANEL_AI_TIMEOUT_MS / 1000)}s · tabs=${mapped.compact.length}`;
+      recordAiFallback(
+        result.fallbackReason,
+        result.fallbackDetail !== undefined ? `${result.fallbackDetail} (${timing})` : timing,
+      );
     }
   } catch (error: unknown) {
     // A model that cannot even be reached is not fatal: §7.2 has already answered,
     // and we surface a warning without changing the user's AI setting.
     if (running === controller && !controller.signal.aborted) {
-      recordAiFallback(
-        'error',
-        error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-      );
+      const elapsed = formatSeconds(Date.now() - runStartedAt);
+      const budget = `${Math.round(PANEL_AI_WARMUP_TIMEOUT_MS / 1000)}s`;
+      const meta = `LanguageModel.create · ${elapsed}/${budget} · session=${wasWarm ? 'warm' : 'cold'} · tabs=${tabs.length}`;
+      if (isTimeoutError(error)) {
+        recordAiFallback('timeout', `model warmup (${meta})`);
+        // If background warmup finishes after our timer gave up, automatically retry once warm.
+        usedModel?.onWarm?.(() => {
+          if (answer.value?.draft === null && !aiWorking.value) {
+            answer.value = null;
+            void startAiGrouping(deps);
+          }
+        });
+      } else {
+        const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        recordAiFallback('error', `${msg} (${meta})`);
+      }
     }
   } finally {
+    stopTicker?.();
     if (running === controller) {
       running = null;
       aiWorking.value = false;
+      aiStageDetail.value = null;
       // Recorded either way: a question that fell back is answered, and asking the model
       // the same thing again would only take the same twenty seconds.
       answer.value = { question: asked, draft: drafted };
@@ -260,6 +376,21 @@ export async function startAiGrouping(deps: AiRunDeps = {}): Promise<void> {
 
 /** How long background `autoOrganize` snoozes after the user explicitly clicks Undo. */
 const WINDOW_UNDO_SNOOZE_MS = 5 * MINUTE;
+
+/** Cooldown before another automatic on-mount AI retry fires after a failed automatic run. */
+const AI_AUTO_RETRY_COOLDOWN_MS = 2 * MINUTE;
+
+let aiAutoCooldownUntil = 0;
+
+/** Whether automatic on-mount AI window retries are currently cooling down after a failure. */
+export function isAiAutoCoolingDown(now: number = Date.now()): boolean {
+  return now < aiAutoCooldownUntil;
+}
+
+/** Clears any automatic AI retry cooldown (e.g. when the user explicitly clicks Organize or toggles AI). */
+export function clearAiAutoCooldown(): void {
+  aiAutoCooldownUntil = 0;
+}
 
 /** The last window organization that actually moved tabs, for as long as "Undo" can revert it. */
 export const windowOrganized = signal<{
@@ -411,6 +542,8 @@ export interface OrganizeWindowsWithAiOptions {
   readonly clusterMode: ClusterMode;
   readonly useTabGroups: boolean;
   readonly useAi: boolean;
+  /** True when triggered automatically on Organize mount rather than by an explicit click. */
+  readonly automatic?: boolean;
   readonly focusedWindowId?: number;
   readonly deps?: AiRunDeps & {
     readonly check?: () => Promise<AiAvailability>;
@@ -430,6 +563,12 @@ export async function organizeWindowsWithAi(
   request: OrganizeWindowsWithAiOptions,
 ): Promise<OrganizeWindowsResult> {
   const organize = request.deps?.organize ?? organizeWindows;
+  if (request.automatic === true && isAiAutoCoolingDown()) {
+    return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
+  }
+  if (request.automatic !== true) {
+    clearAiAutoCooldown();
+  }
   clearAiFallbackNotice();
   // An explicit user organize clears any prior undo snooze.
   void organizeSnoozeUntilItem.setValue(0).catch(() => undefined);
@@ -494,10 +633,32 @@ export async function organizeWindowsWithAi(
   aiWorking.value = true;
   clearAiFallbackNotice();
   let proposal: GroupProposal | undefined;
+  let usedModel: Llm | undefined;
+  let stopTicker: (() => void) | undefined;
+  const runStartedAt = Date.now();
+  let wasWarm = false;
 
   try {
     const groupBy = request.deps?.groupBy ?? (await import('@/core/ai-grouping')).groupByAi;
     const model = request.deps?.model ?? (await aiModel());
+    usedModel = model;
+    wasWarm = (model as { isOpen?: boolean }).isOpen === true;
+    stopTicker = startStageTicker(
+      `warmup (LanguageModel.create, ${wasWarm ? 'warm' : 'cold'})`,
+      PANEL_AI_WARMUP_TIMEOUT_MS,
+    );
+    await warmModel(model, controller.signal);
+    stopTicker();
+    stopTicker = undefined;
+    if (running !== controller || controller.signal.aborted) {
+      return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
+    }
+    const warmupMs = Date.now() - runStartedAt;
+    const promptStartedAt = Date.now();
+    stopTicker = startStageTicker(
+      `prompt (${mapped.compact.length} tabs, warm=${formatSeconds(warmupMs)})`,
+      PANEL_AI_TIMEOUT_MS,
+    );
     const result = await groupBy(mapped.compact, model, {
       minSiteTabs: 2,
       minClusterTabs: 2,
@@ -506,6 +667,9 @@ export async function organizeWindowsWithAi(
       timeoutMs: PANEL_AI_TIMEOUT_MS,
       signal: controller.signal,
     });
+    stopTicker();
+    stopTicker = undefined;
+    const promptMs = Date.now() - promptStartedAt;
     if (
       running !== controller ||
       controller.signal.aborted ||
@@ -513,38 +677,68 @@ export async function organizeWindowsWithAi(
     ) {
       return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
     }
+    const timing = `warmup=${formatSeconds(warmupMs)} · prompt=${formatSeconds(promptMs)}/${Math.round(PANEL_AI_TIMEOUT_MS / 1000)}s · tabs=${mapped.compact.length}`;
     if (result.source === 'ai') {
       const restored = mapped.restore(result.proposal);
       if (restored.groups.length > 0) {
         proposal = restored;
+        clearAiAutoCooldown();
         clearAiFallbackNotice();
         savedAiProposal.value = restored;
         savedAiProposalLoaded.value = true;
         void aiProposalItem.setValue(restored).catch(() => undefined);
       } else {
+        if (request.automatic === true) {
+          aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
+        }
         savedAiProposal.value = null;
         void aiProposalItem.setValue(null).catch(() => undefined);
-        recordAiFallback('no-groups');
+        recordAiFallback('no-groups', timing);
       }
     } else if (result.fallbackReason !== 'empty') {
+      if (request.automatic === true) {
+        aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
+      }
       savedAiProposal.value = null;
       void aiProposalItem.setValue(null).catch(() => undefined);
-      recordAiFallback(result.fallbackReason, result.fallbackDetail);
+      recordAiFallback(
+        result.fallbackReason,
+        result.fallbackDetail !== undefined ? `${result.fallbackDetail} (${timing})` : timing,
+      );
     }
   } catch (error: unknown) {
     if (running !== controller || controller.signal.aborted) {
       return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
     }
+    if (request.automatic === true) {
+      aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
+    }
     savedAiProposal.value = null;
     void aiProposalItem.setValue(null).catch(() => undefined);
-    recordAiFallback(
-      'error',
-      error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-    );
+    const elapsed = formatSeconds(Date.now() - runStartedAt);
+    const budget = `${Math.round(PANEL_AI_WARMUP_TIMEOUT_MS / 1000)}s`;
+    const meta = `LanguageModel.create · ${elapsed}/${budget} · session=${wasWarm ? 'warm' : 'cold'} · tabs=${mapped.compact.length}`;
+    if (isTimeoutError(error)) {
+      recordAiFallback('timeout', `model warmup (${meta})`);
+      // When the in-flight background `LanguageModel.create()` finishes warming after the
+      // deadline, lift the cooldown and automatically re-run with the warm session.
+      usedModel?.onWarm?.(() => {
+        clearAiAutoCooldown();
+        lastAutoWindowAiSignature.value = null;
+        if (!aiWorking.value && !windowWorking.value && useAi.value) {
+          void organizeWindowsWithAi({ ...request, automatic: false }).catch(() => undefined);
+        }
+      });
+    } else {
+      const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      recordAiFallback('error', `${msg} (${meta})`);
+    }
   } finally {
+    stopTicker?.();
     if (running === controller) {
       running = null;
       aiWorking.value = false;
+      aiStageDetail.value = null;
     }
   }
 
@@ -585,13 +779,16 @@ export function cancelAiGrouping(): void {
 
 /** Drops the model's answer, so the next question is asked again. Used by the tests. */
 export function resetAiGrouping(): void {
+  running?.abort();
   running = null;
   aiWorking.value = false;
+  aiStageDetail.value = null;
   windowWorking.value = false;
   windowOrganized.value = null;
   savedAiProposal.value = null;
   savedAiProposalLoaded.value = false;
   lastAutoWindowAiSignature.value = null;
+  aiAutoCooldownUntil = 0;
   clearAiFallbackNotice();
   answer.value = null;
 }

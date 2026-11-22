@@ -3434,3 +3434,23 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   on-device AI stays current and transparent instead of freezing stale layouts, and Autopilot
   honours the user's configured `staleDays` while keeping all safety guardrails and precision
   targets intact.
+
+## Post-release — Separating Gemini Nano warmup, constrained/unconstrained split budget, and clean fallback logging
+- **Context:** real-browser testing on a medium-performance laptop GPU (3962 MiB VRAM) showed that
+  cold-loading Gemini Nano (`LanguageModel.create()`) consumed a large share of the single 45 s
+  grouping timeout, constrained decoding (`responseConstraint`) duplicated the JSON schema into the
+  prompt context without `omitResponseConstraintInput: true`, a stalled constrained pass never fell
+  back to fast unconstrained JSON, retries tore down and reloaded the base session even when
+  `clone()` had kept it untouched, and `console.warn` on expected fallback notices populated Chrome's
+  `chrome://extensions` Errors page.
+- **Decision:** added optional `open()` warmup on `Llm` so `startAiGrouping` and
+  `organizeWindowsWithAi` warm `AiSession` under its own bounded deadline (`PANEL_AI_WARMUP_TIMEOUT_MS`
+  = 45 s) before `groupByAi` starts its inference clock (`PANEL_AI_TIMEOUT_MS` = 60 s); passed
+  `omitResponseConstraintInput: true` alongside `responseConstraint`; capped constrained passes to
+  half of large timeouts (`>= 30 s`) so a slow/stalled grammar aborts its clone immediately and
+  retries unconstrained on the already-warm base session without reloading; added a 2-minute
+  cooldown on automatic on-mount retries after failure (always bypassed by explicit manual clicks);
+  and switched expected fallback/retry logs from `console.warn` to `console.info`.
+- **Why:** Gemini Nano cold starts no longer starve inference, slow constrained decoding gracefully
+  hands off to validated unconstrained JSON on medium-class GPUs, Cancel remains immediate during
+  both warmup and inference, and `chrome://extensions` stays free of false error entries.

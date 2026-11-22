@@ -45,6 +45,10 @@ export interface Llm {
   readonly contextWindow?: number;
   /** Tokens the session has already spent, when the model reports it. */
   readonly contextUsage?: number;
+  /** Warms/initialises the underlying session ahead of prompting, when supported. */
+  open?(options?: { readonly signal?: AbortSignal }): Promise<void>;
+  /** Registers a one-shot callback invoked when an in-flight background warmup completes. */
+  onWarm?(listener: () => void): () => void;
   prompt(input: string, options?: LlmPromptOptions): Promise<string>;
   /** Tokens `input` would cost, when the model can measure it. */
   measureInputUsage?(input: string, options?: { signal?: AbortSignal }): Promise<number>;
@@ -363,12 +367,54 @@ type Validation =
 const UNPARSABLE: Validation = { ok: false, reason: 'unparsable' };
 
 /**
- * Parses JSON from the model's answer, tolerating markdown code fences (` ```json ... ``` `)
- * or short surrounding prose when the model answers without a hard decoding constraint.
+ * Extracts `{ name, tabIds }` group pairs directly from raw model text whenever Gemini Nano
+ * omits `},{` between groups inside `"groups":[{...}]` (which causes `JSON.parse` to silently
+ * overwrite earlier duplicate `"name"`/`"tabIds"` keys with the final `"Other"` group) or
+ * truncates the final `"tabIds":[1,2,3` array before closing `]}`.
+ */
+function extractRegexGroups(raw: string): { name: string; tabIds: number[] }[] {
+  if (!/"groups"\s*:/u.test(raw)) return [];
+  const normalized = raw.replace(/\\"/gu, '"');
+  const groups: { name: string; tabIds: number[] }[] = [];
+  const pattern =
+    /"name"\s*:\s*"([^"]+)"[^{}[\]]*?"tabIds"\s*:\s*\[([^\]{}]*)(?:\]|(?=\s*[,}])|$)/gu;
+  for (const match of normalized.matchAll(pattern)) {
+    const name = match[1] ?? '';
+    const rawIds = match[2] ?? '';
+    const tabIds = rawIds
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '' && /^-?\d+$/u.test(part))
+      .map((part) => Number(part))
+      .filter((id) => Number.isInteger(id));
+    groups.push({ name, tabIds });
+  }
+  return groups;
+}
+
+/**
+ * Checks whether a `JSON.parse` result lost groups due to duplicate `"name"` keys inside one
+ * `{...}` object (missing `},{` separator) and, if so, upgrades it with `extractRegexGroups`.
+ */
+function recoverCollapsedGroups(raw: string, parsed: unknown): unknown {
+  if (parsed === null || typeof parsed !== 'object') return parsed;
+  const groups = (parsed as { groups?: unknown }).groups;
+  if (!Array.isArray(groups)) return parsed;
+  const extracted = extractRegexGroups(raw);
+  if (extracted.length > groups.length) {
+    return { ...parsed, groups: extracted };
+  }
+  return parsed;
+}
+
+/**
+ * Parses JSON from the model's answer, tolerating markdown code fences (` ```json ... ``` `),
+ * short surrounding prose, Gemini Nano wrapping group objects in stray quotes inside
+ * `"groups": ["{"name":...}"]`, missing `},{` separators between groups, or truncated output.
  */
 function parseModelJson(answer: string): { ok: true; value: unknown } | { ok: false } {
   try {
-    return { ok: true, value: JSON.parse(answer) };
+    return { ok: true, value: recoverCollapsedGroups(answer, JSON.parse(answer)) };
   } catch {
     const stripped = answer
       .trim()
@@ -376,15 +422,26 @@ function parseModelJson(answer: string): { ok: true; value: unknown } | { ok: fa
       .replace(/\s*```$/u, '')
       .trim();
     try {
-      return { ok: true, value: JSON.parse(stripped) };
+      return { ok: true, value: recoverCollapsedGroups(stripped, JSON.parse(stripped)) };
     } catch {
       const start = stripped.indexOf('{');
       const end = stripped.lastIndexOf('}');
-      if (start === -1 || end <= start) return { ok: false };
+      const candidate = start !== -1 && end > start ? stripped.slice(start, end + 1) : stripped;
       try {
-        return { ok: true, value: JSON.parse(stripped.slice(start, end + 1)) };
+        return { ok: true, value: recoverCollapsedGroups(stripped, JSON.parse(candidate)) };
       } catch {
-        return { ok: false };
+        // Gemini Nano occasionally wraps each `{...}` item in `"groups":[...]` in stray quotes
+        // (`"{"name":"Topic","tabIds":[1,2]}"`) or leaves trailing commas before `]` / `}`.
+        const repaired = candidate
+          .replace(/"\s*(\{\s*"[^{}]*\})\s*"/gu, '$1')
+          .replace(/,\s*([\]}])/gu, '$1');
+        try {
+          return { ok: true, value: recoverCollapsedGroups(stripped, JSON.parse(repaired)) };
+        } catch {
+          const groups = extractRegexGroups(stripped);
+          if (groups.length > 0) return { ok: true, value: { groups } };
+          return { ok: false };
+        }
       }
     }
   }
@@ -403,7 +460,13 @@ function validate(answer: string, batch: readonly TabInfo[], settings: Settings)
   const taken = new Set<number>();
   const drafts: Draft[] = [];
 
-  for (const group of groups) {
+  for (const rawGroup of groups) {
+    let group: unknown = rawGroup;
+    if (typeof rawGroup === 'string') {
+      const inner = parseModelJson(rawGroup);
+      if (!inner.ok) continue;
+      group = inner.value;
+    }
     if (group === null || typeof group !== 'object') continue;
     const { name, tabIds } = group as { name?: unknown; tabIds?: unknown };
     if (typeof name !== 'string' || !Array.isArray(tabIds)) continue;
@@ -443,7 +506,9 @@ function validate(answer: string, batch: readonly TabInfo[], settings: Settings)
  */
 async function askBatch(llm: Llm, batch: readonly TabInfo[], settings: Settings): Promise<Outcome> {
   if (settings.signal?.aborted === true) return failed(batch, 'aborted', 0);
-  if (settings.now() >= settings.deadline) return failed(batch, 'timeout', 0);
+  if (settings.now() >= settings.deadline) {
+    return failed(batch, 'timeout', 0, `deadline reached before batch (${batch.length} tabs)`);
+  }
 
   const input = buildPrompt(batch);
   if (!(await fitsContext(llm, input))) return split(llm, batch, settings, 'quota', 0);
@@ -454,7 +519,7 @@ async function askBatch(llm: Llm, batch: readonly TabInfo[], settings: Settings)
   } catch (error) {
     const name = errorName(error);
     if (error instanceof PromptTimeout || name === 'TimeoutError') {
-      return failed(batch, 'timeout', 1);
+      return failed(batch, 'timeout', 1, `prompt (${batch.length} tabs, ${input.length} chars)`);
     }
     if (name === QUOTA_ERROR) return split(llm, batch, settings, 'quota', 1);
     if (name === 'AbortError') return failed(batch, 'aborted', 1);
@@ -462,7 +527,17 @@ async function askBatch(llm: Llm, batch: readonly TabInfo[], settings: Settings)
   }
 
   const checked = validate(answer, batch, settings);
-  if (!checked.ok) return failed(batch, checked.reason, 1);
+  if (!checked.ok) {
+    const compact = answer.replace(/\s+/gu, ' ').trim();
+    const preview =
+      compact.length <= 140 ? compact : `${compact.slice(0, 80)} … ${compact.slice(-55)}`;
+    return failed(
+      batch,
+      checked.reason,
+      1,
+      `batch (${batch.length} tabs) raw=${JSON.stringify(preview)}`,
+    );
+  }
   return {
     drafts: checked.drafts,
     ungrouped: checked.ungrouped,

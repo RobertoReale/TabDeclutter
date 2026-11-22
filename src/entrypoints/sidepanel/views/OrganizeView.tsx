@@ -46,16 +46,19 @@ import {
   aiFallbackNotice,
   aiProposalCoversMovable,
   aiQuestion,
+  aiStageDetail,
   aiWorking,
   appliedMessage,
   applyDraft,
   brought,
   cancelAiGrouping,
+  clearAiAutoCooldown,
   clearAiFallbackNotice,
   clearSavedAiProposal,
   dismissApplied,
   dismissWindowOrganized,
   draft,
+  isAiAutoCoolingDown,
   lastAutoWindowAiSignature,
   loadSavedAiProposal,
   mode,
@@ -146,12 +149,14 @@ export function OrganizeView({ language }: { language: string }) {
     nextClusterMode: ClusterMode = mode.value,
     nextUseTabGroups: boolean = currentSettings.useTabGroups,
     nextUseAi: boolean = useAi.value,
+    automatic = false,
   ): void {
     void organizeWindowsWithAi({
       windowMode: nextWindowMode,
       clusterMode: nextClusterMode,
       useTabGroups: nextUseTabGroups,
       useAi: nextUseAi,
+      automatic,
       focusedWindowId: panelData.value?.focusedWindowId,
     }).catch(report);
   }
@@ -162,6 +167,7 @@ export function OrganizeView({ language }: { language: string }) {
       clearAiFallbackNotice();
       clearSavedAiProposal();
     } else {
+      clearAiAutoCooldown();
       lastAutoWindowAiSignature.value = null;
     }
     void setUseAi(checked)
@@ -353,7 +359,7 @@ export function OrganizeView({ language }: { language: string }) {
           isAuto={isAuto}
           onToggleAi={handleToggleAi}
           onAutoRunAi={() => {
-            runWindowOrganizeNow();
+            runWindowOrganizeNow(undefined, undefined, undefined, undefined, true);
           }}
         />
       )}
@@ -478,14 +484,16 @@ function AiPanel({
   // windows with the on-device model when no cached proposal covers the open tabs yet.
   const hydrated = savedAiProposalLoaded.value;
   const movableSig = movableTabSignature.value;
+  const lastAutoSig = lastAutoWindowAiSignature.value;
   const busy = aiWorking.value || windowWorking.value;
   useEffect(() => {
     if (useTabGroups || !isAuto || !active || !hydrated || busy || movableSig === '') return;
-    if (lastAutoWindowAiSignature.value === movableSig) return;
+    if (isAiAutoCoolingDown()) return;
+    if (lastAutoSig === movableSig) return;
     if (aiProposalCoversMovable(savedAiProposal.value, movableTabs.value)) return;
     lastAutoWindowAiSignature.value = movableSig;
     onAutoRunAi();
-  }, [useTabGroups, isAuto, active, hydrated, busy, movableSig]);
+  }, [useTabGroups, isAuto, active, hydrated, busy, movableSig, lastAutoSig]);
 
   const state = availability.value;
   // Never hide or discard the AI panel once the user has turned on-device AI on: if the model
@@ -554,13 +562,16 @@ function AiPanel({
       )}
 
       {aiWorking.value && (
-        <p class="td-ai-working" role="status" aria-live="polite">
-          <span>{t('organizeAiWorking')}</span>
-          {/* §7.3: the wait is always interruptible, and §7.2's groups are already there. */}
-          <button type="button" class="td-action" onClick={cancelAiGrouping}>
-            {t('organizeAiCancel')}
-          </button>
-        </p>
+        <>
+          <p class="td-ai-working" role="status" aria-live="polite">
+            <span>{t('organizeAiWorking')}</span>
+            {/* §7.3: the wait is always interruptible, and §7.2's groups are already there. */}
+            <button type="button" class="td-action" onClick={cancelAiGrouping}>
+              {t('organizeAiCancel')}
+            </button>
+          </p>
+          {aiStageDetail.value !== null && <p class="td-field-hint">{aiStageDetail.value}</p>}
+        </>
       )}
     </div>
   );

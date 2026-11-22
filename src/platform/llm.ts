@@ -42,8 +42,21 @@ export type AiAvailability =
 /** What `availability()` answers. Anything else is read as `'unavailable'`. */
 const REPORTED: readonly string[] = ['unavailable', 'downloadable', 'downloading', 'available'];
 
-/** PLAN.md §7.3: 20 s, then the run falls back to §7.2. */
+/** PLAN.md §7.3: 20 s default per-call deadline, then the run falls back to §7.2. */
 export const DEFAULT_TIMEOUT_MS = 20_000;
+
+/**
+ * Minimum per-call timeout at which constrained decoding is capped to half the budget so a
+ * slow JSON-Schema grammar on local hardware still leaves time for an unconstrained retry.
+ */
+const CONSTRAINED_SPLIT_MIN_MS = 30_000;
+
+/**
+ * Interval at which an open production session pings the backend so Chromium's 60 s
+ * `OnDeviceModelIdleTimeout` (`kDefaultModelIdleTimeout`) never unloads the 4 GiB weights
+ * and compiled D3D12 compute shaders while the side panel remains open.
+ */
+const SESSION_KEEPALIVE_MS = 40_000;
 
 /** `monitor`'s argument: an `EventTarget` that reports the download's progress. */
 export interface LanguageModelMonitor {
@@ -75,7 +88,11 @@ export interface LanguageModelSession {
   readonly contextUsage?: number;
   prompt(
     input: string,
-    options?: { readonly responseConstraint?: unknown; readonly signal?: AbortSignal },
+    options?: {
+      readonly responseConstraint?: unknown;
+      readonly omitResponseConstraintInput?: boolean;
+      readonly signal?: AbortSignal;
+    },
   ): Promise<string>;
   measureInputUsage?(input: string, options?: { readonly signal?: AbortSignal }): Promise<number>;
   clone?(options?: { readonly signal?: AbortSignal }): Promise<LanguageModelSession>;
@@ -107,6 +124,53 @@ const EXPECTED: Pick<LanguageModelCreateOptions, 'expectedInputs' | 'expectedOut
 };
 
 /**
+ * Prepends `SYSTEM_PROMPT` to `input` when the session is created without `initialPrompts`
+ * so `LanguageModel.create()` takes Chromium's 0-token initialization barrier fast-path
+ * (`AILanguageModel::Initialize` with empty `initial_prompts`) instead of blocking session
+ * creation on a GPU prefill pass.
+ */
+function withSystemPrompt(input: string): string {
+  return input.startsWith(SYSTEM_PROMPT) ? input : `${SYSTEM_PROMPT}\n\n${input}`;
+}
+
+/**
+ * Races an in-flight shared promise against a caller's `AbortSignal` without aborting the
+ * underlying shared promise when the caller gives up first.
+ */
+function raceSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const onAbort = (): void => {
+      queueMicrotask(() => {
+        if (!settled) {
+          settled = true;
+          reject(signal.reason as Error);
+        }
+      });
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        reject(error as Error);
+      },
+    );
+  });
+}
+
+/**
  * What the browser has (PLAN.md §7.3, "Detection and state"). It never throws: a browser
  * that has the global but cannot answer about it has no model to offer either.
  */
@@ -127,6 +191,14 @@ export interface AiSessionOptions {
   readonly api?: LanguageModelApi | undefined;
   /** How long one call has before it is aborted (PLAN.md §7.3). */
   readonly timeoutMs?: number;
+  /**
+   * Whether to pass `responseConstraint` to `session.prompt()`. Disabled by default on real
+   * browser sessions because Chromium's `llguidance` (`ConstraintFactory::InitializeTokenizer`)
+   * copies the 256k-token vocabulary and computes 256k-bit masks per token on CPU, while
+   * Gemini Nano already runs greedy decoding (`top_k=1, temperature=0`) and `core/ai-grouping.ts`
+   * parses and validates the JSON shape directly.
+   */
+  readonly useResponseConstraint?: boolean;
 }
 
 /** What `open()` is told: whose signal to obey, and where the download's progress goes. */
@@ -147,14 +219,26 @@ export interface OpenOptions {
 export class AiSession implements Llm {
   readonly #api: LanguageModelApi | undefined;
   readonly #timeoutMs: number;
+  readonly #useResponseConstraint: boolean;
+  readonly #manageKeepAlive: boolean;
   /** The session once it exists; what `contextWindow` and `contextUsage` read. */
   #open: LanguageModelSession | null = null;
   /** The creation while it is in flight, so two calls at once share one session. */
   #opening: Promise<LanguageModelSession> | null = null;
+  /** Aborted only when `close()` is called, so a caller timeout never kills background warmup. */
+  #lifetimeController = new AbortController();
+  /** Periodic ping that prevents Chrome's 60 s idle timer from unloading compiled D3D12 shaders. */
+  #keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  /** Number of active prompt executions, so keep-alive pings only fire when idle. */
+  #activePrompts = 0;
+  /** Listeners notified when a background session creation finishes warming. */
+  readonly #warmListeners = new Set<() => void>();
 
   constructor(options: AiSessionOptions = {}) {
     this.#api = options.api ?? languageModel();
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.#useResponseConstraint = options.useResponseConstraint ?? false;
+    this.#manageKeepAlive = options.api === undefined;
   }
 
   /** Tokens the live session can hold, and `undefined` while there is none. */
@@ -172,39 +256,127 @@ export class AiSession implements Llm {
   }
 
   /**
+   * Registers a callback invoked the next time an in-flight background `LanguageModel.create()`
+   * finishes warming (or immediately if the session is already open).
+   */
+  onWarm(listener: () => void): () => void {
+    if (this.#open !== null) {
+      listener();
+      return () => undefined;
+    }
+    this.#warmListeners.add(listener);
+    return () => {
+      this.#warmListeners.delete(listener);
+    };
+  }
+
+  /**
    * Creates the session now. This is the step that downloads the model when it is
-   * `downloadable`, which is why it is only ever reached from the click of §4.4.2.
+   * `downloadable`, which is why it is only ever reached from the click of §4.4.2
+   * (or to warm an already-`available` model before prompting).
    *
    * The 20 s of §7.3 is a prompt's deadline and not this one: a first download is
-   * gigabytes and takes as long as it takes. Only the caller's signal stops it.
+   * gigabytes and takes as long as it takes. Only the caller's signal stops waiting.
    */
   async open(options: OpenOptions = {}): Promise<void> {
-    await this.#session(options.signal ?? new AbortController().signal, options.onProgress);
+    const signal = options.signal ?? new AbortController().signal;
+    await raceSignal(this.#session(signal, options.onProgress), signal);
   }
 
   async prompt(input: string, options: LlmPromptOptions = {}): Promise<string> {
     return this.#within(options.signal, async (signal) => {
       const base = await this.#session(signal);
-      const constraint = sanitizeConstraint(options.responseConstraint);
+      const fullInput = withSystemPrompt(input);
+      const constraint = this.#useResponseConstraint
+        ? sanitizeConstraint(options.responseConstraint)
+        : undefined;
+      const hasClone = typeof base.clone === 'function';
+      this.#activePrompts += 1;
       try {
-        return await this.#ask(base, input, constraint, signal);
-      } catch (error: unknown) {
-        if (signal.aborted || isTerminalPromptError(error)) throw error;
-        console.warn('TabDeclutter: on-device AI prompt failed, retrying cleanly', error);
-        // Reset the base session in case Chrome left it in an invalid state, then retry once
-        // unconstrained with an explicit English-name reminder (avoids both constrained-decoder
-        // failures and Chrome's "untested output language" filter on Italian tab titles).
-        this.close();
-        const fresh = await this.#session(signal);
-        const retryInput = `${input}\nIMPORTANT: Every group "name" MUST be 1-3 simple English words only (e.g. "Math", "Videos", "Email").`;
-        return this.#ask(fresh, retryInput, undefined, signal);
+        try {
+          if (constraint !== undefined && this.#timeoutMs >= CONSTRAINED_SPLIT_MIN_MS) {
+            const constrainedCap = Math.floor(this.#timeoutMs * 0.5);
+            return await this.#askWithCap(base, fullInput, constraint, signal, constrainedCap);
+          }
+          return await this.#ask(base, fullInput, constraint, signal);
+        } catch (error: unknown) {
+          if (signal.aborted || isTerminalPromptError(error)) throw error;
+          console.info('TabDeclutter: on-device AI prompt failed, retrying cleanly', error);
+          // Keep the warm base session when it was only cloned (never mutated directly);
+          // only destroy and reload when base itself was prompted without clone().
+          let retryBase = base;
+          if (!hasClone) {
+            this.close();
+            retryBase = await this.#session(signal);
+          }
+          const retryInput = `${fullInput}\nIMPORTANT: Every group "name" MUST be 1-3 simple English words only (e.g. "Math", "Videos", "Email").`;
+          try {
+            return await this.#ask(retryBase, retryInput, undefined, signal);
+          } catch (retryError: unknown) {
+            if (!hasClone || signal.aborted || isTerminalPromptError(retryError)) {
+              throw retryError;
+            }
+            // If the base session itself became unhealthy (e.g. idle disconnect), reload it once.
+            this.close();
+            const fresh = await this.#session(signal);
+            return await this.#ask(fresh, retryInput, undefined, signal);
+          }
+        }
+      } finally {
+        this.#activePrompts = Math.max(0, this.#activePrompts - 1);
       }
     });
   }
 
   /**
+   * Runs a constrained pass under a shorter child deadline so a slow JSON-Schema grammar
+   * on local hardware aborts cleanly and hands the remaining budget to an unconstrained retry.
+   */
+  async #askWithCap(
+    base: LanguageModelSession,
+    input: string,
+    responseConstraint: unknown,
+    outer: AbortSignal,
+    capMs: number,
+  ): Promise<string> {
+    const child = new AbortController();
+    const onOuterAbort = (): void => {
+      child.abort(outer.reason);
+    };
+    outer.addEventListener('abort', onOuterAbort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await new Promise<string>((keep, reject) => {
+        const give = (): void => {
+          reject(child.signal.reason as Error);
+        };
+        if (outer.aborted) child.abort(outer.reason);
+        if (child.signal.aborted) {
+          give();
+          return;
+        }
+        child.signal.addEventListener('abort', give, { once: true });
+        timer = setTimeout(() => {
+          child.abort(
+            new DOMException(
+              'constrained decoding exceeded split budget',
+              'ConstrainedTimeoutError',
+            ),
+          );
+        }, capMs);
+        this.#ask(base, input, responseConstraint, child.signal).then(keep, reject);
+      });
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      outer.removeEventListener('abort', onOuterAbort);
+    }
+  }
+
+  /**
    * Prompts an isolated clone of `base` when the browser supports `session.clone()`, so
    * repeated groupings reuse the KV-cached system prompt without accumulating history tokens.
+   * Passing `omitResponseConstraintInput: true` avoids duplicating the JSON Schema text into
+   * the prompt context (our prompt already states the exact JSON shape).
    */
   async #ask(
     base: LanguageModelSession,
@@ -213,13 +385,23 @@ export class AiSession implements Llm {
     signal: AbortSignal,
   ): Promise<string> {
     const promptOpts =
-      responseConstraint === undefined ? { signal } : { responseConstraint, signal };
+      responseConstraint === undefined
+        ? { signal }
+        : { responseConstraint, omitResponseConstraintInput: true, signal };
     if (typeof base.clone === 'function') {
       const isolated = await base.clone({ signal });
+      let destroyed = false;
+      const cleanup = (): void => {
+        if (destroyed) return;
+        destroyed = true;
+        isolated.destroy();
+      };
+      signal.addEventListener('abort', cleanup, { once: true });
       try {
         return await isolated.prompt(input, promptOpts);
       } finally {
-        isolated.destroy();
+        signal.removeEventListener('abort', cleanup);
+        cleanup();
       }
     }
     return base.prompt(input, promptOpts);
@@ -244,18 +426,32 @@ export class AiSession implements Llm {
 
   /** PLAN.md §7.3: the session is destroyed when the panel closes. */
   close(): void {
+    this.#stopKeepAlive();
+    this.#lifetimeController.abort();
+    this.#lifetimeController = new AbortController();
     this.#open?.destroy();
     this.#open = null;
     this.#opening = null;
   }
 
-  /** The session, created once. A creation that fails is not remembered as a failure. */
-  async #session(
+  /**
+   * The session, created once. A creation that fails is not remembered as a failure.
+   *
+   * When a caller's per-call `signal` aborts while `this.#opening` is still loading the
+   * shared model in the background (and no download monitor is attached), only the caller's
+   * wait rejects (`raceSignal`) so Chromium's `OnDeviceModelService` can finish cold-loading
+   * weights and compiling D3D12 shaders instead of tearing down and restarting from zero.
+   */
+  #session(
     signal: AbortSignal,
     onProgress?: (loaded: number) => void,
   ): Promise<LanguageModelSession> {
-    if (this.#open !== null) return this.#open;
-    this.#opening ??= this.#create(signal, onProgress).catch((error: unknown) => {
+    if (signal.aborted) {
+      return Promise.reject(signal.reason as Error);
+    }
+    if (this.#open !== null) return Promise.resolve(this.#open);
+    const createSignal = onProgress === undefined ? this.#lifetimeController.signal : signal;
+    this.#opening ??= this.#create(createSignal, onProgress).catch((error: unknown) => {
       this.#opening = null;
       throw error;
     });
@@ -268,11 +464,13 @@ export class AiSession implements Llm {
   ): Promise<LanguageModelSession> {
     const api = this.#api;
     if (api === undefined) throw new Error('no on-device model on this browser');
+    const lifetime = this.#lifetimeController;
     const session = await api.create({
       ...EXPECTED,
-      // The system prompt belongs to the session, not to every prompt: it is sent once
-      // and the session is reused (PLAN.md §7.3).
-      initialPrompts: [{ role: 'system', content: SYSTEM_PROMPT }],
+      // Omit `initialPrompts` from `create()` so `AILanguageModel::Initialize` takes Chromium's
+      // 0-token initialization barrier fast-path (`Input::New()`), resolving as soon as the
+      // model weights are ready instead of blocking session creation on a GPU prefill pass;
+      // `SYSTEM_PROMPT` is prepended directly to each prompt input.
       signal,
       ...(onProgress === undefined
         ? {}
@@ -284,9 +482,49 @@ export class AiSession implements Llm {
             },
           }),
     });
+    if (lifetime.signal.aborted) {
+      session.destroy();
+      throw new DOMException('the AI session was closed while opening', 'AbortError');
+    }
     this.#open = session;
     this.#opening = null;
+    this.#startKeepAlive();
+    const listeners = [...this.#warmListeners];
+    this.#warmListeners.clear();
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch {
+        // Never let a listener failure poison the resolved session.
+      }
+    }
     return session;
+  }
+
+  #startKeepAlive(): void {
+    this.#stopKeepAlive();
+    if (!this.#manageKeepAlive || this.#open === null) return;
+    this.#keepAliveTimer = setInterval(() => {
+      const live = this.#open;
+      if (live === null || this.#activePrompts > 0) return;
+      if (typeof live.measureInputUsage === 'function') {
+        void live.measureInputUsage('.').catch(() => undefined);
+      } else if (typeof live.clone === 'function') {
+        void live
+          .clone()
+          .then((cloned) => {
+            cloned.destroy();
+          })
+          .catch(() => undefined);
+      }
+    }, SESSION_KEEPALIVE_MS);
+  }
+
+  #stopKeepAlive(): void {
+    if (this.#keepAliveTimer !== null) {
+      clearInterval(this.#keepAliveTimer);
+      this.#keepAliveTimer = null;
+    }
   }
 
   /**

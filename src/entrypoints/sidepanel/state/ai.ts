@@ -69,9 +69,18 @@ export async function checkAi(deps: AiDeps = {}): Promise<AiAvailability> {
     availability.value = 'unsupported';
     return 'unsupported';
   }
-  const state = await (await llmModule(deps)).checkAvailability();
+  const module = await llmModule(deps);
+  const state = await module.checkAvailability();
   availability.value = state;
   if (state !== 'downloading') downloadProgress.value = null;
+  // When the model is already downloaded and the user opted in, begin warming the session
+  // in the background immediately so weights and D3D12 shaders load before Organize is clicked.
+  if (state === 'available' && useAi.value) {
+    void module
+      .panelSession({ timeoutMs: PANEL_AI_TIMEOUT_MS })
+      .open?.()
+      .catch(() => undefined);
+  }
   return state;
 }
 
@@ -109,10 +118,19 @@ export async function setUseAi(next: boolean): Promise<void> {
 }
 
 /**
- * Prompt budget for interactive on-device AI calls in the side panel: generous enough for a
- * cold Gemini Nano model load on a laptop while remaining interruptible at any time via Cancel.
+ * Warmup budget for loading Gemini Nano into memory once per side-panel session, kept separate
+ * from the grouping prompt budget so cold-start latency (including Windows D3D12 background
+ * compute shader compilation at Idle thread priority on 4 GB VRAM GPUs) never eats into
+ * inference time.
  */
-export const PANEL_AI_TIMEOUT_MS = 45_000;
+export const PANEL_AI_WARMUP_TIMEOUT_MS = 600_000;
+
+/**
+ * Prompt budget for interactive on-device AI grouping in the side panel: enough for cold-start
+ * prefill and JSON generation on medium-class GPUs while remaining interruptible at any
+ * millisecond via Cancel.
+ */
+export const PANEL_AI_TIMEOUT_MS = 90_000;
 
 /** The panel's session, created on the first prompt and reused (PLAN.md §7.3). */
 export async function aiModel(deps: AiDeps = {}): Promise<Llm> {

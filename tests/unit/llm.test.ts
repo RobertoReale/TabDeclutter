@@ -29,7 +29,12 @@ class FakeSession implements LanguageModelSession {
   contextWindow?: number;
   contextUsage?: number;
   destroyed = 0;
-  readonly asked: { input: string; responseConstraint?: unknown; signal?: AbortSignal }[] = [];
+  readonly asked: {
+    input: string;
+    responseConstraint?: unknown;
+    omitResponseConstraintInput?: boolean;
+    signal?: AbortSignal;
+  }[] = [];
   readonly measured: string[] = [];
   readonly answer: (input: string) => Promise<string>;
   /** Absent when the model cannot measure, which the real API allows. */
@@ -50,7 +55,11 @@ class FakeSession implements LanguageModelSession {
 
   async prompt(
     input: string,
-    options: { responseConstraint?: unknown; signal?: AbortSignal } = {},
+    options: {
+      responseConstraint?: unknown;
+      omitResponseConstraintInput?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<string> {
     this.asked.push({ input, ...options });
     return this.answer(input);
@@ -177,7 +186,7 @@ describe('AiSession', () => {
     expect(session.isOpen).toBe(true);
   });
 
-  it('creates the session with the system prompt of §7.3, once', async () => {
+  it('creates the session without initialPrompts and prepends the system prompt to each prompt', async () => {
     const api = new FakeApi();
     const session = new AiSession({ api });
 
@@ -185,8 +194,11 @@ describe('AiSession', () => {
     await session.prompt('two');
 
     expect(api.created).toHaveLength(1);
-    expect(api.created[0]?.initialPrompts).toEqual([{ role: 'system', content: SYSTEM_PROMPT }]);
-    expect(api.sessions[0]?.asked.map((ask) => ask.input)).toEqual(['one', 'two']);
+    expect(api.created[0]?.initialPrompts).toBeUndefined();
+    expect(api.sessions[0]?.asked.map((ask) => ask.input)).toEqual([
+      `${SYSTEM_PROMPT}\n\none`,
+      `${SYSTEM_PROMPT}\n\ntwo`,
+    ]);
   });
 
   it('shares one creation between two calls made at once', async () => {
@@ -198,16 +210,30 @@ describe('AiSession', () => {
     expect(api.created).toHaveLength(1);
   });
 
-  it('passes the response constraint and a signal through', async () => {
-    const api = new FakeApi();
-    const session = new AiSession({ api });
+  it('omits responseConstraint by default and passes it with omitResponseConstraintInput when enabled', async () => {
+    const defaultApi = new FakeApi();
+    const defaultSession = new AiSession({ api: defaultApi });
     const constraint = { type: 'object' };
 
-    await session.prompt('one', { responseConstraint: constraint });
+    await defaultSession.prompt('one', { responseConstraint: constraint });
+    expect(defaultApi.sessions[0]?.asked[0]?.responseConstraint).toBeUndefined();
+    expect(defaultApi.sessions[0]?.asked[0]?.omitResponseConstraintInput).toBeUndefined();
+    expect(defaultApi.sessions[0]?.asked[0]?.signal).toBeInstanceOf(AbortSignal);
 
-    const ask = api.sessions[0]?.asked[0];
-    expect(ask?.responseConstraint).toBe(constraint);
-    expect(ask?.signal).toBeInstanceOf(AbortSignal);
+    const api = new FakeApi();
+    const session = new AiSession({ api, useResponseConstraint: true });
+
+    await session.prompt('one', { responseConstraint: constraint });
+    await session.prompt('two');
+
+    const constrainedAsk = api.sessions[0]?.asked[0];
+    expect(constrainedAsk?.responseConstraint).toBe(constraint);
+    expect(constrainedAsk?.omitResponseConstraintInput).toBe(true);
+    expect(constrainedAsk?.signal).toBeInstanceOf(AbortSignal);
+
+    const freeAsk = api.sessions[0]?.asked[1];
+    expect(freeAsk?.responseConstraint).toBeUndefined();
+    expect(freeAsk?.omitResponseConstraintInput).toBeUndefined();
   });
 
   it('reports the context the live session has', async () => {
@@ -331,9 +357,9 @@ describe('AiSession', () => {
     await expect(session.measureInputUsage('one')).rejects.toThrow(/cannot measure/);
   });
 
-  it('strips maxLength and maxItems from responseConstraint and adds additionalProperties: false', async () => {
+  it('strips maxLength and maxItems from responseConstraint and adds additionalProperties: false when useResponseConstraint is enabled', async () => {
     const api = new FakeApi();
-    const session = new AiSession({ api });
+    const session = new AiSession({ api, useResponseConstraint: true });
 
     await session.prompt('one', { responseConstraint: responseConstraintFor(8, 24) });
 
@@ -384,6 +410,7 @@ describe('AiSession', () => {
   });
 
   it('retries cleanly without responseConstraint when Chrome rejects with NotSupportedError', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     let calls = 0;
     const api = new FakeApi({
@@ -398,7 +425,7 @@ describe('AiSession', () => {
         return '{"groups":[{"name":"Math","tabIds":[1,2]}]}';
       },
     });
-    const session = new AiSession({ api });
+    const session = new AiSession({ api, useResponseConstraint: true });
 
     const reply = await session.prompt('1|Basi ortogonali|gemini.google.com', {
       responseConstraint: responseConstraintFor(8, 24),
@@ -406,11 +433,105 @@ describe('AiSession', () => {
 
     expect(reply).toContain('Math');
     expect(calls).toBe(2);
-    // Reset the session after the error and dropped responseConstraint on the retry.
+    // Reset the session after the error when clone() is unavailable and dropped responseConstraint.
     expect(api.created).toHaveLength(2);
     expect(api.sessions[1]?.asked[0]?.responseConstraint).toBeUndefined();
     expect(api.sessions[1]?.asked[0]?.input).toContain('simple English words only');
+    expect(warn).not.toHaveBeenCalled();
+    info.mockRestore();
     warn.mockRestore();
+  });
+
+  it('aborts a stalled constrained pass at half-budget and succeeds via unconstrained retry on the warm base session', async () => {
+    vi.useFakeTimers();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const clones: FakeSession[] = [];
+    let created = 0;
+    const baseSession = new FakeSession(async () => '{"groups":[]}');
+    const cloneable: LanguageModelSession = {
+      prompt: baseSession.prompt.bind(baseSession),
+      destroy: baseSession.destroy.bind(baseSession),
+      clone: async () => {
+        const index = clones.length;
+        const copy = new FakeSession(async () => {
+          if (index === 0) {
+            // Simulate Chrome's constrained decoder hanging indefinitely.
+            return new Promise<string>(() => undefined);
+          }
+          return '{"groups":[{"name":"Math","tabIds":[1,2]}]}';
+        });
+        clones.push(copy);
+        return copy;
+      },
+    };
+    const api = {
+      availability: async () => 'available',
+      create: async () => {
+        created += 1;
+        return cloneable;
+      },
+    };
+    const session = new AiSession({ api, timeoutMs: 60_000, useResponseConstraint: true });
+
+    const pending = session.prompt(
+      '1|Esercitazione_8_Sacco.pdf|\n2|calcolo integrali|youtube.com',
+      {
+        responseConstraint: responseConstraintFor(8, 24),
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    const reply = await pending;
+
+    expect(reply).toContain('Math');
+    // Warm base session was created once and reused across both clones.
+    expect(created).toBe(1);
+    expect(baseSession.destroyed).toBe(0);
+    expect(clones).toHaveLength(2);
+    // First stalled clone was aborted and destroyed immediately; second ran unconstrained.
+    expect(clones[0]?.asked[0]?.omitResponseConstraintInput).toBe(true);
+    expect(clones[0]?.asked[0]?.signal?.aborted).toBe(true);
+    expect(clones[0]?.destroyed).toBe(1);
+    expect(clones[1]?.asked[0]?.responseConstraint).toBeUndefined();
+    expect(clones[1]?.destroyed).toBe(1);
+    info.mockRestore();
+  });
+
+  it('keeps background create() alive when a caller warmup signal aborts and fires onWarm once ready', async () => {
+    let finishCreate: () => void = () => undefined;
+    const api = new FakeApi({
+      hold: () =>
+        new Promise<void>((resolve) => {
+          finishCreate = resolve;
+        }),
+      answer: async () => '{"groups":[{"name":"Math","tabIds":[1,2]}]}',
+    });
+    const session = new AiSession({ api });
+    let warmed = 0;
+    session.onWarm(() => {
+      warmed += 1;
+    });
+
+    const caller = new AbortController();
+    const openPending = session.open({ signal: caller.signal });
+    caller.abort(new DOMException('warmup deadline', 'TimeoutError'));
+
+    await expect(openPending).rejects.toMatchObject({ name: 'TimeoutError' });
+    // The underlying Chrome create() call is NOT aborted when a caller times out.
+    expect(api.created).toHaveLength(1);
+    expect(api.created[0]?.signal?.aborted).toBe(false);
+    expect(session.isOpen).toBe(false);
+    expect(warmed).toBe(0);
+
+    // Once background loading completes, the session becomes warm and ready without a 2nd create().
+    finishCreate();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(session.isOpen).toBe(true);
+    expect(warmed).toBe(1);
+    await expect(session.prompt('tabs')).resolves.toContain('Math');
+    expect(api.created).toHaveLength(1);
   });
 });
 

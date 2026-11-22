@@ -13,8 +13,8 @@
   "scripts": {
     "dev": "wxt",
     "dev:firefox": "wxt -b firefox",
-    "build": "wxt build",
-    "build:firefox": "wxt build -b firefox",
+    "build": "wxt build && node tools/sync-prova.mjs",
+    "build:firefox": "wxt build -b firefox && node tools/sync-prova.mjs",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "reproducible": "node tools/verify-reproducible.mjs",

@@ -12,7 +12,7 @@
  */
 
 import { effect } from '@preact/signals';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 
 import type { AiGroupingResult, Llm } from '../../src/core/ai-grouping';
@@ -39,6 +39,7 @@ import {
   cancelAiGrouping,
   clearSavedAiProposal,
   draft,
+  isAiAutoCoolingDown,
   loadSavedAiProposal,
   organizeWindowsWithAi,
   resetAiGrouping,
@@ -733,5 +734,94 @@ describe('persisting topic + AI preferences without resets or races', () => {
     expect(savedAiProposal.value).toBeNull();
     expect(windowPlan.value.source).toBe('local');
     expect(await aiProposalItem.getValue()).toBeNull();
+  });
+
+  it('warms model.open() before groupBy, logs console.info on fallback, and cools down automatic retries only', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await saveSettings({ ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true });
+    await checkAi({ capabilities: CHROME, llm });
+
+    const order: string[] = [];
+    const warmableModel: Llm = {
+      open: async () => {
+        order.push('open');
+      },
+      prompt: async () => '{"groups":[]}',
+    };
+
+    let organizeCalls = 0;
+    // First automatic run fails with timeout -> enters cooldown and does not emit console.warn.
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      automatic: true,
+      deps: {
+        model: warmableModel,
+        groupBy: async () => {
+          order.push('groupBy');
+          return { ...answered('fallback'), fallbackReason: 'timeout' };
+        },
+        organize: async () => {
+          organizeCalls += 1;
+          return { movedTabs: 1, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+
+    expect(order).toEqual(['open', 'groupBy']);
+    expect(isAiAutoCoolingDown()).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalled();
+    expect(organizeCalls).toBe(1);
+
+    // A second automatic run during cooldown is skipped without running AI or moving windows.
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      automatic: true,
+      deps: {
+        model: warmableModel,
+        groupBy: async () => {
+          order.push('should-not-run');
+          return answered('ai');
+        },
+        organize: async () => {
+          organizeCalls += 1;
+          return { movedTabs: 1, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+    expect(order).toEqual(['open', 'groupBy']);
+    expect(organizeCalls).toBe(1);
+
+    // An explicit manual click clears cooldown and succeeds immediately.
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      deps: {
+        model: warmableModel,
+        groupBy: async () => {
+          order.push('manual-groupBy');
+          return answered('ai');
+        },
+        organize: async () => {
+          organizeCalls += 1;
+          return { movedTabs: 2, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+    expect(order).toEqual(['open', 'groupBy', 'open', 'manual-groupBy']);
+    expect(isAiAutoCoolingDown()).toBe(false);
+    expect(organizeCalls).toBe(2);
+
+    info.mockRestore();
+    warn.mockRestore();
   });
 });

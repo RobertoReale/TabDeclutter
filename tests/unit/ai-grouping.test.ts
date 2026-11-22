@@ -355,6 +355,42 @@ describe('the answer is not trusted', () => {
     const wrappedResult = await groupByAi(SIX_TABS, wrapped, at(0));
     expect(wrappedResult.source).toBe('ai');
     expect(membership(wrappedResult.proposal)).toEqual({ Cooking: [4, 5, 6] });
+
+    // Gemini Nano unconstrained quirk reproduced live: each `{...}` inside `"groups":[...]`
+    // wrapped in stray quotes (`"{"name":"...","tabIds":[...]}"`) or JSON-stringified.
+    const strayQuoted = fakeLlm(
+      () =>
+        '```json\n{"groups":["{"name":"Corrado Augias Talks","tabIds":[1,2,3]}","{\\"name\\":\\"Cooking\\",\\"tabIds\\":[4,5,6]}"]}\n```',
+    );
+    const strayQuotedResult = await groupByAi(SIX_TABS, strayQuoted, at(0));
+    expect(strayQuotedResult.source).toBe('ai');
+    expect(membership(strayQuotedResult.proposal)).toEqual({
+      'Corrado Augias Talks': [1, 2, 3],
+      Cooking: [4, 5, 6],
+    });
+
+    // Gemini Nano omitting `},{` between groups inside `"groups":[{...}]` (so raw JSON.parse
+    // would overwrite earlier duplicate `"name"`/`"tabIds"` keys with the final `"Other"`),
+    // or truncating the final `"tabIds":[...` array before closing `]}`.
+    const collapsedAndTruncated = fakeLlm(
+      () =>
+        '```json\n{"groups":[{"name":"Corrado Augias Lectures","tabIds":[1,2,3],"name":"Cooking","tabIds":[4,5],"name":"Other","tabIds":[6]}]}\n```',
+    );
+    const collapsedResult = await groupByAi(SIX_TABS, collapsedAndTruncated, at(0));
+    expect(collapsedResult.source).toBe('ai');
+    expect(membership(collapsedResult.proposal)).toEqual({
+      'Corrado Augias Lectures': [1, 2, 3],
+      Cooking: [4, 5],
+    });
+
+    const truncated = fakeLlm(
+      () => '```json\n{"groups":[{"name":"Corrado Augias Lectures","tabIds":[1,2,3,4',
+    );
+    const truncatedResult = await groupByAi(SIX_TABS, truncated, at(0));
+    expect(truncatedResult.source).toBe('ai');
+    expect(membership(truncatedResult.proposal)).toEqual({
+      'Corrado Augias Lectures': [1, 2, 3, 4],
+    });
   });
 
   it('recognizes a TimeoutError thrown by the session as a timeout fallback', async () => {
