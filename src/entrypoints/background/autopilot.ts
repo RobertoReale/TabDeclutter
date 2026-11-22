@@ -8,9 +8,10 @@
  */
 
 import { compile } from '@/core/patterns';
+import type { GroupProposal } from '@/core/cluster';
 import { scoreTabs, type ScoredTab } from '@/core/scoring';
-import { DAY, HOUR } from '@/core/time';
-import { STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
+import { DAY, HOUR, MINUTE } from '@/core/time';
+import { NO_GROUP_ID, STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
 import { unwrapSuspendedUrl } from '@/core/url';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import {
@@ -25,12 +26,14 @@ import {
   readSettings,
   settingsItem,
 } from '@/platform/storage';
-import { activateTab, closeTabs, closeWindow, queryTabs } from '@/platform/tabs';
-import { organizeWindows } from '@/platform/windows';
+import { activateTab, closeTabs, closeWindow, NO_WINDOW, queryTabs } from '@/platform/tabs';
+import { isMovableTab, organizeWindows } from '@/platform/windows';
 
-const AUTOPILOT_DEBOUNCE_MS = 2_500;
+const AUTOPILOT_DEBOUNCE_MS = 1_200;
 const AUTOPILOT_PERIOD_MINUTES = 15;
 const ALARM_NAME = 'autopilot-sweep';
+const BG_AI_TIMEOUT_MS = 90_000;
+const BG_AI_COOLDOWN_MS = 2 * MINUTE;
 
 function bareKey(key: string): string {
   return key.slice(key.indexOf(':') + 1);
@@ -68,6 +71,9 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   let chain: Promise<unknown> = Promise.resolve();
+  let bgAiInFlight = false;
+  let bgAiCooldownUntil = 0;
+  let lastBgAiSignature = '';
 
   function run(): Promise<AutopilotReport> {
     const next = chain.then(sweep, sweep);
@@ -80,6 +86,90 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       timer = undefined;
       void run().catch(failed);
     }, debounceMs);
+  }
+
+  async function refreshAiInBackground(settings: Settings, focusedId?: number): Promise<void> {
+    if (bgAiInFlight || now() < bgAiCooldownUntil) return;
+    if (
+      !capabilities.promptApi ||
+      typeof (globalThis as { LanguageModel?: unknown }).LanguageModel === 'undefined'
+    ) {
+      return;
+    }
+    const allTabs = await queryTabs().catch(() => []);
+    const movable = allTabs.filter(
+      (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && isMovableTab(tab),
+    );
+    if (movable.length < 2) return;
+    const signature = movable
+      .map((tab) => tab.id)
+      .sort((a, b) => a - b)
+      .join(',');
+    const existing = await aiProposalItem.getValue().catch(() => null);
+    if (proposalCoversMovable(existing, movable) || lastBgAiSignature === signature) return;
+
+    bgAiInFlight = true;
+    lastBgAiSignature = signature;
+    try {
+      const [llmMod, aiMod] = await Promise.all([
+        import('@/platform/llm'),
+        import('@/core/ai-grouping'),
+      ]);
+      const state = await llmMod.checkAvailability();
+      if (state !== 'available') return;
+      const session = llmMod.panelSession({ timeoutMs: BG_AI_TIMEOUT_MS });
+      await session.open?.();
+
+      const realByShort = new Map<number, number>();
+      const compact: TabInfo[] = movable.map((tab, index) => {
+        const shortId = index + 1;
+        realByShort.set(shortId, tab.id);
+        return { ...tab, id: shortId, windowId: 1, index, groupId: NO_GROUP_ID };
+      });
+      const result = await aiMod.groupByAi(compact, session, {
+        minSiteTabs: 2,
+        minClusterTabs: 2,
+        includePinned: false,
+        includeGrouped: true,
+        timeoutMs: BG_AI_TIMEOUT_MS,
+      });
+      if (result.source !== 'ai') {
+        bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
+        return;
+      }
+      const restored: GroupProposal = {
+        mode: result.proposal.mode,
+        groups: result.proposal.groups
+          .map((group) => ({
+            ...group,
+            tabIds: group.tabIds
+              .map((id) => realByShort.get(id))
+              .filter((id): id is number => id !== undefined),
+          }))
+          .filter((group) => group.tabIds.length >= 2),
+        ungrouped: result.proposal.ungrouped
+          .map((id) => realByShort.get(id))
+          .filter((id): id is number => id !== undefined),
+      };
+      if (restored.groups.length === 0) {
+        bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
+        return;
+      }
+      await aiProposalItem.setValue(restored);
+      const snoozeUntil = await organizeSnoozeUntilItem.getValue().catch(() => 0);
+      if (snoozeUntil > now()) return;
+      await organizeWindows({
+        windowMode: settings.autoWindowMode,
+        clusterMode: settings.autoOrganizeMode,
+        useTabGroups: settings.useTabGroups,
+        focusedWindowId: focusedId ?? (await focusedWindow()),
+        proposal: restored,
+      });
+    } catch {
+      bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
+    } finally {
+      bgAiInFlight = false;
+    }
   }
 
   async function sweep(): Promise<AutopilotReport> {
@@ -185,15 +275,24 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         proposal: aiProposal,
       });
       groupedWindows = winResult.windowsCount;
+      if (
+        !settings.useTabGroups &&
+        settings.autoOrganizeMode === 'topic' &&
+        settings.useOnDeviceAi
+      ) {
+        void refreshAiInBackground(settings, focusedId).catch(ignore);
+      }
     }
 
     return { closedTabs, closedWindows, groupedWindows };
   }
 
   browser.tabs.onCreated.addListener(schedule);
-  browser.tabs.onUpdated.addListener((_tabId: number, change: { status?: string }) => {
-    if (change.status === 'complete') schedule();
-  });
+  browser.tabs.onUpdated.addListener(
+    (_tabId: number, change: { status?: string; title?: string }) => {
+      if (change.status === 'complete' || change.title !== undefined) schedule();
+    },
+  );
 
   browser.storage.onChanged.addListener(
     (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
@@ -329,6 +428,25 @@ function onlyAiToggleChanged(
     JSON.stringify({ ...oldVal, useOnDeviceAi: false }) ===
     JSON.stringify({ ...newVal, useOnDeviceAi: false })
   );
+}
+
+function proposalCoversMovable(
+  proposal: GroupProposal | null,
+  movable: readonly TabInfo[],
+): boolean {
+  if (proposal === null || movable.length < 2) return false;
+  const movableIds = new Set(movable.map((tab) => tab.id));
+  const known = new Set<number>(proposal.ungrouped);
+  let hasLiveGroup = false;
+  for (const group of proposal.groups) {
+    let liveCount = 0;
+    for (const id of group.tabIds) {
+      known.add(id);
+      if (movableIds.has(id)) liveCount += 1;
+    }
+    if (liveCount >= 2) hasLiveGroup = true;
+  }
+  return hasLiveGroup && movable.every((tab) => known.has(tab.id));
 }
 
 function failed(error: unknown): void {

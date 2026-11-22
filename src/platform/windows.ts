@@ -513,12 +513,40 @@ function resolveWindowProposal(
     // browsing sessions never pile into the ungrouped catch-all window.
     if (groups.length > 0 && knownMovable * 2 >= movable.length) {
       const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
-      if (newTabs.length >= 2) {
-        const extra = clusterLocal(newTabs);
-        for (const extraGroup of extra.groups) {
-          if (groups.length >= 8) break;
-          groups.push([...extraGroup]);
-          for (const id of extraGroup) placed.add(id);
+      if (newTabs.length >= 1) {
+        // 1. First try matching each newly opened tab against existing AI groups using fast
+        //    full-window local clustering, so opening even a single new tab on an active topic
+        //    lands in its thematic window immediately (< 5 ms) before the LLM re-runs.
+        const fullLocal = clusterLocal(movable);
+        const remainingNew: TabInfo[] = [];
+        for (const newTab of newTabs) {
+          const localCluster = fullLocal.groups.find((g) => g.includes(newTab.id));
+          let bestGroupIdx = -1;
+          let bestOverlap = 0;
+          if (localCluster !== undefined) {
+            for (const [idx, group] of groups.entries()) {
+              const overlap = group.filter((id) => localCluster.includes(id)).length;
+              if (overlap > bestOverlap) {
+                bestOverlap = overlap;
+                bestGroupIdx = idx;
+              }
+            }
+          }
+          if (bestGroupIdx >= 0) {
+            groups[bestGroupIdx]!.push(newTab.id);
+            placed.add(newTab.id);
+          } else {
+            remainingNew.push(newTab);
+          }
+        }
+        // 2. Any remaining new tabs that form a brand-new topic pair get their own new window.
+        if (remainingNew.length >= 2) {
+          const extra = clusterLocal(remainingNew);
+          for (const extraGroup of extra.groups) {
+            if (groups.length >= 8) break;
+            groups.push([...extraGroup]);
+            for (const id of extraGroup) placed.add(id);
+          }
         }
       }
       const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);

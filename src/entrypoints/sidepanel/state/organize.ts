@@ -412,7 +412,19 @@ export const savedAiProposalLoaded = signal(false);
 export const lastAutoWindowAiSignature = signal<string | null>(null);
 
 /** Hydrates `savedAiProposal` from `storage.session` so the overview reflects background state. */
+let watchingAiProposalStorage = false;
 export async function loadSavedAiProposal(): Promise<void> {
+  if (!watchingAiProposalStorage) {
+    watchingAiProposalStorage = true;
+    try {
+      aiProposalItem.watch((next) => {
+        savedAiProposal.value = next;
+        savedAiProposalLoaded.value = true;
+      });
+    } catch {
+      // Fallback when storage watching is unavailable in lightweight test stubs.
+    }
+  }
   const stored = await aiProposalItem.getValue().catch(() => null);
   savedAiProposal.value = stored;
   savedAiProposalLoaded.value = true;
@@ -506,17 +518,42 @@ export const windowPlan = computed<WindowPlan>(() => {
     const knownMovable = movable.filter((tab) => knownIds.has(tab.id)).length;
     if (groups.length > 0 && knownMovable * 2 >= movable.length) {
       const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
-      if (newTabs.length >= 2) {
-        const extra = clusterLocal(newTabs);
-        for (const extraGroup of extra.groups) {
-          if (groups.length >= 8) break;
-          groups.push({
-            key: `new:${extraGroup.key}`,
-            title: extraGroup.title,
-            color: extraGroup.color,
-            tabIds: extraGroup.tabIds,
-          });
-          for (const id of extraGroup.tabIds) placed.add(id);
+      if (newTabs.length >= 1) {
+        const fullLocal = clusterLocal(movable);
+        const remainingNew: TabInfo[] = [];
+        for (const newTab of newTabs) {
+          const localCluster = fullLocal.groups.find((g) => g.tabIds.includes(newTab.id));
+          let bestGroupIdx = -1;
+          let bestOverlap = 0;
+          if (localCluster !== undefined) {
+            for (const [idx, group] of groups.entries()) {
+              const overlap = group.tabIds.filter((id) => localCluster.tabIds.includes(id)).length;
+              if (overlap > bestOverlap) {
+                bestOverlap = overlap;
+                bestGroupIdx = idx;
+              }
+            }
+          }
+          if (bestGroupIdx >= 0) {
+            const target = groups[bestGroupIdx]!;
+            groups[bestGroupIdx] = { ...target, tabIds: [...target.tabIds, newTab.id] };
+            placed.add(newTab.id);
+          } else {
+            remainingNew.push(newTab);
+          }
+        }
+        if (remainingNew.length >= 2) {
+          const extra = clusterLocal(remainingNew);
+          for (const extraGroup of extra.groups) {
+            if (groups.length >= 8) break;
+            groups.push({
+              key: `new:${extraGroup.key}`,
+              title: extraGroup.title,
+              color: extraGroup.color,
+              tabIds: extraGroup.tabIds,
+            });
+            for (const id of extraGroup.tabIds) placed.add(id);
+          }
         }
       }
       const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);

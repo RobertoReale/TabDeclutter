@@ -469,20 +469,26 @@ function lastSeparator(title: string): { at: number; separator: string } | null 
   return best;
 }
 
-/** The path of a URL, percent-decoded when it can be, or `''` when there is none. */
+/** The path (and any search query like `?q=` / `?search_query=`) of a URL, percent-decoded. */
 function pathOf(url: string): string {
   const effectiveUrl = unwrapSuspendedUrl(url).trim();
-  let path: string;
+  let parsed: URL;
   try {
-    path = new URL(effectiveUrl).pathname;
+    parsed = new URL(effectiveUrl);
   } catch {
     return '';
   }
+  const query =
+    parsed.searchParams.get('search_query') ??
+    parsed.searchParams.get('q') ??
+    parsed.searchParams.get('query') ??
+    '';
+  const rawPath = query !== '' ? `${parsed.pathname}/${query}` : parsed.pathname;
   try {
-    return decodeURIComponent(path);
+    return decodeURIComponent(rawPath);
   } catch {
     // A stray `%` is not an escape; the raw path still tokenizes.
-    return path;
+    return rawPath;
   }
 }
 
