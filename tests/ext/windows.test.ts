@@ -494,6 +494,210 @@ describe('platform/windows', () => {
     });
     expect(second.movedTabs).toBe(0);
   });
+
+  it('organizes a real 30-tab Italian+English browsing session with Gemini Nano and incrementally places a single new tab into the right window', async () => {
+    const { groupByAi } = await import('../../src/core/ai-grouping');
+    const realSessionTabs: BrowserTab[] = [
+      {
+        id: 101,
+        windowId: 1,
+        index: 0,
+        url: 'https://gemini.google.com/app/3dbbdad542c8de16',
+        title: 'Prodotto scalare standard o generico? - Google Gemini',
+      },
+      {
+        id: 102,
+        windowId: 1,
+        index: 1,
+        url: 'https://gemini.google.com/notebook/e17e13be-20d2-4956-845c-f9ab5a60941e',
+        title: 'Google Gemini',
+      },
+      {
+        id: 103,
+        windowId: 1,
+        index: 2,
+        url: 'https://gemini.google.com/app/5addf5db49a9ba71',
+        title: "Calcolo del coefficiente m dell'asintoto obliquo - Google Gemini",
+      },
+      {
+        id: 104,
+        windowId: 1,
+        index: 3,
+        url: 'https://gemini.google.com/app/c76bcfca86bc2f89',
+        title: 'Preparazione esercizi di derivate - Google Gemini',
+      },
+      {
+        id: 105,
+        windowId: 1,
+        index: 4,
+        url: 'https://www.youtube.com/watch?v=5oJ0Rhdq9oA',
+        title: 'calcolo integrali - YouTube',
+      },
+      {
+        id: 106,
+        windowId: 2,
+        index: 0,
+        url: 'https://www.youtube.com/watch?v=1',
+        title:
+          'Lectio magistralis sulla laicità "Stato e Chiesa cattolica..." - CORRADO AUGIAS (prima parte) - YouTube',
+      },
+      {
+        id: 107,
+        windowId: 2,
+        index: 1,
+        url: 'https://www.youtube.com/watch?v=2',
+        title:
+          'Lectio magistralis sulla laicità "Stato e Chiesa cattolica..." - CORRADO AUGIAS (seconda parte) - YouTube',
+      },
+      {
+        id: 108,
+        windowId: 2,
+        index: 2,
+        url: 'https://www.youtube.com/watch?v=3',
+        title: 'Lectio magistralis. Il grande romanzo dei Vangeli. Corrado Augias - YouTube',
+      },
+      {
+        id: 109,
+        windowId: 2,
+        index: 3,
+        url: 'https://www.youtube.com/watch?v=4',
+        title: "L'intervista a Corrado Augias su islamismo, cristianesimo, ebraismo - YouTube",
+      },
+      {
+        id: 110,
+        windowId: 2,
+        index: 4,
+        url: 'https://www.youtube.com/watch?v=5',
+        title: 'Corrado Augias: Breviario per un confuso presente (Einaudi) - YouTube',
+      },
+      {
+        id: 111,
+        windowId: 2,
+        index: 5,
+        url: 'https://www.youtube.com/watch?v=zD_D1kHBW8k',
+        title: 'Corraudo Augias: I segreti del Vaticano - LaFeltrinelli - YouTube',
+      },
+      {
+        id: 112,
+        windowId: 2,
+        index: 6,
+        url: 'https://www.youtube.com/results?search_query=augias+i+segreti+del+vaticano',
+        title: 'augias i segreti del vaticano - YouTube',
+      },
+      {
+        id: 113,
+        windowId: 3,
+        index: 0,
+        url: 'https://www.youtube.com/watch?v=15',
+        title: 'The tragedy that always happens when you buy a Stratocaster. - YouTube',
+      },
+      {
+        id: 114,
+        windowId: 3,
+        index: 1,
+        url: 'https://www.youtube.com/watch?v=rj-YurbfhRE',
+        title: 'You can play this Hendrix riff FOREVER and not get bored - YouTube',
+      },
+      {
+        id: 115,
+        windowId: 4,
+        index: 0,
+        url: 'https://www.youtube.com/watch?v=16',
+        title: 'Live #33 - Cold war 2.0 calling? Con Alberto Forchielli - YouTube',
+      },
+      {
+        id: 116,
+        windowId: 4,
+        index: 1,
+        url: 'https://www.youtube.com/watch?v=17',
+        title: 'Live #30 - Anti-storia degli Italiani. Con Michele Boldrin. - YouTube',
+      },
+    ];
+
+    const { api, tabs } = fakeApi(realSessionTabs);
+    const asInfos: TabInfo[] = realSessionTabs.map((t, index) => ({
+      id: index + 1,
+      windowId: 1,
+      index,
+      url: t.url ?? '',
+      title: t.title ?? '',
+      pinned: false,
+      audible: false,
+      active: false,
+      discarded: false,
+      hidden: false,
+      groupId: NO_GROUP_ID,
+      incognito: false,
+    }));
+
+    // Simulate real Gemini Nano output with omitted `},{` between groups and a final `"Other"`.
+    const aiResult = await groupByAi(asInfos, {
+      prompt: async () =>
+        '```json\n{"groups":[{"name":"Mathematics & Calculus","tabIds":[1,2,3,4,5],"name":"Corrado Augias Lectures","tabIds":[6,7,8,9,10,11,12],"name":"Guitar","tabIds":[13,14],"name":"Politics & Economics","tabIds":[15,16],"name":"Other","tabIds":[]}]}\n```',
+    });
+    expect(aiResult.source).toBe('ai');
+    expect(aiResult.proposal.groups.map((g) => g.title)).toEqual([
+      'Corrado Augias Lectures',
+      'Mathematics & Calculus',
+      'Guitar',
+      'Politics & Economics',
+    ]);
+
+    const realProposal = {
+      ...aiResult.proposal,
+      groups: aiResult.proposal.groups.map((g) => ({
+        ...g,
+        tabIds: g.tabIds.map((shortId) => realSessionTabs[shortId - 1]!.id!),
+      })),
+      ungrouped: aiResult.proposal.ungrouped.map((shortId) => realSessionTabs[shortId - 1]!.id!),
+    };
+
+    await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      proposal: realProposal,
+      api,
+    });
+
+    const mathWindow = tabs.find((t) => t.id === 101)?.windowId;
+    const augiasWindow = tabs.find((t) => t.id === 106)?.windowId;
+    const guitarWindow = tabs.find((t) => t.id === 113)?.windowId;
+    const politicsWindow = tabs.find((t) => t.id === 115)?.windowId;
+
+    // All 5 math tabs (4 Gemini + 1 YouTube `calcolo integrali`) share the Math window.
+    for (const id of [101, 102, 103, 104, 105]) {
+      expect(tabs.find((t) => t.id === id)?.windowId).toBe(mathWindow);
+    }
+    // All 7 Corrado Augias tabs (including `Corraudo` typo and `?search_query=augias...`) share the Augias window.
+    for (const id of [106, 107, 108, 109, 110, 111, 112]) {
+      expect(tabs.find((t) => t.id === id)?.windowId).toBe(augiasWindow);
+    }
+    expect(new Set([mathWindow, augiasWindow, guitarWindow, politicsWindow]).size).toBe(4);
+
+    // Now the user opens ONE new Corrado Augias tab in window 1 while the existing AI proposal is cached:
+    tabs.push({
+      id: 199,
+      windowId: 1,
+      index: 5,
+      url: 'https://www.youtube.com/watch?v=new-augias',
+      title: 'Tra Cesare e Dio. Incontro con Corrado Augias - YouTube',
+      groupId: NO_GROUP_ID,
+    });
+
+    await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      proposal: realProposal,
+      api,
+    });
+
+    // The single new tab is incrementally matched and moved straight into the Corrado Augias window!
+    expect(tabs.find((t) => t.id === 199)?.windowId).toBe(augiasWindow);
+  });
 });
 
 function makeTab(overrides: Partial<TabInfo> = {}): TabInfo {

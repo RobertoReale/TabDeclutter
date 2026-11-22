@@ -34,6 +34,11 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
   - Groups related tabs **by website** or **by topic** and places each cluster into its own
     dedicated browser window so every open window focuses on a single coherent topic or project.
   - The cluster containing the tab you are currently viewing always stays in your active window.
+  - **Instant incremental placement on new tabs**: whenever you open even a single new tab (or an
+    SPA such as YouTube or Google Gemini updates its `<title>` asynchronously), Autopilot reacts
+    within ~1.2 s and matches the new tab against your existing AI or local window clusters in
+    `< 5 ms` (including search queries such as `?search_query=` or `?q=`), moving it straight into
+    its thematic window without waiting for a full re-clustering pass.
 - **Live windows & topics overview**: in the **Organize** view, inspect every window cluster (and
   any ungrouped tabs) in a collapsible list showing whether **AI on-device** or **Local** grouping
   produced it, and click any tab to jump straight to it.
@@ -46,9 +51,23 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
   for site/topic organization, duplicate detection, site protection, favicons, activity tracking, and
   Archive restores, while leaving genuine extension pages (such as PDF or Office viewers) untouched.
 - **Experimental on-device AI** _(Chrome-only, off by default)_: local organization already runs
-  instantly and offline without AI; if you want to experiment with Chrome's built-in Gemini Nano
-  model for topic grouping, you can opt in under **Settings → Experimental**. Your choice is never
-  reset automatically, and TabDeclutter warns you if Chrome's model is unavailable or falls back.
+  instantly and offline without AI; if you want to use Chrome's built-in Gemini Nano model
+  (`LanguageModel`) for semantic cross-site topic grouping, you can opt in under **Settings →
+  Experimental**:
+  - **Fast 0-token session init & GPU keep-alive**: initializes `LanguageModel.create()` via
+    Chromium's 0-token barrier fast path (prepending the system prompt per query instead of blocking
+    creation on `initialPrompts`), decouples background D3D12 shader warmup from caller timeouts,
+    and pings idle sessions every 40 s so Chrome's 60 s `OnDeviceModelIdleTimeout` never unloads the
+    model from VRAM while the panel is open.
+  - **Fast unconstrained decoding with resilient JSON recovery**: uses Chrome's native greedy
+    sampling (`top_k=1, temperature=0`) without `llguidance` CPU token-mask overhead, paired with a
+    fault-tolerant parser that recovers groups even when Gemini Nano wraps objects in stray quotes,
+    omits `},{` separators between groups, or truncates trailing arrays.
+  - **Background Service Worker AI refresh & live stage telemetry**: runs both from the Side Panel
+    (with a live `warmup` / `prompt` elapsed timer and detailed fallback diagnostics) and quietly in
+    the background Service Worker when new tabs open while the Side Panel is closed. Your choice is
+    never reset automatically, and TabDeclutter warns you if Chrome's model is unavailable or falls
+    back.
 
 ### 2. Autopilot & Declutter
 

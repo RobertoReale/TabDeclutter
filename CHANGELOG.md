@@ -14,8 +14,12 @@ First version, for Chrome (121 and later) and Firefox (140 and later).
 
 - **Declutter**: the open tabs ranked by an explainable score, each with a plain reason; close,
   keep, discard or protect a site, one by one or in bulk, with an undo.
-- **Organize**: tab groups by site, by topic without AI, and by topic with Chrome's on-device AI
-  when available (optional, Chrome only).
+- **Organize**: automatic window organization (_Merge and tidy into a single window_ or _One window
+  per topic or website_) with one-click Undo, instant incremental placement of newly opened tabs
+  into existing thematic windows, and optional native tab groups by site, by topic without AI, or
+  by topic with Chrome's on-device Gemini Nano AI (with 0-token session warmup, 40 s VRAM
+  keep-alive, background Service Worker AI refresh, resilient JSON parsing, and live stage
+  telemetry).
 - **Duplicate protection** in real time: warn only or close automatically, priority rules, scope,
   URL comparison rules, a whitelist with `*` and `/regex/` patterns, pause, and an import of the
   Duplicate Tabs Closer list.
