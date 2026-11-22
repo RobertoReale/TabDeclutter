@@ -64,6 +64,7 @@ export interface Llm {
 export const SYSTEM_PROMPT =
   'You organize browser tabs into a small number of topical groups. ' +
   "Group by the user's task or topic, not by website. " +
+  'Ignore minor spelling typos in names and never pair unrelated tabs over one coincidental word. ' +
   'Use short English group names (1-3 words). Prefer 3-8 groups. ' +
   "Tabs that fit nowhere go to 'Other'.";
 
@@ -361,7 +362,12 @@ async function fitsContext(llm: Llm, input: string): Promise<boolean> {
  * to Other".
  */
 type Validation =
-  | { readonly ok: true; readonly drafts: readonly Draft[]; readonly ungrouped: readonly number[] }
+  | {
+      readonly ok: true;
+      readonly drafts: readonly Draft[];
+      readonly ungrouped: readonly number[];
+      readonly failed: readonly number[];
+    }
   | { readonly ok: false; readonly reason: 'unparsable' | 'no-groups' };
 
 const UNPARSABLE: Validation = { ok: false, reason: 'unparsable' };
@@ -412,9 +418,15 @@ function recoverCollapsedGroups(raw: string, parsed: unknown): unknown {
  * short surrounding prose, Gemini Nano wrapping group objects in stray quotes inside
  * `"groups": ["{"name":...}"]`, missing `},{` separators between groups, or truncated output.
  */
-function parseModelJson(answer: string): { ok: true; value: unknown } | { ok: false } {
+function parseModelJson(
+  answer: string,
+): { ok: true; value: unknown; truncated: boolean } | { ok: false } {
   try {
-    return { ok: true, value: recoverCollapsedGroups(answer, JSON.parse(answer)) };
+    return {
+      ok: true,
+      value: recoverCollapsedGroups(answer, JSON.parse(answer)),
+      truncated: false,
+    };
   } catch {
     const stripped = answer
       .trim()
@@ -422,13 +434,21 @@ function parseModelJson(answer: string): { ok: true; value: unknown } | { ok: fa
       .replace(/\s*```$/u, '')
       .trim();
     try {
-      return { ok: true, value: recoverCollapsedGroups(stripped, JSON.parse(stripped)) };
+      return {
+        ok: true,
+        value: recoverCollapsedGroups(stripped, JSON.parse(stripped)),
+        truncated: false,
+      };
     } catch {
       const start = stripped.indexOf('{');
       const end = stripped.lastIndexOf('}');
       const candidate = start !== -1 && end > start ? stripped.slice(start, end + 1) : stripped;
       try {
-        return { ok: true, value: recoverCollapsedGroups(stripped, JSON.parse(candidate)) };
+        return {
+          ok: true,
+          value: recoverCollapsedGroups(stripped, JSON.parse(candidate)),
+          truncated: false,
+        };
       } catch {
         // Gemini Nano occasionally wraps each `{...}` item in `"groups":[...]` in stray quotes
         // (`"{"name":"Topic","tabIds":[1,2]}"`) or leaves trailing commas before `]` / `}`.
@@ -436,10 +456,14 @@ function parseModelJson(answer: string): { ok: true; value: unknown } | { ok: fa
           .replace(/"\s*(\{\s*"[^{}]*\})\s*"/gu, '$1')
           .replace(/,\s*([\]}])/gu, '$1');
         try {
-          return { ok: true, value: recoverCollapsedGroups(stripped, JSON.parse(repaired)) };
+          return {
+            ok: true,
+            value: recoverCollapsedGroups(stripped, JSON.parse(repaired)),
+            truncated: false,
+          };
         } catch {
           const groups = extractRegexGroups(stripped);
-          if (groups.length > 0) return { ok: true, value: { groups } };
+          if (groups.length > 0) return { ok: true, value: { groups }, truncated: true };
           return { ok: false };
         }
       }
@@ -492,11 +516,13 @@ function validate(answer: string, batch: readonly TabInfo[], settings: Settings)
 
   if (drafts.length === 0) return { ok: false, reason: 'no-groups' };
   // "Altro" is everything no group kept: the tabs the model forgot, and the ones it put
-  // in a group that was then dropped. A claimed id stays claimed even so, because the
-  // first group to ask for it is the only one allowed to have it.
+  // in a group that was then dropped. When the model's output was truncated mid-JSON, tabs
+  // it never reached go to `failed` so §7.2 local clustering still groups the unreached tail.
   const grouped = new Set(drafts.flatMap((draft) => draft.tabIds));
-  const ungrouped = batch.filter((tab) => !grouped.has(tab.id)).map((tab) => tab.id);
-  return { ok: true, drafts, ungrouped };
+  const leftover = batch.filter((tab) => !grouped.has(tab.id)).map((tab) => tab.id);
+  return decoded.truncated
+    ? { ok: true, drafts, ungrouped: [], failed: leftover }
+    : { ok: true, drafts, ungrouped: leftover, failed: [] };
 }
 
 /**
@@ -541,7 +567,7 @@ async function askBatch(llm: Llm, batch: readonly TabInfo[], settings: Settings)
   return {
     drafts: checked.drafts,
     ungrouped: checked.ungrouped,
-    failed: [],
+    failed: checked.failed,
     prompts: 1,
     answered: 1,
     reason: undefined,

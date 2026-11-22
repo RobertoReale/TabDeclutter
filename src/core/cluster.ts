@@ -678,6 +678,98 @@ interface Vectors {
   readonly vocabulary: readonly string[];
 }
 
+/** Whether two stems differ by one edit (substitution, insertion, deletion, or adjacent swap). */
+function isEditDistanceOne(a: string, b: string): boolean {
+  const diff = a.length - b.length;
+  if (diff < -1 || diff > 1 || a[0] !== b[0]) return false;
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length && a[i] === b[j]) {
+    i += 1;
+    j += 1;
+  }
+  if (diff === 0) {
+    return (
+      a.slice(i + 1) === b.slice(j + 1) ||
+      (i + 1 < a.length &&
+        a[i] === b[j + 1] &&
+        a[i + 1] === b[j] &&
+        a.slice(i + 2) === b.slice(j + 2))
+    );
+  }
+  return diff > 0 ? a.slice(i + 1) === b.slice(j) : a.slice(i) === b.slice(j + 1);
+}
+
+/**
+ * Snaps rare singleton stems (`df === 1`, length ≥ 6, no digits) that are one edit away from a
+ * dominant stem in the same window (`df >= 3`, max length ≥ 7) so uploader typos such as
+ * "Corraudo Augias" merge cleanly with "Corrado Augias" instead of fracturing the cluster.
+ */
+function snapTypoStems(
+  vocabulary: readonly string[],
+  documentFrequency: number[],
+  counts: Map<number, number>[],
+): void {
+  const anchors: number[] = [];
+  for (let id = 0; id < vocabulary.length; id += 1) {
+    const stem = vocabulary[id] as string;
+    if (
+      (documentFrequency[id] as number) >= 3 &&
+      stem.length >= 6 &&
+      !stem.startsWith(DOMAIN_PREFIX) &&
+      !/\d/.test(stem)
+    ) {
+      anchors.push(id);
+    }
+  }
+  if (anchors.length === 0) return;
+
+  const remap = new Map<number, number>();
+  for (let id = 0; id < vocabulary.length; id += 1) {
+    const stem = vocabulary[id] as string;
+    if (
+      (documentFrequency[id] as number) !== 1 ||
+      stem.length < 6 ||
+      stem.startsWith(DOMAIN_PREFIX) ||
+      /\d/.test(stem)
+    ) {
+      continue;
+    }
+    let bestId = -1;
+    let bestDf = -1;
+    for (const anchorId of anchors) {
+      const anchor = vocabulary[anchorId] as string;
+      if (Math.max(stem.length, anchor.length) < 7 || !isEditDistanceOne(stem, anchor)) continue;
+      const anchorDf = documentFrequency[anchorId] as number;
+      if (
+        anchorDf > bestDf ||
+        (anchorDf === bestDf && anchor.localeCompare(vocabulary[bestId] as string) < 0)
+      ) {
+        bestId = anchorId;
+        bestDf = anchorDf;
+      }
+    }
+    if (bestId !== -1) remap.set(id, bestId);
+  }
+  if (remap.size === 0) return;
+
+  for (const perTab of counts) {
+    for (const [oldId, newId] of remap) {
+      const weight = perTab.get(oldId);
+      if (weight === undefined) continue;
+      perTab.delete(oldId);
+      documentFrequency[oldId] = (documentFrequency[oldId] as number) - 1;
+      const existing = perTab.get(newId);
+      if (existing === undefined) {
+        perTab.set(newId, weight);
+        documentFrequency[newId] = (documentFrequency[newId] as number) + 1;
+      } else {
+        perTab.set(newId, existing + weight);
+      }
+    }
+  }
+}
+
 /**
  * TF-IDF over the tabs of one window (PLAN.md §7.2.2), with an extra token for the domain
  * at `domainWeight`.
@@ -724,6 +816,8 @@ function vectorize(tabs: readonly TabInfo[], options: Required<ClusterOptions>):
 
     counts.push(perTab);
   }
+
+  snapTypoStems(vocabulary, documentFrequency, counts);
 
   const total = tabs.length;
   const vectors: Vector[] = [];
@@ -863,6 +957,144 @@ function agglomerate(vectors: readonly Vector[], threshold: number): readonly nu
     if (alive[i] === 1) clusters.push(members[i] as number[]);
   }
   return clusters;
+}
+
+/** L2-normalised centroid of a cluster's sparse vectors, optionally excluding one member. */
+function centroidOf(
+  members: readonly number[],
+  vectors: readonly Vector[],
+  excludeIndex = -1,
+): Vector {
+  const sum = new Map<number, number>();
+  for (const index of members) {
+    if (index === excludeIndex) continue;
+    const vector = vectors[index] as Vector;
+    for (let at = 0; at < vector.ids.length; at += 1) {
+      const id = vector.ids[at] as number;
+      sum.set(id, (sum.get(id) ?? 0) + (vector.values[at] as number));
+    }
+  }
+  const sorted = [...sum.keys()].sort((a, b) => a - b);
+  const ids = new Int32Array(sorted.length);
+  const values = new Float64Array(sorted.length);
+  let norm = 0;
+  for (const [at, id] of sorted.entries()) {
+    const weight = sum.get(id) as number;
+    ids[at] = id;
+    values[at] = weight;
+    norm += weight * weight;
+  }
+  const length = Math.sqrt(norm);
+  if (length > 0) {
+    for (let at = 0; at < values.length; at += 1) values[at] = (values[at] as number) / length;
+  }
+  return { ids, values };
+}
+
+/** Total cosine similarity and non-domain (content-only) cosine similarity in one linear pass. */
+function splitCosine(
+  a: Vector,
+  b: Vector,
+  isDomainId: Uint8Array,
+): { readonly total: number; readonly content: number } {
+  let i = 0;
+  let j = 0;
+  let total = 0;
+  let content = 0;
+  while (i < a.ids.length && j < b.ids.length) {
+    const left = a.ids[i] as number;
+    const right = b.ids[j] as number;
+    if (left === right) {
+      const product = (a.values[i] as number) * (b.values[j] as number);
+      total += product;
+      if (isDomainId[left] === 0) content += product;
+      i += 1;
+      j += 1;
+    } else if (left < right) i += 1;
+    else j += 1;
+  }
+  return { total, content };
+}
+
+/**
+ * Post-agglomeration centroid refinement: rescues tabs that greedy pairwise linkage prematurely
+ * locked into a weak 2-tab coincidence (e.g. sharing one high-IDF decorative word like "segreti"
+ * or "incontro") when they strongly match a larger dominant cluster's core centroid.
+ */
+function refineClusters(
+  initial: readonly number[][],
+  vectors: readonly Vector[],
+  vocabulary: readonly string[],
+  threshold: number,
+): readonly number[][] {
+  if (initial.length < 2) return initial;
+  const isDomainId = new Uint8Array(vocabulary.length);
+  for (let id = 0; id < vocabulary.length; id += 1) {
+    if ((vocabulary[id] as string).startsWith(DOMAIN_PREFIX)) isDomainId[id] = 1;
+  }
+
+  let current: number[][] = initial.map((c) => [...c]);
+  for (let pass = 0; pass < 2; pass += 1) {
+    const targets: { readonly idx: number; readonly centroid: Vector }[] = [];
+    for (let c = 0; c < current.length; c += 1) {
+      const members = current[c] as number[];
+      if (members.length >= 2) targets.push({ idx: c, centroid: centroidOf(members, vectors) });
+    }
+    if (targets.length === 0) break;
+
+    const owner = new Int32Array(vectors.length);
+    for (let c = 0; c < current.length; c += 1) {
+      for (const tabIdx of current[c] as number[]) owner[tabIdx] = c;
+    }
+    const nextOwner = Int32Array.from(owner);
+    let moved = false;
+
+    for (let i = 0; i < vectors.length; i += 1) {
+      const ownIdx = owner[i] as number;
+      const ownMembers = current[ownIdx] as number[];
+      const tabVec = vectors[i] as Vector;
+      const isSingleton = ownMembers.length === 1;
+      const ownSim = isSingleton
+        ? 0
+        : ownMembers.length === 2
+          ? cosine(
+              tabVec,
+              vectors[(ownMembers[0] === i ? ownMembers[1] : ownMembers[0]) as number] as Vector,
+            )
+          : cosine(tabVec, centroidOf(ownMembers, vectors, i));
+
+      const minTotal = isSingleton ? Math.max(threshold, 0.32) : threshold;
+      const minContent = isSingleton ? Math.max(threshold * 0.8, 0.2) : threshold * 0.6;
+      let bestCluster = ownIdx;
+      let bestSim = ownSim;
+
+      for (const target of targets) {
+        if (target.idx === ownIdx) continue;
+        const { total, content } = splitCosine(tabVec, target.centroid, isDomainId);
+        if (total < minTotal || content < minContent) continue;
+        if (total > bestSim + 1e-9) {
+          bestSim = total;
+          bestCluster = target.idx;
+        }
+      }
+      if (bestCluster !== ownIdx) {
+        nextOwner[i] = bestCluster;
+        moved = true;
+      }
+    }
+
+    if (!moved) break;
+    const grouped = new Map<number, number[]>();
+    for (let i = 0; i < vectors.length; i += 1) {
+      const clusterId = nextOwner[i] as number;
+      const list = grouped.get(clusterId);
+      if (list === undefined) grouped.set(clusterId, [i]);
+      else list.push(i);
+    }
+    current = [...grouped.values()].sort((a, b) => (a[0] as number) - (b[0] as number));
+  }
+
+  return current;
 }
 
 /** A token of a cluster and what it weighs there: the ranking a title is built from. */
@@ -1024,7 +1256,9 @@ function topicWindowClusters(
     readonly firstAt: number;
   }[] = [];
 
-  for (const cluster of agglomerate(vectors, resolved.threshold)) {
+  const rawClusters = agglomerate(vectors, resolved.threshold);
+  const refined = refineClusters(rawClusters, vectors, vocabulary, resolved.threshold);
+  for (const cluster of refined) {
     const tabIds = cluster.map((index) => (eligible[index] as TabInfo).id);
     if (cluster.length < resolved.minClusterTabs) {
       ungrouped.push(...tabIds);

@@ -668,6 +668,91 @@ describe('grouping by topic (PLAN.md §7.2)', () => {
     expect(proposal.ungrouped).toEqual([20, 21, 22]);
   });
 
+  it('keeps typoed and rare-word-overlapping tabs inside their dominant topic cluster instead of fracturing into bogus pairs', () => {
+    const suspend = (u: string) =>
+      `chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=${encodeURIComponent(u)}`;
+    const session = [
+      tab(
+        1,
+        'https://www.youtube.com/watch?v=1',
+        'Lectio magistralis sulla laicità - CORRADO AUGIAS - YouTube',
+      ),
+      tab(
+        2,
+        'https://www.youtube.com/watch?v=2',
+        'Lectio magistralis. Il grande romanzo dei Vangeli. Corrado Augias - YouTube',
+      ),
+      tab(
+        3,
+        'https://www.youtube.com/watch?v=3',
+        'Tra Cesare e Dio. Incontro con Corrado Augias - YouTube',
+      ),
+      tab(
+        4,
+        'https://www.youtube.com/watch?v=4',
+        "L'intervista integrale a Corrado Augias - YouTube",
+      ),
+      tab(
+        5,
+        'https://www.youtube.com/watch?v=5',
+        "L'intervista a Corrado Augias su islamismo, cristianesimo, ebraismo - YouTube",
+      ),
+      tab(
+        6,
+        'https://www.youtube.com/watch?v=6',
+        'Corrado Augias: Breviario per un confuso presente (Einaudi) - YouTube',
+      ),
+      tab(7, 'https://www.youtube.com/watch?v=7', 'TIRARE LE SOMME - Corrado Augias - YouTube'),
+      tab(8, 'https://www.youtube.com/watch?v=8', "CORRADO AUGIAS - La vita s'impara - YouTube"),
+      tab(9, 'https://www.youtube.com/watch?v=9', 'Senza Filtri Live con Corrado Augias - YouTube'),
+      tab(10, 'https://www.youtube.com/watch?v=10', 'Corrado Augias - I promessi sposi - YouTube'),
+      // Uploader typo ("Corraudo") + high-IDF word ("segreti") shared with an unrelated video:
+      tab(
+        11,
+        suspend('https://www.youtube.com/watch?v=zD_D1kHBW8k'),
+        'Corraudo Augias: I segreti del Vaticano - LaFeltrinelli - YouTube',
+      ),
+      // Even without "Corrado" at all, a video titled only with "Augias" + "segreti" still joins Augias:
+      tab(
+        12,
+        'https://www.youtube.com/watch?v=12',
+        'Augias: i segreti della storia moderna - YouTube',
+      ),
+      // Unrelated video sharing only "segreti" must NOT steal tab 11 or 12:
+      tab(
+        13,
+        suspend('https://www.youtube.com/watch?v=13'),
+        'I SEGRETI DEGLI STATI UNITI con un LOBBISTA ITALIANO IN AMERICA - EP. 90 Jeantoneria Podcast - YouTube',
+      ),
+      // Unrelated "Live" and "Incontro" videos must NOT steal tabs 3 or 9 from Corrado Augias:
+      tab(20, 'https://www.youtube.com/watch?v=l30', 'Live #30 - YouTube'),
+      tab(21, 'https://www.youtube.com/watch?v=l33', 'Live #33 - YouTube'),
+      tab(22, 'https://www.youtube.com/watch?v=f2', 'Incontro di filosofia - YouTube'),
+    ];
+    const proposal = groupByTopic(session);
+    const sets = proposal.groups.map((g) => [...g.tabIds]);
+    expect(sets).toContainEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(sets).toContainEqual([20, 21]);
+    expect(proposal.ungrouped).toEqual([13, 22]);
+  });
+
+  it('snaps single-edit deletion, substitution, and transposition typos to dominant stems', () => {
+    const tabsWithTypos = [
+      tab(1, 'https://example.org/a', 'Kubernetes networking guide'),
+      tab(2, 'https://example.org/b', 'Kubernetes storage handbook'),
+      tab(3, 'https://example.org/c', 'Kubernetes security primer'),
+      // Deletion (`kubernete` vs `kubernet` after stem -> use `kubernets` vs `kubernete`? Use `kubernetes` -> stem `kubernete` len 9)
+      tab(4, 'https://example.org/d', 'Kubernets cluster overview'),
+      // Substitution (`kubernetas` -> stem `kuberneta` vs `kubernete`)
+      tab(5, 'https://example.org/e', 'Kubernetas pod notes'),
+      // Adjacent transposition (`kubrenetes`) + canonical term repeated on same tab
+      tab(6, 'https://example.org/f', 'Kubrenetes and Kubernetes tips'),
+    ];
+    const proposal = groupByTopic(tabsWithTypos);
+    expect(proposal.groups).toHaveLength(1);
+    expect(proposal.groups[0]?.tabIds).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
   it('groups suspended and active tabs of the same site together in site mode', () => {
     const mixed = [
       tab(

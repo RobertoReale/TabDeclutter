@@ -388,8 +388,11 @@ describe('the answer is not trusted', () => {
     );
     const truncatedResult = await groupByAi(SIX_TABS, truncated, at(0));
     expect(truncatedResult.source).toBe('ai');
+    // Tabs 5 and 6 were never reached before truncation, so §7.2 local clustering recovers them
+    // instead of dumping the unreached tail into "Other".
     expect(membership(truncatedResult.proposal)).toEqual({
       'Corrado Augias Lectures': [1, 2, 3, 4],
+      'Pasta · Ricetta': [5, 6],
     });
   });
 

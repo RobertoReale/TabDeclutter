@@ -30,7 +30,9 @@ import { computed, signal } from '@preact/signals';
 
 import type { AiFallbackReason, Llm, groupByAi as GroupByAi } from '@/core/ai-grouping';
 import {
+  colorFor,
   proposeGroups,
+  siteName,
   type ClusterMode,
   type GroupColor,
   type GroupProposal,
@@ -38,11 +40,18 @@ import {
 import { MINUTE } from '@/core/time';
 import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '@/core/types';
 import { applyGroups, applyMessage, undoGroups, type ApplyResult } from '@/platform/groups';
-import { aiProposalItem, organizeSnoozeUntilItem } from '@/platform/storage';
+import {
+  aiBusyUntilItem,
+  aiProposalItem,
+  aiProposalSignatureItem,
+  organizeSnoozeUntilItem,
+} from '@/platform/storage';
 import { NO_WINDOW } from '@/platform/tabs';
 import {
   isMovableTab,
+  movableTabsSignature,
   organizeWindows,
+  partitionUngroupedBySite,
   undoOrganizeWindows,
   type OrganizeWindowsResult,
   type OrganizeWindowsSnapshot,
@@ -405,6 +414,9 @@ export const windowWorking = signal(false);
 /** Most recent on-device AI window proposal persisted in `storage.session`. */
 export const savedAiProposal = signal<GroupProposal | null>(null);
 
+/** Content signature that `savedAiProposal` was computed for. */
+export const savedAiProposalSignature = signal<string>('');
+
 /** Whether `savedAiProposal` has been hydrated from `storage.session` at least once. */
 export const savedAiProposalLoaded = signal(false);
 
@@ -421,20 +433,29 @@ export async function loadSavedAiProposal(): Promise<void> {
         savedAiProposal.value = next;
         savedAiProposalLoaded.value = true;
       });
+      aiProposalSignatureItem.watch((next) => {
+        savedAiProposalSignature.value = next;
+      });
     } catch {
       // Fallback when storage watching is unavailable in lightweight test stubs.
     }
   }
-  const stored = await aiProposalItem.getValue().catch(() => null);
+  const [stored, sig] = await Promise.all([
+    aiProposalItem.getValue().catch(() => null),
+    aiProposalSignatureItem.getValue().catch(() => ''),
+  ]);
   savedAiProposal.value = stored;
+  savedAiProposalSignature.value = sig;
   savedAiProposalLoaded.value = true;
 }
 
 /** Clears any cached on-device AI window proposal (e.g. when disabling AI). */
 export function clearSavedAiProposal(): void {
   savedAiProposal.value = null;
+  savedAiProposalSignature.value = '';
   lastAutoWindowAiSignature.value = null;
   void aiProposalItem.setValue(null).catch(() => undefined);
+  void aiProposalSignatureItem.setValue('').catch(() => undefined);
 }
 
 /** All currently open, non-incognito tabs eligible for window organization. */
@@ -444,22 +465,17 @@ export const movableTabs = computed<readonly TabInfo[]>(() =>
   ),
 );
 
-/** Stable signature of the currently movable tab IDs (empty when fewer than 2 tabs exist). */
-export const movableTabSignature = computed<string>(() => {
-  const movable = movableTabs.value;
-  if (movable.length < 2) return '';
-  return movable
-    .map((tab) => tab.id)
-    .sort((a, b) => a - b)
-    .join(',');
-});
+/** Content-aware signature of the currently movable tabs (empty when fewer than 2 tabs exist). */
+export const movableTabSignature = computed<string>(() => movableTabsSignature(movableTabs.value));
 
 /** Whether `proposal` already accounts for every live movable tab with at least one valid group. */
 export function aiProposalCoversMovable(
   proposal: GroupProposal | null,
   movable: readonly TabInfo[],
+  savedSignature = '',
 ): boolean {
   if (proposal === null || movable.length < 2) return false;
+  if (savedSignature !== '' && savedSignature !== movableTabsSignature(movable)) return false;
   const movableIds = new Set(movable.map((tab) => tab.id));
   const known = new Set<number>(proposal.ungrouped);
   let hasLiveGroup = false;
@@ -494,6 +510,31 @@ export interface WindowPlan {
 export const windowPlan = computed<WindowPlan>(() => {
   const movable = movableTabs.value;
   if (movable.length === 0) return { source: 'local', groups: [], ungrouped: [] };
+  const byId = new Map(movable.map((tab) => [tab.id, tab]));
+  const splitSites =
+    panelData.value?.settings.autoWindowMode === 'split-windows' && mode.value === 'topic';
+
+  const finalize = (
+    source: 'ai' | 'local',
+    groups: WindowPlanGroup[],
+    ungrouped: readonly number[],
+  ): WindowPlan => {
+    if (!splitSites || ungrouped.length === 0) return { source, groups, ungrouped };
+    const { siteBuckets, remaining } = partitionUngroupedBySite(ungrouped, byId, groups.length);
+    return {
+      source,
+      groups: [
+        ...groups,
+        ...siteBuckets.map((bucket) => ({
+          key: `site:${bucket.siteKey}`,
+          title: siteName(bucket.siteKey),
+          color: colorFor(bucket.siteKey),
+          tabIds: bucket.tabIds,
+        })),
+      ],
+      ungrouped: remaining,
+    };
+  };
 
   const clusterLocal = (subset: readonly TabInfo[]) =>
     proposeGroups(
@@ -557,21 +598,21 @@ export const windowPlan = computed<WindowPlan>(() => {
         }
       }
       const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
-      return { source: 'ai', groups, ungrouped };
+      return finalize('ai', groups, ungrouped);
     }
   }
 
   const local = clusterLocal(movable);
-  return {
-    source: 'local',
-    groups: local.groups.map((group) => ({
+  return finalize(
+    'local',
+    local.groups.map((group) => ({
       key: group.key,
       title: group.title,
       color: group.color,
       tabIds: group.tabIds,
     })),
-    ungrouped: local.ungrouped,
-  };
+    local.ungrouped,
+  );
 });
 
 export interface OrganizeWindowsWithAiOptions {
@@ -648,10 +689,8 @@ export async function organizeWindowsWithAi(
   if (movable.length < 2) {
     return finish();
   }
-  lastAutoWindowAiSignature.value = movable
-    .map((tab) => tab.id)
-    .sort((a, b) => a - b)
-    .join(',');
+  const currentSignature = movableTabsSignature(movable);
+  lastAutoWindowAiSignature.value = currentSignature;
 
   // Group across every open window together by placing movable tabs in one virtual window,
   // with compact 1..N IDs so the small local model never drops digits from Chrome's 10-digit IDs.
@@ -668,6 +707,9 @@ export async function organizeWindowsWithAi(
   const controller = new AbortController();
   running = controller;
   aiWorking.value = true;
+  void aiBusyUntilItem
+    .setValue(Date.now() + PANEL_AI_WARMUP_TIMEOUT_MS + PANEL_AI_TIMEOUT_MS)
+    .catch(() => undefined);
   clearAiFallbackNotice();
   let proposal: GroupProposal | undefined;
   let usedModel: Llm | undefined;
@@ -722,14 +764,18 @@ export async function organizeWindowsWithAi(
         clearAiAutoCooldown();
         clearAiFallbackNotice();
         savedAiProposal.value = restored;
+        savedAiProposalSignature.value = currentSignature;
         savedAiProposalLoaded.value = true;
         void aiProposalItem.setValue(restored).catch(() => undefined);
+        void aiProposalSignatureItem.setValue(currentSignature).catch(() => undefined);
       } else {
         if (request.automatic === true) {
           aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
         }
         savedAiProposal.value = null;
+        savedAiProposalSignature.value = '';
         void aiProposalItem.setValue(null).catch(() => undefined);
+        void aiProposalSignatureItem.setValue('').catch(() => undefined);
         recordAiFallback('no-groups', timing);
       }
     } else if (result.fallbackReason !== 'empty') {
@@ -737,7 +783,9 @@ export async function organizeWindowsWithAi(
         aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
       }
       savedAiProposal.value = null;
+      savedAiProposalSignature.value = '';
       void aiProposalItem.setValue(null).catch(() => undefined);
+      void aiProposalSignatureItem.setValue('').catch(() => undefined);
       recordAiFallback(
         result.fallbackReason,
         result.fallbackDetail !== undefined ? `${result.fallbackDetail} (${timing})` : timing,
@@ -751,7 +799,9 @@ export async function organizeWindowsWithAi(
       aiAutoCooldownUntil = Date.now() + AI_AUTO_RETRY_COOLDOWN_MS;
     }
     savedAiProposal.value = null;
+    savedAiProposalSignature.value = '';
     void aiProposalItem.setValue(null).catch(() => undefined);
+    void aiProposalSignatureItem.setValue('').catch(() => undefined);
     const elapsed = formatSeconds(Date.now() - runStartedAt);
     const budget = `${Math.round(PANEL_AI_WARMUP_TIMEOUT_MS / 1000)}s`;
     const meta = `LanguageModel.create · ${elapsed}/${budget} · session=${wasWarm ? 'warm' : 'cold'} · tabs=${mapped.compact.length}`;
@@ -776,6 +826,7 @@ export async function organizeWindowsWithAi(
       running = null;
       aiWorking.value = false;
       aiStageDetail.value = null;
+      void aiBusyUntilItem.setValue(0).catch(() => undefined);
     }
   }
 
@@ -795,7 +846,9 @@ export async function undoWindowOrganize(
       .setValue(Date.now() + WINDOW_UNDO_SNOOZE_MS)
       .catch(() => undefined);
     savedAiProposal.value = null;
+    savedAiProposalSignature.value = '';
     await aiProposalItem.setValue(null).catch(() => undefined);
+    await aiProposalSignatureItem.setValue('').catch(() => undefined);
     await undoFn(last.undo);
   } catch (error: unknown) {
     console.error('TabDeclutter: undo window organize', error);
@@ -823,6 +876,7 @@ export function resetAiGrouping(): void {
   windowWorking.value = false;
   windowOrganized.value = null;
   savedAiProposal.value = null;
+  savedAiProposalSignature.value = '';
   savedAiProposalLoaded.value = false;
   lastAutoWindowAiSignature.value = null;
   aiAutoCooldownUntil = 0;

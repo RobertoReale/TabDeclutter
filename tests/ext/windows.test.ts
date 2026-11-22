@@ -698,6 +698,88 @@ describe('platform/windows', () => {
     // The single new tab is incrementally matched and moved straight into the Corrado Augias window!
     expect(tabs.find((t) => t.id === 199)?.windowId).toBe(augiasWindow);
   });
+
+  it('separates multi-tab ungrouped sites (e.g. YouTube, Gemini) from unrelated singletons (e.g. GitHub) in topic split-windows mode', async () => {
+    const { api, tabs } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://www.youtube.com/watch?v=a1',
+        title: 'Lectio magistralis - Corrado Augias - YouTube',
+      },
+      {
+        id: 2,
+        windowId: 1,
+        index: 1,
+        url: 'https://www.youtube.com/watch?v=a2',
+        title: 'Tra Cesare e Dio - Corrado Augias - YouTube',
+      },
+      {
+        id: 3,
+        windowId: 1,
+        index: 2,
+        url: 'https://gemini.google.com/app/111122223333',
+        title: 'Prodotto scalare standard - Google Gemini',
+      },
+      {
+        id: 4,
+        windowId: 1,
+        index: 3,
+        url: 'https://gemini.google.com/app/444455556666',
+        title: 'Spiegazione rette tangenti - Google Gemini',
+      },
+      {
+        id: 5,
+        windowId: 1,
+        index: 4,
+        url: 'https://github.com/RobertoReale/TabDeclutter',
+        title: 'RobertoReale/TabDeclutter - GitHub',
+      },
+      {
+        id: 6,
+        windowId: 1,
+        index: 5,
+        url: 'https://www.youtube.com/watch?v=yt1',
+        title: 'The tragedy that always happens when you buy a Stratocaster - YouTube',
+      },
+      {
+        id: 7,
+        windowId: 1,
+        index: 6,
+        url: 'https://www.youtube.com/watch?v=yt2',
+        title: 'FRANCESCO COSTA morning podcast - YouTube',
+      },
+      {
+        id: 8,
+        windowId: 1,
+        index: 7,
+        url: 'https://www.youtube.com/watch?v=yt3',
+        title: 'CALENDARIO campionato serie A - YouTube',
+      },
+    ]);
+
+    const result = await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    const augiasWin = tabs.find((t) => t.id === 1)?.windowId;
+    const geminiWin = tabs.find((t) => t.id === 3)?.windowId;
+    const githubWin = tabs.find((t) => t.id === 5)?.windowId;
+    const youtubeMiscWin = tabs.find((t) => t.id === 6)?.windowId;
+
+    expect(result.windowsCount).toBe(4);
+    expect(tabs.find((t) => t.id === 2)?.windowId).toBe(augiasWin);
+    expect(tabs.find((t) => t.id === 4)?.windowId).toBe(geminiWin);
+    expect(tabs.find((t) => t.id === 7)?.windowId).toBe(youtubeMiscWin);
+    expect(tabs.find((t) => t.id === 8)?.windowId).toBe(youtubeMiscWin);
+    // Gemini and GitHub must never be mixed into the miscellaneous YouTube window.
+    expect(new Set([augiasWin, geminiWin, githubWin, youtubeMiscWin]).size).toBe(4);
+  });
 });
 
 function makeTab(overrides: Partial<TabInfo> = {}): TabInfo {

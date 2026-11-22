@@ -16,7 +16,9 @@ import { unwrapSuspendedUrl } from '@/core/url';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import {
   activityItem,
+  aiBusyUntilItem,
   aiProposalItem,
+  aiProposalSignatureItem,
   duplicateWhitelistItem,
   keepsItem,
   organizeSnoozeUntilItem,
@@ -27,13 +29,14 @@ import {
   settingsItem,
 } from '@/platform/storage';
 import { activateTab, closeTabs, closeWindow, NO_WINDOW, queryTabs } from '@/platform/tabs';
-import { isMovableTab, organizeWindows } from '@/platform/windows';
 
 const AUTOPILOT_DEBOUNCE_MS = 1_200;
 const AUTOPILOT_PERIOD_MINUTES = 15;
 const ALARM_NAME = 'autopilot-sweep';
+const BG_AI_WARMUP_TIMEOUT_MS = 60_000;
 const BG_AI_TIMEOUT_MS = 90_000;
 const BG_AI_COOLDOWN_MS = 2 * MINUTE;
+const SW_KEEPALIVE_MS = 20_000;
 
 function bareKey(key: string): string {
   return key.slice(key.indexOf(':') + 1);
@@ -96,29 +99,59 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     ) {
       return;
     }
-    const allTabs = await queryTabs().catch(() => []);
+    const busyUntil = await aiBusyUntilItem.getValue().catch(() => 0);
+    if (busyUntil > now()) return;
+    const [windowsMod, allTabs] = await Promise.all([
+      import('@/platform/windows'),
+      queryTabs().catch(() => []),
+    ]);
     const movable = allTabs.filter(
-      (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && isMovableTab(tab),
+      (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && windowsMod.isMovableTab(tab),
     );
     if (movable.length < 2) return;
-    const signature = movable
-      .map((tab) => tab.id)
-      .sort((a, b) => a - b)
-      .join(',');
-    const existing = await aiProposalItem.getValue().catch(() => null);
-    if (proposalCoversMovable(existing, movable) || lastBgAiSignature === signature) return;
+    const signature = windowsMod.movableTabsSignature(movable);
+    const [existing, savedSig] = await Promise.all([
+      aiProposalItem.getValue().catch(() => null),
+      aiProposalSignatureItem.getValue().catch(() => ''),
+    ]);
+    if (
+      proposalCoversMovable(existing, movable, savedSig, signature) ||
+      lastBgAiSignature === signature
+    ) {
+      return;
+    }
 
     bgAiInFlight = true;
-    lastBgAiSignature = signature;
+    void aiBusyUntilItem.setValue(now() + BG_AI_WARMUP_TIMEOUT_MS + BG_AI_TIMEOUT_MS).catch(ignore);
+    // Keep the MV3 service worker alive while on-device GPU inference runs.
+    const heartbeat = setInterval(() => {
+      void (browser.runtime as unknown as { getPlatformInfo?: () => Promise<unknown> })
+        .getPlatformInfo?.()
+        .catch(ignore);
+    }, SW_KEEPALIVE_MS);
+    (heartbeat as unknown as { unref?: () => void }).unref?.();
+
     try {
       const [llmMod, aiMod] = await Promise.all([
         import('@/platform/llm'),
         import('@/core/ai-grouping'),
       ]);
       const state = await llmMod.checkAvailability();
-      if (state !== 'available') return;
+      if (state !== 'available') {
+        bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
+        return;
+      }
       const session = llmMod.panelSession({ timeoutMs: BG_AI_TIMEOUT_MS });
-      await session.open?.();
+      const warmupController = new AbortController();
+      const warmupTimer = setTimeout(() => {
+        warmupController.abort(new DOMException('background AI warmup timed out', 'TimeoutError'));
+      }, BG_AI_WARMUP_TIMEOUT_MS);
+      (warmupTimer as unknown as { unref?: () => void }).unref?.();
+      try {
+        await session.open?.({ signal: warmupController.signal });
+      } finally {
+        clearTimeout(warmupTimer);
+      }
 
       const realByShort = new Map<number, number>();
       const compact: TabInfo[] = movable.map((tab, index) => {
@@ -155,10 +188,14 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
         return;
       }
-      await aiProposalItem.setValue(restored);
+      lastBgAiSignature = signature;
+      await Promise.all([
+        aiProposalItem.setValue(restored),
+        aiProposalSignatureItem.setValue(signature),
+      ]);
       const snoozeUntil = await organizeSnoozeUntilItem.getValue().catch(() => 0);
       if (snoozeUntil > now()) return;
-      await organizeWindows({
+      await windowsMod.organizeWindows({
         windowMode: settings.autoWindowMode,
         clusterMode: settings.autoOrganizeMode,
         useTabGroups: settings.useTabGroups,
@@ -168,7 +205,9 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     } catch {
       bgAiCooldownUntil = now() + BG_AI_COOLDOWN_MS;
     } finally {
+      clearInterval(heartbeat);
       bgAiInFlight = false;
+      void aiBusyUntilItem.setValue(0).catch(ignore);
     }
   }
 
@@ -267,6 +306,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi
           ? ((await aiProposalItem.getValue().catch(() => null)) ?? undefined)
           : undefined;
+      const { organizeWindows } = await import('@/platform/windows');
       const winResult = await organizeWindows({
         windowMode: settings.autoWindowMode,
         clusterMode: settings.autoOrganizeMode,
@@ -433,8 +473,11 @@ function onlyAiToggleChanged(
 function proposalCoversMovable(
   proposal: GroupProposal | null,
   movable: readonly TabInfo[],
+  savedSignature: string,
+  currentSignature: string,
 ): boolean {
   if (proposal === null || movable.length < 2) return false;
+  if (savedSignature !== '' && savedSignature !== currentSignature) return false;
   const movableIds = new Set(movable.map((tab) => tab.id));
   const known = new Set<number>(proposal.ungrouped);
   let hasLiveGroup = false;

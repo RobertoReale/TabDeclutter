@@ -36,6 +36,15 @@ export function isMovableTab(tab: TabInfo): boolean {
   return true;
 }
 
+/** Content-aware signature covering tab IDs, site keys, and titles so navigations invalidate stale AI plans. */
+export function movableTabsSignature(movable: readonly TabInfo[]): string {
+  if (movable.length < 2) return '';
+  return [...movable]
+    .sort((a, b) => a.id - b.id)
+    .map((tab) => `${tab.id}:${siteKey(tab.url)}:${tab.title.trim().slice(0, 60)}`)
+    .join('|');
+}
+
 export interface WindowsOrganizeApi {
   tabs: {
     query(query: Record<string, unknown>): Promise<BrowserTab[]>;
@@ -317,9 +326,65 @@ async function mergeAndSortIntoOneWindow(
   return moved;
 }
 
+/** Maximum total thematic + fallback-site windows created in `split-windows` mode. */
+const MAX_SPLIT_WINDOWS = 10;
+
+export interface SiteFallbackBucket {
+  readonly siteKey: string;
+  readonly tabIds: readonly number[];
+}
+
+/**
+ * Splits remaining `ungrouped` tabs by site when a site has ≥ 2 ungrouped tabs (up to the
+ * window cap), so miscellaneous tabs on a busy site (e.g. 10 YouTube videos or 2 Gemini chats)
+ * get their own clean window instead of being mixed into one catch-all window alongside
+ * unrelated single-tab sites (e.g. GitHub).
+ */
+export function partitionUngroupedBySite(
+  ungrouped: readonly number[],
+  byId: ReadonlyMap<number, TabInfo>,
+  existingGroupCount: number,
+  maxTotalWindows = MAX_SPLIT_WINDOWS,
+): { readonly siteBuckets: readonly SiteFallbackBucket[]; readonly remaining: readonly number[] } {
+  const bySite = new Map<string, number[]>();
+  const remaining: number[] = [];
+  for (const id of ungrouped) {
+    const key = siteKey(byId.get(id)?.url ?? '');
+    if (key === '') {
+      remaining.push(id);
+      continue;
+    }
+    const list = bySite.get(key);
+    if (list === undefined) bySite.set(key, [id]);
+    else list.push(id);
+  }
+
+  const multiSite = [...bySite.entries()]
+    .filter(([, ids]) => ids.length >= 2)
+    .sort((a, b) =>
+      b[1].length !== a[1].length ? b[1].length - a[1].length : a[0].localeCompare(b[0]),
+    );
+
+  const budget = Math.max(0, maxTotalWindows - existingGroupCount);
+  const siteBuckets: SiteFallbackBucket[] = [];
+  for (const [key, ids] of multiSite) {
+    if (siteBuckets.length < budget) {
+      siteBuckets.push({ siteKey: key, tabIds: ids });
+    } else {
+      remaining.push(...ids);
+    }
+  }
+  for (const [, ids] of bySite) {
+    if (ids.length === 1) remaining.push(...ids);
+  }
+
+  return { siteBuckets, remaining: sortBySite(remaining, byId) };
+}
+
 /**
  * Mode 2: Places each topic/site cluster (with ≥ 2 tabs) into its own dedicated window,
- * and puts remaining unclustered tabs together in the primary window, ordered cleanly.
+ * separates multi-tab ungrouped sites into clean fallback windows in topic mode, and puts
+ * remaining singletons together in a small catch-all window.
  */
 async function splitIntoThematicWindows(
   allTabs: readonly TabInfo[],
@@ -335,10 +400,21 @@ async function splitIntoThematicWindows(
 
   const byId = new Map(movable.map((tab) => [tab.id, tab]));
 
-  // Build desired window buckets: one per proposed group, plus one bucket for ungrouped tabs (sorted by site).
+  // Build desired window buckets: one per proposed group, then fallback site windows for any
+  // ungrouped site with ≥ 2 tabs (in topic mode), plus one catch-all for remaining singletons.
   const buckets: number[][] = proposal.groups.map((group) => [...group]);
   if (proposal.ungrouped.length > 0) {
-    buckets.push(sortBySite(proposal.ungrouped, byId));
+    if (clusterMode === 'topic') {
+      const { siteBuckets, remaining } = partitionUngroupedBySite(
+        proposal.ungrouped,
+        byId,
+        buckets.length,
+      );
+      for (const bucket of siteBuckets) buckets.push([...bucket.tabIds]);
+      if (remaining.length > 0) buckets.push([...remaining]);
+    } else {
+      buckets.push(sortBySite(proposal.ungrouped, byId));
+    }
   }
   if (buckets.length === 0) return { movedTabs: 0, windowsCount: 1 };
 

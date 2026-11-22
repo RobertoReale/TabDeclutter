@@ -69,6 +69,7 @@ import {
   plannedTabs,
   savedAiProposal,
   savedAiProposalLoaded,
+  savedAiProposalSignature,
   scope,
   setMode,
   setOptions,
@@ -490,7 +491,15 @@ function AiPanel({
     if (useTabGroups || !isAuto || !active || !hydrated || busy || movableSig === '') return;
     if (isAiAutoCoolingDown()) return;
     if (lastAutoSig === movableSig) return;
-    if (aiProposalCoversMovable(savedAiProposal.value, movableTabs.value)) return;
+    if (
+      aiProposalCoversMovable(
+        savedAiProposal.value,
+        movableTabs.value,
+        savedAiProposalSignature.value,
+      )
+    ) {
+      return;
+    }
     lastAutoWindowAiSignature.value = movableSig;
     onAutoRunAi();
   }, [useTabGroups, isAuto, active, hydrated, busy, movableSig, lastAutoSig]);

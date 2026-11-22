@@ -113,11 +113,20 @@ export const guardStateItem = defineVersioned<GuardState>('session:guardState', 
 });
 
 /**
- * The most recent on-device AI window proposal from the side panel, kept for this browser
- * session so background autopilot preserves AI topic windows instead of overwriting them
- * with the deterministic heuristic.
+ * The most recent on-device AI window proposal from the side panel or background autopilot,
+ * kept for this browser session so background autopilot preserves AI topic windows instead of
+ * overwriting them with the deterministic heuristic.
  */
 export const aiProposalItem = defineVersioned<GroupProposal | null>('session:aiProposal', null);
+
+/** Content signature (tab IDs + hosts + titles) that `aiProposalItem` was generated for. */
+export const aiProposalSignatureItem = defineVersioned<string>('session:aiProposalSignature', '');
+
+/**
+ * Timestamp (ms epoch) until which an on-device AI prompt is currently running in either the
+ * side panel or background service worker, preventing both contexts from competing on the GPU.
+ */
+export const aiBusyUntilItem = defineVersioned<number>('session:aiBusyUntil', 0);
 
 /**
  * Timestamp (ms epoch) until which background `autoOrganize` pauses after the user clicks
