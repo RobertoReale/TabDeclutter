@@ -136,7 +136,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       const byId = new Map(tabs.map((tab) => [tab.id, tab]));
       const staleMs = Math.max(1, settings.staleDays) * DAY;
       const closeCandidates = scoring.tabs.filter((scored) => {
-        if (scored.bucket !== 'close' || forgottenIds.has(scored.windowId)) return false;
+        if (forgottenIds.has(scored.windowId)) return false;
         const tab = byId.get(scored.tabId);
         if (tab === undefined) return false;
         return isSafeToAutoClose(tab, scored, settings, staleMs);
@@ -270,6 +270,8 @@ export function isSafeToAutoClose(
   settings: Settings,
   staleMs: number,
 ): boolean {
+  if (scored.bucket === 'keep') return false;
+  if (scored.bucket === 'review' && scored.idleMs < staleMs) return false;
   if (tab.active || tab.pinned || tab.audible || tab.hidden || tab.incognito) return false;
   const rawUrl = unwrapSuspendedUrl(tab.url).trim();
   if (rawUrl === '') return false;

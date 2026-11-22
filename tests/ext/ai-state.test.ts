@@ -34,17 +34,22 @@ import {
 import {
   aiBadge,
   aiFallbackNotice,
+  aiProposalCoversMovable,
   aiWorking,
   cancelAiGrouping,
+  clearSavedAiProposal,
   draft,
+  loadSavedAiProposal,
   organizeWindowsWithAi,
   resetAiGrouping,
+  savedAiProposal,
   setMode,
   setOptions,
   setScope,
   startAiGrouping,
   undoWindowOrganize,
   windowOrganized,
+  windowPlan,
 } from '../../src/entrypoints/sidepanel/state/organize';
 import { brought } from '../../src/entrypoints/sidepanel/state/organize-request';
 import { setSetting } from '../../src/entrypoints/sidepanel/state/settings';
@@ -689,5 +694,44 @@ describe('persisting topic + AI preferences without resets or races', () => {
     expect(undone).toEqual([snapshot]);
     expect(windowOrganized.value).toBeNull();
     expect(await organizeSnoozeUntilItem.getValue()).toBeGreaterThan(Date.now());
+  });
+
+  it('hydrates savedAiProposal for windowPlan, clusters newly opened tabs, and clears on fallback or toggle-off', async () => {
+    const initial = tabs();
+    panelData.value = {
+      ...data(initial),
+      settings: { ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true },
+    };
+    setMode('topic');
+
+    expect(windowPlan.value.source).toBe('local');
+    expect(aiProposalCoversMovable(null, initial)).toBe(false);
+
+    await aiProposalItem.setValue(aiProposal());
+    await loadSavedAiProposal();
+    expect(savedAiProposal.value?.groups.map((g) => g.title)).toEqual(['Reading', 'Work']);
+    expect(aiProposalCoversMovable(savedAiProposal.value, initial)).toBe(true);
+    expect(windowPlan.value.source).toBe('ai');
+    expect(windowPlan.value.groups.map((g) => g.title)).toEqual(['Reading', 'Work']);
+
+    // Opening 2 new tabs not in the cached AI proposal: coverage becomes false (triggering
+    // refresh in OrganizeView), while windowPlan still clusters the new pair cleanly.
+    const withNew = [
+      ...initial,
+      tab(7, 'https://cooking.example/pasta-1', { title: 'Pasta ricetta facile' }),
+      tab(8, 'https://cooking.example/pasta-2', { title: 'Pasta ricetta veloce' }),
+    ];
+    panelData.value = {
+      ...data(withNew),
+      settings: { ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true },
+    };
+    expect(aiProposalCoversMovable(savedAiProposal.value, withNew)).toBe(false);
+    expect(windowPlan.value.source).toBe('ai');
+    expect(windowPlan.value.groups.length).toBe(3);
+
+    clearSavedAiProposal();
+    expect(savedAiProposal.value).toBeNull();
+    expect(windowPlan.value.source).toBe('local');
+    expect(await aiProposalItem.getValue()).toBeNull();
   });
 });

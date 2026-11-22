@@ -138,6 +138,20 @@ describe('the prompt', () => {
     expect(line).toBe('8|A B C D E|news.site');
   });
 
+  it('strips trailing site suffixes before truncating while keeping bare site titles', () => {
+    expect(
+      tabLine(
+        tab(9, 'https://www.youtube.com/watch?v=1', 'Corrado Augias - I promessi sposi - YouTube'),
+      ),
+    ).toBe('9|Corrado Augias - I promessi sposi|youtube.com');
+    expect(
+      tabLine(
+        tab(10, 'https://gemini.google.com/app/123', 'Studio di una funzione - Google Gemini'),
+      ),
+    ).toBe('10|Studio di una funzione|gemini.google.com');
+    expect(tabLine(tab(11, 'https://www.youtube.com/', 'YouTube'))).toBe('11|YouTube|youtube.com');
+  });
+
   it('asks for JSON only, and for the ids it listed', () => {
     const prompt = buildPrompt(SIX_TABS.slice(0, 2));
     expect(prompt.split('\n')).toHaveLength(4);

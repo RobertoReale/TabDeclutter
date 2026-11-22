@@ -127,6 +127,11 @@ export function unwrapSuspendedUrl(url: string): string {
   return current;
 }
 
+/** Whether `url` is wrapped by a tab-suspender extension (`unwrapSuspendedUrl` extracted a real web URL). */
+export function isSuspendedUrl(url: string): boolean {
+  return unwrapSuspendedUrl(url) !== url;
+}
+
 /**
  * Rewrites `url` into the key form described by `options`.
  *

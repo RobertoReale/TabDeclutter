@@ -3408,3 +3408,29 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Why:** users running tab suspenders alongside TabDeclutter get consistent grouping, duplicate
   protection, and archive recovery without uninstalling their suspender, and non-AI topic
   clustering handles real Italian/English titles cleanly without over-merging or exceeding budgets.
+
+## Post-release — Dominant-topic IDF smoothing, stale AI cache eviction, window overview, and autopilot stale-tab closing
+- **Context:** real-browser testing with 44–54 tabs revealed four separate issues: (1) raw
+  `ln(1 + N/df)` IDF penalized a dominant 11-tab topic by >6× in squared weight relative to
+  singleton title words (`df === 1`), fracturing one subject across tiny pairs and ungrouped tabs
+  while allowing a single homonym (`integrale`/`integrali`) to hijack unrelated tabs; (2) cached
+  `session:aiProposal` values kept shrunken 1-tab ghost windows alive, dumped every newly opened
+  tab into `ungrouped`, and never auto-refreshed when opening Organize without Tab Groups; (3) the
+  `!useTabGroups` Organize view gave no visibility into the window groups or whether AI or local
+  clustering produced them; and (4) `autoDeclutter` could never close read tabs (which cap at 55
+  inactivity points, `bucket: 'review'`) even past `staleDays`, abandoned 404 pages (`errorPoints: 15`)
+  stayed below `reviewBucketMin`, and tab-suspender tabs did not receive `discardedPoints`.
+- **Decision:** smoothed TF-IDF in `src/core/cluster.ts` (`baseIdf = 1 + 0.25 * ln(1 + N/df)`,
+  with `0.7` damping on `df === 1` content tokens) and added Italian `-ale`/`-ali` stemming paired
+  with `-alizzazione`/`-alizzazioni`; stripped site suffixes in `ai-grouping.ts`'s `tabLine()`;
+  updated `resolveWindowProposal()` in `src/platform/windows.ts` to drop `< 2`-tab groups, cluster
+  newly opened tabs alongside valid AI groups, and re-cluster fresh when coverage drops below 50%;
+  added session AI hydration, auto-refresh on uncovered tabs, and a collapsible Windows overview
+  (with AI/Local source badge) in `OrganizeView.tsx`; updated `isSafeToAutoClose()` in
+  `autopilot.ts` to allow `review` tabs once `idleMs >= staleMs`, raised `errorPoints` to `25`
+  (improving `tabs-300.json` precision to 0.941 / recall 0.576), and counted `isSuspendedUrl()`
+  alongside `tab.discarded` in `scoring.ts`.
+- **Why:** dominant real-world topics consolidate cleanly into single windows without false merges,
+  on-device AI stays current and transparent instead of freezing stale layouts, and Autopilot
+  honours the user's configured `staleDays` while keeping all safety guardrails and precision
+  targets intact.

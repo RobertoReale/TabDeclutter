@@ -263,7 +263,7 @@ function isOpaquePathToken(token: string): boolean {
  * match while displayed group titles still use the original surface words.
  */
 const STEM_SUFFIXES: readonly string[] =
-  'izzazioni izzazione izations ization isations isation imenti imento amenti amento azioni azione ations ation ments ment mente ings ing'.split(
+  'alizzazioni alizzazione izzazioni izzazione izations ization isations isation imenti imento amenti amento azioni azione ations ation ments ment mente ings ing'.split(
     ' ',
   );
 
@@ -279,6 +279,7 @@ function stemToken(raw: string): string {
   }
   if (word.endsWith('ies') && word.length >= 6) return `${word.slice(0, -3)}y`;
   if (word.endsWith('ed') && word.length >= 7) return word.slice(0, -2);
+  if (word.length >= 7 && /al[ei]$/.test(word)) return word.slice(0, -3);
   if (word.length >= 8 && /at[aeio]$/.test(word)) return word.slice(0, -3);
   if (word.length >= 7 && /[cg]h[ei]$/.test(word)) return word.slice(0, -2);
   if (word.length >= 6 && /(?:sh|ch|[sxz])es$/.test(word)) return word.slice(0, -2);
@@ -361,12 +362,6 @@ export function colorFor(key: string): GroupColor {
   return GROUP_COLORS[hashOf(key) % GROUP_COLORS.length] as GroupColor;
 }
 
-const NON_WEB_PROTOCOLS: ReadonlySet<string> = new Set(
-  'chrome: chrome-extension: moz-extension: edge: brave: vivaldi: opera: about: devtools: view-source: file: data: blob:'.split(
-    ' ',
-  ),
-);
-
 /**
  * Which site a tab belongs to, as a key: the registrable domain, or the host shown in a
  * row when there is none — `localhost`, an IP address, an intranet name are sites to the
@@ -377,7 +372,8 @@ const NON_WEB_PROTOCOLS: ReadonlySet<string> = new Set(
 export function siteKey(url: string): string {
   const trimmed = unwrapSuspendedUrl(url).trim();
   try {
-    if (NON_WEB_PROTOCOLS.has(new URL(trimmed).protocol.toLowerCase())) return '';
+    const protocol = new URL(trimmed).protocol;
+    if (protocol !== 'http:' && protocol !== 'https:') return '';
   } catch {
     // Let registrableDomain / displayHost handle bare hostnames or unparseable strings.
   }
@@ -427,14 +423,16 @@ function simplify(text: string): string {
 export function stripSiteSuffix(title: string, url: string): string {
   const effectiveUrl = unwrapSuspendedUrl(url);
   const key = siteKey(effectiveUrl);
-  const name = siteName(key);
+  const label = domainLabel(key);
+  const appName = APP_SUBDOMAINS[key] ?? '';
   const parentKey = registrableDomain(effectiveUrl) ?? '';
-  const parentName = parentKey !== '' && parentKey !== key ? siteName(parentKey) : '';
-  const candidates: string[] = [name, key, domainLabel(key), displayHost(effectiveUrl)];
-  if (parentName !== '') {
-    candidates.push(parentName, `${parentName} ${name}`, `${name} ${parentName}`);
+  const parentLabel = parentKey !== '' && parentKey !== key ? domainLabel(parentKey) : '';
+  const candidates: string[] = [appName, key, label, displayHost(effectiveUrl)];
+  if (parentLabel !== '') {
+    const sub = appName || label;
+    candidates.push(parentLabel, `${parentLabel} ${sub}`, `${sub} ${parentLabel}`);
   }
-  const aliases = SITE_TITLE_ALIASES[key] ?? SITE_TITLE_ALIASES[domainLabel(key)];
+  const aliases = SITE_TITLE_ALIASES[key] ?? SITE_TITLE_ALIASES[label];
   if (aliases !== undefined) candidates.push(...aliases);
   const forms = new Set(candidates.filter((form) => form !== '').map(simplify));
   let out = title.trim();
@@ -730,8 +728,12 @@ function vectorize(tabs: readonly TabInfo[], options: Required<ClusterOptions>):
     let norm = 0;
     for (const [at, id] of sorted.entries()) {
       const df = documentFrequency[id] as number;
-      const idf = Math.log(1 + total / df);
       const isDomain = (vocabulary[id] as string).startsWith(DOMAIN_PREFIX);
+      // Smooth IDF prevents a large dominant topic (e.g. 10+ tabs on one subject) from being
+      // penalised against unique decorative title words (`df === 1`), while damping singleton
+      // content words so long titles still merge cleanly with their topic.
+      const baseIdf = 1 + 0.25 * Math.log(1 + total / df);
+      const idf = df === 1 && !isDomain ? 0.7 * baseIdf : baseIdf;
       const rawTf = perTab.get(id) as number;
       const tf = rawTf > 1 ? 1 + Math.log(rawTf) : rawTf;
       const weight = tf * idf * (isDomain ? options.domainWeight : 1);

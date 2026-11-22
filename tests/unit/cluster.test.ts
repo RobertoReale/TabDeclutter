@@ -599,6 +599,75 @@ describe('grouping by topic (PLAN.md §7.2)', () => {
     }
   });
 
+  it('consolidates dominant multi-tab topics without fracturing and links -ale/-ali adjectives across sites', () => {
+    const realWorld = [
+      tab(1, 'https://teatrodellebiglie.it/chi-siamo', 'Teatro delle Biglie'),
+      tab(2, 'https://teatrodellebiglie.it/spettacoli', 'Teatro delle Biglie'),
+      tab(3, 'https://teatrodellebiglie.it/corsi', 'Teatro delle Biglie'),
+      tab(4, 'https://claude.ai/chat/111222333444', 'Roberto, interesse per il teatro - Claude'),
+      tab(
+        5,
+        'https://www.youtube.com/watch?v=t1',
+        'Compagnia Teatrale delle Biglie - Legàmi (parte 1/2) - YouTube',
+      ),
+      tab(
+        10,
+        'https://www.youtube.com/watch?v=a1',
+        'Lectio magistralis sulla laicità - CORRADO AUGIAS - YouTube',
+      ),
+      tab(
+        11,
+        'https://www.youtube.com/watch?v=a2',
+        'Lectio magistralis. Il grande romanzo dei Vangeli. Corrado Augias - YouTube',
+      ),
+      tab(
+        12,
+        'https://www.youtube.com/watch?v=a3',
+        'Corrado Augias: Breviario per un confuso presente (Einaudi) - YouTube',
+      ),
+      tab(
+        13,
+        'https://www.youtube.com/watch?v=a4',
+        'Corrado Augias presenta "Breviario per un confuso presente" (Einaudi) - YouTube',
+      ),
+      tab(
+        14,
+        'https://www.youtube.com/watch?v=a5',
+        "L'intervista integrale a Corrado Augias - YouTube",
+      ),
+      tab(
+        15,
+        'https://www.youtube.com/watch?v=a6',
+        'Tra Cesare e Dio. Incontro con Corrado Augias - YouTube',
+      ),
+      tab(16, 'https://www.youtube.com/watch?v=a7', "CORRADO AUGIAS - La vita s'impara - YouTube"),
+      tab(
+        17,
+        'https://www.youtube.com/watch?v=a8',
+        "L'intervista a Corrado Augias su islamismo, cristianesimo, ebraismo - YouTube",
+      ),
+      tab(18, 'https://www.youtube.com/watch?v=a9', 'Corrado Augias - I promessi sposi - YouTube'),
+      tab(20, 'https://www.youtube.com/watch?v=m1', 'calcolo integrali - YouTube'),
+      tab(
+        21,
+        'https://gemini.google.com/app/ccc111222',
+        'Esempi di rette tangenti - Google Gemini',
+      ),
+      tab(
+        22,
+        'https://gemini.google.com/app/ddd333444',
+        'Prodotto scalare standard - Google Gemini',
+      ),
+    ];
+    const proposal = groupByTopic(realWorld);
+    const sets = proposal.groups.map((g) => [...g.tabIds]);
+    expect(sets).toContainEqual([10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    expect(sets).toContainEqual([1, 2, 3, 4, 5]);
+    // `calcolo integrali` must NOT steal `L'intervista integrale a Corrado Augias`, and
+    // unrelated Gemini chats must NOT falsely merge on domain alone.
+    expect(proposal.ungrouped).toEqual([20, 21, 22]);
+  });
+
   it('groups suspended and active tabs of the same site together in site mode', () => {
     const mixed = [
       tab(

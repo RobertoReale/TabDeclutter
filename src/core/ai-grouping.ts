@@ -20,7 +20,7 @@
  */
 
 import type { ClusterOptions, GroupProposal, ProposedGroup } from './cluster';
-import { colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic } from './cluster';
+import { colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic, stripSiteSuffix } from './cluster';
 import type { TabInfo } from './types';
 import { displayHost } from './url';
 
@@ -165,7 +165,7 @@ export function responseConstraintFor(maxGroups: number, maxNameLength: number):
  * that a title can neither carry the separator nor end the line.
  */
 export function tabLine(tab: Pick<TabInfo, 'id' | 'title' | 'url'>): string {
-  const title = tab.title
+  const title = stripSiteSuffix(tab.title, tab.url)
     .replace(/[|\s]+/gu, ' ')
     .trim()
     .slice(0, MAX_INPUT_TITLE_CHARS)

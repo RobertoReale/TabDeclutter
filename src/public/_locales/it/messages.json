@@ -1062,5 +1062,17 @@
   "archiveIntro": {
     "message": "Ogni scheda chiusa da te o dal Pilota automatico resta salvata qui e puoi riaprirla in qualsiasi momento.",
     "description": "Introductory helper text at the top of the Archive view."
+  },
+  "windowPlanHeading": {
+    "message": "Finestre e argomenti",
+    "description": "Heading of the collapsible window-organization overview shown in Organize when coloured tab groups are off."
+  },
+  "windowPlanSourceLocal": {
+    "message": "Locale",
+    "description": "Badge next to the window-organization overview heading when local clustering produced the groups."
+  },
+  "windowPlanHint": {
+    "message": "Come sono raggruppate adesso le tue schede aperte. Clicca una scheda per aprirla.",
+    "description": "Short explanation under the window-organization overview heading."
   }
 }

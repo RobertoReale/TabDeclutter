@@ -34,6 +34,9 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
   - Groups related tabs **by website** or **by topic** and places each cluster into its own
     dedicated browser window so every open window focuses on a single coherent topic or project.
   - The cluster containing the tab you are currently viewing always stays in your active window.
+- **Live windows & topics overview**: in the **Organize** view, inspect every window cluster (and
+  any ungrouped tabs) in a collapsible list showing whether **AI on-device** or **Local** grouping
+  produced it, and click any tab to jump straight to it.
 - **One-click Undo for windows**: every manual window organization shows an **Undo** bar that
   restores tabs (and any emptied windows) back to their previous layout and temporarily snoozes
   background auto-organize so your layout stays intact.

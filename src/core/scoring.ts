@@ -39,7 +39,7 @@ import {
   type Settings,
   type TabInfo,
 } from './types';
-import { normalizeUrl } from './url';
+import { isSuspendedUrl, normalizeUrl } from './url';
 
 /** Where a score puts a tab in Declutter (PLAN.md §4.2). */
 export type Bucket = 'close' | 'review' | 'keep';
@@ -623,7 +623,7 @@ function scoreOne(fact: TabFacts, window: WindowFacts, pass: Pass): ScoredTab {
     reasons.push({ code: 'bookmarked', points: config.bookmarkedPoints });
   }
 
-  if (fact.tab.discarded) {
+  if (fact.tab.discarded || isSuspendedUrl(fact.tab.url)) {
     reasons.push({ code: 'discarded', points: config.discardedPoints });
   }
 

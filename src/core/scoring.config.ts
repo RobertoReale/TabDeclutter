@@ -64,7 +64,7 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
 
   inactivityPoints: 55,
   transientPoints: 25,
-  errorPoints: 15,
+  errorPoints: 25,
   transientMinIdleMs: HOUR,
 
   lowEngagementPoints: 15,

@@ -4,6 +4,7 @@ import { DEFAULT_MATCH_OPTIONS } from '../../src/core/types';
 import type { MatchOptions } from '../../src/core/types';
 import {
   displayHost,
+  isSuspendedUrl,
   isTrackingParam,
   normalizeUrl,
   registrableDomain,
@@ -344,5 +345,9 @@ describe('unwrapSuspendedUrl (tab-suspender compatibility)', () => {
     expect(displayHost(TINY)).toBe('youtube.com');
     expect(displayHost(TAB_SUSPENDER)).toBe('gemini.google.com');
     expect(displayHost('chrome-extension://bbomjaikkcabgmfaomdich/views/app.html')).toBe('');
+    expect(isSuspendedUrl(TINY)).toBe(true);
+    expect(isSuspendedUrl(MARVELLOUS)).toBe(true);
+    expect(isSuspendedUrl('https://youtube.com/watch?v=abc')).toBe(false);
+    expect(isSuspendedUrl('chrome-extension://bbomjaikkcabgmfaomdich/views/app.html')).toBe(false);
   });
 });

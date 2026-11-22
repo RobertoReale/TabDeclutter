@@ -1062,5 +1062,17 @@
   "archiveIntro": {
     "message": "Every tab closed by you or by Autopilot is kept here so you can restore it anytime.",
     "description": "Introductory helper text at the top of the Archive view."
+  },
+  "windowPlanHeading": {
+    "message": "Windows and topics",
+    "description": "Heading of the collapsible window-organization overview shown in Organize when coloured tab groups are off."
+  },
+  "windowPlanSourceLocal": {
+    "message": "Local",
+    "description": "Badge next to the window-organization overview heading when local clustering produced the groups."
+  },
+  "windowPlanHint": {
+    "message": "How your open tabs are grouped right now. Click any tab to jump to it.",
+    "description": "Short explanation under the window-organization overview heading."
   }
 }

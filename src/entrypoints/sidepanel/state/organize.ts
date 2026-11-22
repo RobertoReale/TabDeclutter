@@ -53,6 +53,7 @@ import {
   availability,
   checkAi,
   PANEL_AI_TIMEOUT_MS,
+  useAi,
   type AiAvailability,
 } from './ai';
 import {
@@ -270,6 +271,141 @@ export const windowOrganized = signal<{
 /** Whether a window organization or window undo is currently running. */
 export const windowWorking = signal(false);
 
+/** Most recent on-device AI window proposal persisted in `storage.session`. */
+export const savedAiProposal = signal<GroupProposal | null>(null);
+
+/** Whether `savedAiProposal` has been hydrated from `storage.session` at least once. */
+export const savedAiProposalLoaded = signal(false);
+
+/** Movable-tab signature for which automatic AI window organization already ran this session. */
+export const lastAutoWindowAiSignature = signal<string | null>(null);
+
+/** Hydrates `savedAiProposal` from `storage.session` so the overview reflects background state. */
+export async function loadSavedAiProposal(): Promise<void> {
+  const stored = await aiProposalItem.getValue().catch(() => null);
+  savedAiProposal.value = stored;
+  savedAiProposalLoaded.value = true;
+}
+
+/** Clears any cached on-device AI window proposal (e.g. when disabling AI). */
+export function clearSavedAiProposal(): void {
+  savedAiProposal.value = null;
+  lastAutoWindowAiSignature.value = null;
+  void aiProposalItem.setValue(null).catch(() => undefined);
+}
+
+/** All currently open, non-incognito tabs eligible for window organization. */
+export const movableTabs = computed<readonly TabInfo[]>(() =>
+  (panelData.value?.tabs ?? []).filter(
+    (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && isMovableTab(tab),
+  ),
+);
+
+/** Stable signature of the currently movable tab IDs (empty when fewer than 2 tabs exist). */
+export const movableTabSignature = computed<string>(() => {
+  const movable = movableTabs.value;
+  if (movable.length < 2) return '';
+  return movable
+    .map((tab) => tab.id)
+    .sort((a, b) => a - b)
+    .join(',');
+});
+
+/** Whether `proposal` already accounts for every live movable tab with at least one valid group. */
+export function aiProposalCoversMovable(
+  proposal: GroupProposal | null,
+  movable: readonly TabInfo[],
+): boolean {
+  if (proposal === null || movable.length < 2) return false;
+  const movableIds = new Set(movable.map((tab) => tab.id));
+  const known = new Set<number>(proposal.ungrouped);
+  let hasLiveGroup = false;
+  for (const group of proposal.groups) {
+    let liveCount = 0;
+    for (const id of group.tabIds) {
+      known.add(id);
+      if (movableIds.has(id)) liveCount += 1;
+    }
+    if (liveCount >= 2) hasLiveGroup = true;
+  }
+  return hasLiveGroup && movable.every((tab) => known.has(tab.id));
+}
+
+export interface WindowPlanGroup {
+  readonly key: string;
+  readonly title: string;
+  readonly color: GroupColor;
+  readonly tabIds: readonly number[];
+}
+
+export interface WindowPlan {
+  readonly source: 'ai' | 'local';
+  readonly groups: readonly WindowPlanGroup[];
+  readonly ungrouped: readonly number[];
+}
+
+/**
+ * Current window-organization overview for the `!useTabGroups` UI, mirroring `platform/windows.ts`
+ * so the user can see each window's topic/site name, tabs, and whether AI or local grouping ran.
+ */
+export const windowPlan = computed<WindowPlan>(() => {
+  const movable = movableTabs.value;
+  if (movable.length === 0) return { source: 'local', groups: [], ungrouped: [] };
+
+  const clusterLocal = (subset: readonly TabInfo[]) =>
+    proposeGroups(
+      subset.map((tab, index) => ({ ...tab, windowId: 1, index, groupId: NO_GROUP_ID })),
+      mode.value,
+      { minSiteTabs: 2, minClusterTabs: 2, includePinned: false, includeGrouped: true },
+    );
+
+  const cached = mode.value === 'topic' && useAi.value ? savedAiProposal.value : null;
+  if (cached !== null) {
+    const movableIds = new Set(movable.map((tab) => tab.id));
+    const knownIds = new Set<number>(cached.ungrouped);
+    const placed = new Set<number>();
+    const groups: WindowPlanGroup[] = [];
+    for (const group of cached.groups) {
+      for (const id of group.tabIds) knownIds.add(id);
+      const live = group.tabIds.filter((id) => movableIds.has(id) && !placed.has(id));
+      if (live.length < 2) continue;
+      for (const id of live) placed.add(id);
+      groups.push({ key: group.key, title: group.title, color: group.color, tabIds: live });
+    }
+    const knownMovable = movable.filter((tab) => knownIds.has(tab.id)).length;
+    if (groups.length > 0 && knownMovable * 2 >= movable.length) {
+      const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
+      if (newTabs.length >= 2) {
+        const extra = clusterLocal(newTabs);
+        for (const extraGroup of extra.groups) {
+          if (groups.length >= 8) break;
+          groups.push({
+            key: `new:${extraGroup.key}`,
+            title: extraGroup.title,
+            color: extraGroup.color,
+            tabIds: extraGroup.tabIds,
+          });
+          for (const id of extraGroup.tabIds) placed.add(id);
+        }
+      }
+      const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
+      return { source: 'ai', groups, ungrouped };
+    }
+  }
+
+  const local = clusterLocal(movable);
+  return {
+    source: 'local',
+    groups: local.groups.map((group) => ({
+      key: group.key,
+      title: group.title,
+      color: group.color,
+      tabIds: group.tabIds,
+    })),
+    ungrouped: local.ungrouped,
+  };
+});
+
 export interface OrganizeWindowsWithAiOptions {
   readonly windowMode: AutoWindowMode;
   readonly clusterMode: ClusterMode;
@@ -336,6 +472,10 @@ export async function organizeWindowsWithAi(
   if (movable.length < 2) {
     return finish();
   }
+  lastAutoWindowAiSignature.value = movable
+    .map((tab) => tab.id)
+    .sort((a, b) => a - b)
+    .join(',');
 
   // Group across every open window together by placing movable tabs in one virtual window,
   // with compact 1..N IDs so the small local model never drops digits from Chrome's 10-digit IDs.
@@ -378,17 +518,25 @@ export async function organizeWindowsWithAi(
       if (restored.groups.length > 0) {
         proposal = restored;
         clearAiFallbackNotice();
+        savedAiProposal.value = restored;
+        savedAiProposalLoaded.value = true;
         void aiProposalItem.setValue(restored).catch(() => undefined);
       } else {
+        savedAiProposal.value = null;
+        void aiProposalItem.setValue(null).catch(() => undefined);
         recordAiFallback('no-groups');
       }
     } else if (result.fallbackReason !== 'empty') {
+      savedAiProposal.value = null;
+      void aiProposalItem.setValue(null).catch(() => undefined);
       recordAiFallback(result.fallbackReason, result.fallbackDetail);
     }
   } catch (error: unknown) {
     if (running !== controller || controller.signal.aborted) {
       return { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
     }
+    savedAiProposal.value = null;
+    void aiProposalItem.setValue(null).catch(() => undefined);
     recordAiFallback(
       'error',
       error instanceof Error ? `${error.name}: ${error.message}` : String(error),
@@ -415,6 +563,7 @@ export async function undoWindowOrganize(
     await organizeSnoozeUntilItem
       .setValue(Date.now() + WINDOW_UNDO_SNOOZE_MS)
       .catch(() => undefined);
+    savedAiProposal.value = null;
     await aiProposalItem.setValue(null).catch(() => undefined);
     await undoFn(last.undo);
   } catch (error: unknown) {
@@ -440,6 +589,9 @@ export function resetAiGrouping(): void {
   aiWorking.value = false;
   windowWorking.value = false;
   windowOrganized.value = null;
+  savedAiProposal.value = null;
+  savedAiProposalLoaded.value = false;
+  lastAutoWindowAiSignature.value = null;
   clearAiFallbackNotice();
   answer.value = null;
 }

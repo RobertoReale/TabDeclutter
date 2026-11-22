@@ -480,9 +480,28 @@ describe('step 3, the additions', () => {
     expect(points(result, 'bookmarked')).toBe(CONFIG.bookmarkedPoints);
   });
 
-  it('counts a tab the browser has already dropped', () => {
-    const result = only({ tab: tab(1, { discarded: true }) });
-    expect(points(result, 'discarded')).toBe(CONFIG.discardedPoints);
+  it('counts a tab the browser has already dropped or a tab-suspender extension has suspended', () => {
+    const native = only({ tab: tab(1, { discarded: true }) });
+    expect(points(native, 'discarded')).toBe(CONFIG.discardedPoints);
+
+    const suspended = only({
+      tab: tab(2, {
+        url: 'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fexample.com%2Farticle',
+      }),
+    });
+    expect(points(suspended, 'discarded')).toBe(CONFIG.discardedPoints);
+  });
+
+  it('surfaces an abandoned 404 error page in Declutter after a few hours', () => {
+    const result = only(
+      {
+        tab: tab(1, { url: 'https://www.youtube.com/watch?v=missing', title: ERROR_TITLE }),
+        at: { idleMs: 4 * HOUR, activations: 1, foregroundMs: 2_000 },
+      },
+      { settings: { staleDays: 3 } },
+    );
+    expect(result.score).toBeGreaterThanOrEqual(CONFIG.reviewBucketMin);
+    expect(result.bucket).toBe('review');
   });
 
   it('counts the window nobody has opened in weeks', () => {

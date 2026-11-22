@@ -483,34 +483,50 @@ function resolveWindowProposal(
   virtualWindowId: number,
   precomputed: GroupProposal | undefined,
 ): { readonly groups: readonly (readonly number[])[]; readonly ungrouped: readonly number[] } {
+  const clusterLocal = (subset: readonly TabInfo[]) =>
+    clusterTabIds(
+      subset.map((tab, index) => ({
+        ...tab,
+        windowId: virtualWindowId,
+        index,
+        groupId: NO_GROUP_ID,
+      })),
+      clusterMode,
+      { minSiteTabs: 2, minClusterTabs: 2, includePinned: false, includeGrouped: true },
+    );
+
   if (precomputed !== undefined) {
     const movableIds = new Set(movable.map((tab) => tab.id));
+    const knownIds = new Set<number>(precomputed.ungrouped);
     const placed = new Set<number>();
-    const groups = precomputed.groups
-      .map((group) =>
-        group.tabIds.filter((id) => {
-          if (!movableIds.has(id) || placed.has(id)) return false;
-          placed.add(id);
-          return true;
-        }),
-      )
-      .filter((tabIds) => tabIds.length > 0);
-    const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
-    if (groups.length > 0) return { groups, ungrouped };
+    const groups: number[][] = [];
+    for (const group of precomputed.groups) {
+      for (const id of group.tabIds) knownIds.add(id);
+      const live = group.tabIds.filter((id) => movableIds.has(id) && !placed.has(id));
+      if (live.length < 2) continue;
+      for (const id of live) placed.add(id);
+      groups.push(live);
+    }
+    const knownMovable = movable.filter((tab) => knownIds.has(tab.id)).length;
+    // Reuse a cached AI proposal only while it still has real (>=2-tab) groups and covers at
+    // least half of the current movable tabs; otherwise re-cluster everything fresh so new
+    // browsing sessions never pile into the ungrouped catch-all window.
+    if (groups.length > 0 && knownMovable * 2 >= movable.length) {
+      const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
+      if (newTabs.length >= 2) {
+        const extra = clusterLocal(newTabs);
+        for (const extraGroup of extra.groups) {
+          if (groups.length >= 8) break;
+          groups.push([...extraGroup]);
+          for (const id of extraGroup) placed.add(id);
+        }
+      }
+      const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
+      return { groups, ungrouped };
+    }
   }
 
-  const unified = movable.map((tab, index) => ({
-    ...tab,
-    windowId: virtualWindowId,
-    index,
-    groupId: NO_GROUP_ID,
-  }));
-  return clusterTabIds(unified, clusterMode, {
-    minSiteTabs: 2,
-    minClusterTabs: 2,
-    includePinned: false,
-    includeGrouped: true,
-  });
+  return clusterLocal(movable);
 }
 
 /**

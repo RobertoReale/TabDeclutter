@@ -339,6 +339,130 @@ describe('platform/windows', () => {
     expect(tabs.find((t) => t.id === 1)?.windowId).not.toBe(tabs.find((t) => t.id === 2)?.windowId);
   });
 
+  it('drops 1-tab ghost groups, clusters newly opened tabs, and evicts stale cached AI proposals', async () => {
+    // 1. Valid cached AI proposal (covers >= 50% of tabs): group 1 shrank to 1 live tab (id 1) so
+    //    it is dropped; group 2 (ids 2,3) survives; newly opened tabs (ids 4,5) on the same topic
+    //    are clustered into their own window instead of dumped blindly into ungrouped.
+    const partial = fakeApi([
+      { id: 1, windowId: 1, index: 0, url: 'https://news.example/solo', title: 'Lonely news' },
+      { id: 2, windowId: 1, index: 1, url: 'https://arxiv.org/abs/1', title: 'Linear algebra' },
+      { id: 3, windowId: 1, index: 2, url: 'https://youtube.com/watch?v=m', title: 'Eigenvalues' },
+      {
+        id: 4,
+        windowId: 1,
+        index: 3,
+        url: 'https://cooking.example/pasta-1',
+        title: 'Pasta ricetta facile',
+      },
+      {
+        id: 5,
+        windowId: 1,
+        index: 4,
+        url: 'https://cooking.example/pasta-2',
+        title: 'Pasta ricetta veloce',
+      },
+    ]);
+    await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      proposal: {
+        mode: 'topic',
+        groups: [
+          { key: 'news', title: 'News', color: 'red', windowId: 1, tabIds: [1, 999] },
+          { key: 'math', title: 'Math', color: 'blue', windowId: 1, tabIds: [2, 3] },
+        ],
+        ungrouped: [],
+      },
+      api: partial.api,
+    });
+    expect(partial.tabs.find((t) => t.id === 2)?.windowId).toBe(
+      partial.tabs.find((t) => t.id === 3)?.windowId,
+    );
+    expect(partial.tabs.find((t) => t.id === 4)?.windowId).toBe(
+      partial.tabs.find((t) => t.id === 5)?.windowId,
+    );
+    expect(partial.tabs.find((t) => t.id === 2)?.windowId).not.toBe(
+      partial.tabs.find((t) => t.id === 4)?.windowId,
+    );
+    // Tab 1 (shrunken 1-tab ghost group) landed in ungrouped, separate from Math and Pasta.
+    expect(partial.tabs.find((t) => t.id === 1)?.windowId).not.toBe(
+      partial.tabs.find((t) => t.id === 2)?.windowId,
+    );
+
+    // 2. Stale cached AI proposal (covers < 50% of tabs): discarded so fresh clustering runs on all tabs.
+    const stale = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://example.org/rust-1',
+        title: 'Rust async guide',
+      },
+      {
+        id: 2,
+        windowId: 1,
+        index: 1,
+        url: 'https://example.org/rust-2',
+        title: 'Rust async tokio',
+      },
+      {
+        id: 3,
+        windowId: 1,
+        index: 2,
+        url: 'https://example.org/rust-3',
+        title: 'Rust async streams',
+      },
+      {
+        id: 4,
+        windowId: 1,
+        index: 3,
+        url: 'https://example.org/pasta-1',
+        title: 'Pasta ricetta forno',
+      },
+      {
+        id: 5,
+        windowId: 1,
+        index: 4,
+        url: 'https://example.org/pasta-2',
+        title: 'Pasta ricetta veloce',
+      },
+      {
+        id: 6,
+        windowId: 1,
+        index: 5,
+        url: 'https://example.org/pasta-3',
+        title: 'Pasta ricetta facile',
+      },
+    ]);
+    await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      proposal: {
+        mode: 'topic',
+        // Only mentions 2 of 6 tabs (< 50%) — and groups unrelated tabs together.
+        groups: [{ key: 'old', title: 'Old', color: 'grey', windowId: 1, tabIds: [1, 4] }],
+        ungrouped: [],
+      },
+      api: stale.api,
+    });
+    expect(stale.tabs.find((t) => t.id === 1)?.windowId).toBe(
+      stale.tabs.find((t) => t.id === 2)?.windowId,
+    );
+    expect(stale.tabs.find((t) => t.id === 1)?.windowId).toBe(
+      stale.tabs.find((t) => t.id === 3)?.windowId,
+    );
+    expect(stale.tabs.find((t) => t.id === 4)?.windowId).toBe(
+      stale.tabs.find((t) => t.id === 5)?.windowId,
+    );
+    expect(stale.tabs.find((t) => t.id === 1)?.windowId).not.toBe(
+      stale.tabs.find((t) => t.id === 4)?.windowId,
+    );
+  });
+
   it('keeps movable tabs anchored after pinned tabs even when an unpinned New Tab is open', async () => {
     const { api, tabs } = fakeApi([
       { id: 1, windowId: 1, index: 0, url: 'https://youtube.com/watch?v=1', title: 'Video 1' },
@@ -517,5 +641,34 @@ describe('autopilot safety guardrails (isSafeToAutoClose)', () => {
         staleMs,
       ),
     ).toBe(true);
+  });
+
+  it('auto-closes read tabs in the review bucket once staleDays has elapsed, while never touching keep tabs', () => {
+    // A normal read tab caps at 55 inactivity points (`bucket: 'review'`). Once idle >= staleDays
+    // it is eligible for auto-close, while younger review tabs and all keep tabs stay untouched.
+    expect(
+      isSafeToAutoClose(
+        makeTab({ url: 'https://www.youtube.com/watch?v=old' }),
+        makeScored({ bucket: 'review', score: 55, idleMs: 8 * DAY }),
+        DEFAULT_SETTINGS,
+        staleMs,
+      ),
+    ).toBe(true);
+    expect(
+      isSafeToAutoClose(
+        makeTab({ url: 'https://www.youtube.com/watch?v=recent' }),
+        makeScored({ bucket: 'review', score: 45, idleMs: 2 * DAY }),
+        DEFAULT_SETTINGS,
+        staleMs,
+      ),
+    ).toBe(false);
+    expect(
+      isSafeToAutoClose(
+        makeTab({ url: 'https://www.youtube.com/watch?v=kept' }),
+        makeScored({ bucket: 'keep', score: 33, idleMs: 14 * DAY }),
+        DEFAULT_SETTINGS,
+        staleMs,
+      ),
+    ).toBe(false);
   });
 });

@@ -21,9 +21,11 @@ import { useEffect, useRef } from 'preact/hooks';
 
 import { caps } from '@/platform/capabilities';
 import { t, type MessageKey } from '@/platform/i18n';
+import { activateTab } from '@/platform/tabs';
 import { ungroupAllOpenTabs } from '@/platform/windows';
 import type { ClusterMode } from '@/core/cluster';
-import { NO_GROUP_ID, type AutoWindowMode } from '@/core/types';
+import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '@/core/types';
+import { displayHost } from '@/core/url';
 import { EmptyState } from '../components/EmptyState';
 import { GroupPreview } from '../components/GroupPreview';
 import { appliedGroupsText, formatCount, formatPercent, pairText } from '../format';
@@ -42,6 +44,7 @@ import {
   aiBadge,
   aiFallbackDetail,
   aiFallbackNotice,
+  aiProposalCoversMovable,
   aiQuestion,
   aiWorking,
   appliedMessage,
@@ -49,13 +52,20 @@ import {
   brought,
   cancelAiGrouping,
   clearAiFallbackNotice,
+  clearSavedAiProposal,
   dismissApplied,
   dismissWindowOrganized,
   draft,
+  lastAutoWindowAiSignature,
+  loadSavedAiProposal,
   mode,
+  movableTabSignature,
+  movableTabs,
   options,
   organizeWindowsWithAi,
   plannedTabs,
+  savedAiProposal,
+  savedAiProposalLoaded,
   scope,
   setMode,
   setOptions,
@@ -64,8 +74,10 @@ import {
   undoApply,
   undoWindowOrganize,
   windowOrganized,
+  windowPlan,
   windowWorking,
   working,
+  type WindowPlan,
 } from '../state/organize';
 import { setSetting, settings } from '../state/settings';
 import { loaded, panelData, tabs } from '../state/tabs';
@@ -148,6 +160,9 @@ export function OrganizeView({ language }: { language: string }) {
     if (!checked) {
       cancelAiGrouping();
       clearAiFallbackNotice();
+      clearSavedAiProposal();
+    } else {
+      lastAutoWindowAiSignature.value = null;
     }
     void setUseAi(checked)
       .then(() => {
@@ -162,6 +177,13 @@ export function OrganizeView({ language }: { language: string }) {
       })
       .catch(report);
   }
+
+  // Hydrate any cached session AI proposal when viewing the window-organization mode so
+  // the overview and auto-AI refresh accurately reflect background state.
+  useEffect(() => {
+    if (!ready || currentSettings.useTabGroups) return;
+    void loadSavedAiProposal();
+  }, [ready, currentSettings.useTabGroups]);
 
   // When autoOrganize and useTabGroups are enabled, apply any proposed groups automatically.
   const lastAutoApplied = useRef<string>('');
@@ -328,8 +350,16 @@ export function OrganizeView({ language }: { language: string }) {
         <AiPanel
           language={language}
           useTabGroups={currentSettings.useTabGroups}
+          isAuto={isAuto}
           onToggleAi={handleToggleAi}
+          onAutoRunAi={() => {
+            runWindowOrganizeNow();
+          }}
         />
+      )}
+
+      {!currentSettings.useTabGroups && (
+        <WindowPlanOverview plan={windowPlan.value} tabs={tabs.value} language={language} />
       )}
 
       {currentSettings.useTabGroups && (
@@ -421,26 +451,41 @@ export function OrganizeView({ language }: { language: string }) {
 function AiPanel({
   language,
   useTabGroups,
+  isAuto,
   onToggleAi,
+  onAutoRunAi,
 }: {
   language: string;
   useTabGroups: boolean;
+  isAuto: boolean;
   onToggleAi: (checked: boolean) => void;
+  onAutoRunAi: () => void;
 }) {
   const wanted = useAi.value;
   useEffect(() => {
     if (wanted) void checkAi().catch(report);
   }, [wanted]);
 
-  // Asked again whenever the question changes, and only when the tab-groups preview is active:
-  // when organizing windows without tab groups, the AI runs inside `organizeWindowsWithAi` over
-  // all windows rather than computing an unused preview.
+  // Asked again whenever the question changes in tab-groups preview mode.
   const active = aiActive.value;
   const question = aiQuestion.value;
   useEffect(() => {
     if (!useTabGroups) return;
     void startAiGrouping().catch(report);
   }, [useTabGroups, active, question]);
+
+  // In window-organization mode with Auto-organize + AI enabled, automatically refresh
+  // windows with the on-device model when no cached proposal covers the open tabs yet.
+  const hydrated = savedAiProposalLoaded.value;
+  const movableSig = movableTabSignature.value;
+  const busy = aiWorking.value || windowWorking.value;
+  useEffect(() => {
+    if (useTabGroups || !isAuto || !active || !hydrated || busy || movableSig === '') return;
+    if (lastAutoWindowAiSignature.value === movableSig) return;
+    if (aiProposalCoversMovable(savedAiProposal.value, movableTabs.value)) return;
+    lastAutoWindowAiSignature.value = movableSig;
+    onAutoRunAi();
+  }, [useTabGroups, isAuto, active, hydrated, busy, movableSig]);
 
   const state = availability.value;
   // Never hide or discard the AI panel once the user has turned on-device AI on: if the model
@@ -518,6 +563,86 @@ function AiPanel({
         </p>
       )}
     </div>
+  );
+}
+
+/** Compact collapsible overview of how open tabs are grouped across windows when tab groups are off. */
+function WindowPlanOverview({
+  plan,
+  tabs: openTabs,
+  language,
+}: {
+  plan: WindowPlan;
+  tabs: readonly TabInfo[];
+  language: string;
+}) {
+  if (plan.groups.length === 0 && plan.ungrouped.length === 0) return null;
+  const byId = new Map(openTabs.map((tab) => [tab.id, tab]));
+
+  function renderTabs(tabIds: readonly number[]) {
+    return (
+      <ul class="td-window-plan-list">
+        {tabIds.map((tabId) => {
+          const tab = byId.get(tabId);
+          if (tab === undefined) return null;
+          const host = displayHost(tab.url);
+          return (
+            <li key={tabId}>
+              <button
+                type="button"
+                class="td-window-plan-tab"
+                onClick={() => {
+                  void activateTab(tab.id, tab.windowId).catch(report);
+                }}
+              >
+                <span class="td-window-plan-tab-title">{tab.title || host}</span>
+                {host !== '' && <span class="td-window-plan-tab-host">{host}</span>}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  return (
+    <section class="td-window-plan" aria-label={t('windowPlanHeading')}>
+      <div class="td-window-plan-head">
+        <h3 class="td-settings-group">{t('windowPlanHeading')}</h3>
+        <span class={plan.source === 'ai' ? 'td-chip td-ai-badge' : 'td-chip td-settings-status'}>
+          {t(plan.source === 'ai' ? 'organizeAiBadge' : 'windowPlanSourceLocal')}
+        </span>
+      </div>
+      <p class="td-field-hint">{t('windowPlanHint')}</p>
+
+      {plan.groups.map((group) => (
+        <details key={group.key} class="td-window-plan-group">
+          <summary class="td-window-plan-summary">
+            <span class="td-group-swatch" data-color={group.color} aria-hidden="true" />
+            <span class="td-window-plan-name">
+              {t('sectionHeading', group.title, formatCount(group.tabIds.length, language))}
+            </span>
+          </summary>
+          {renderTabs(group.tabIds)}
+        </details>
+      ))}
+
+      {plan.ungrouped.length > 0 && (
+        <details class="td-window-plan-group">
+          <summary class="td-window-plan-summary">
+            <span class="td-group-swatch" data-color="grey" aria-hidden="true" />
+            <span class="td-window-plan-name">
+              {t(
+                'sectionHeading',
+                t('organizeOther'),
+                formatCount(plan.ungrouped.length, language),
+              )}
+            </span>
+          </summary>
+          {renderTabs(plan.ungrouped)}
+        </details>
+      )}
+    </section>
   );
 }
 
