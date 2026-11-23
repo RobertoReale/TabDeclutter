@@ -35,6 +35,7 @@ import {
   aiBadge,
   aiFallbackNotice,
   aiProposalCoversMovable,
+  aiProposalFreshForAutoRefresh,
   aiWorking,
   cancelAiGrouping,
   clearSavedAiProposal,
@@ -61,9 +62,14 @@ import {
   aiProposalItem,
   organizeSnoozeUntilItem,
   readSettings,
+  saveAiProposalState,
   saveSettings,
 } from '../../src/platform/storage';
-import type { OrganizeWindowsOptions, OrganizeWindowsSnapshot } from '../../src/platform/windows';
+import {
+  movableTabsSignature,
+  type OrganizeWindowsOptions,
+  type OrganizeWindowsSnapshot,
+} from '../../src/platform/windows';
 
 const NOW = Date.UTC(2026, 0, 15, 12, 0, 0);
 
@@ -823,5 +829,98 @@ describe('persisting topic + AI preferences without resets or races', () => {
 
     info.mockRestore();
     warn.mockRestore();
+  });
+
+  it('keeps checkAi() read-only without eagerly invoking panelSession().open()', async () => {
+    let opened = 0;
+    const probingLlm: LlmModule = {
+      checkAvailability: async () => 'available',
+      downloadModel: async () => 'available',
+      panelSession: () => ({
+        open: async () => {
+          opened += 1;
+        },
+        prompt: async () => '{"groups":[]}',
+      }),
+      closeSession: () => undefined,
+    };
+    panelData.value = {
+      ...data(),
+      settings: { ...DEFAULT_SETTINGS, useOnDeviceAi: true },
+    };
+
+    await expect(checkAi({ capabilities: CHROME, llm: probingLlm })).resolves.toBe('available');
+    expect(opened).toBe(0);
+  });
+
+  it('persists local AI proposals across reloads, tolerates closed tabs and small drift, and rejects post-restart ID collisions', async () => {
+    const initial = [
+      ...tabs(),
+      tab(7, 'https://docs.python.org/3/library/math.html', { title: 'Math module' }),
+      tab(8, 'https://docs.python.org/3/library/json.html', { title: 'JSON module' }),
+    ];
+    const proposal: GroupProposal = {
+      mode: 'topic',
+      groups: [
+        { key: 'code', title: 'Code', color: 'blue', windowId: 1, tabIds: [1, 2, 3] },
+        { key: 'design', title: 'Design', color: 'green', windowId: 1, tabIds: [4, 5, 6] },
+        { key: 'python', title: 'Python', color: 'yellow', windowId: 1, tabIds: [7, 8] },
+      ],
+      ungrouped: [],
+    };
+    const sig = movableTabsSignature(initial);
+    await saveAiProposalState(proposal, sig);
+
+    // Simulate extension/panel reload: in-memory state resets, storage.local keeps the plan.
+    resetAiGrouping();
+    panelData.value = {
+      ...data(initial),
+      settings: { ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true },
+    };
+    setMode('topic');
+    await loadSavedAiProposal();
+    expect(windowPlan.value.source).toBe('ai');
+    expect(aiProposalCoversMovable(savedAiProposal.value, initial, sig)).toBe(true);
+    expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, initial, sig)).toBe(true);
+
+    // Closing a tab or updating an unread "(2) " title badge keeps both exact coverage and freshness true.
+    const afterCloseAndBadge = initial
+      .filter((entry) => entry.id !== 3)
+      .map((entry) => (entry.id === 1 ? { ...entry, title: '(2) Tab 1' } : entry));
+    expect(aiProposalCoversMovable(savedAiProposal.value, afterCloseAndBadge, sig)).toBe(true);
+    expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, afterCloseAndBadge, sig)).toBe(
+      true,
+    );
+
+    // Opening 1 new tab out of 9 (11% drift, < 4 tabs): exact coverage is false, auto-refresh stays fresh.
+    const withOneNew = [...initial, tab(9, 'https://news.example/story', { title: 'Daily news' })];
+    expect(aiProposalCoversMovable(savedAiProposal.value, withOneNew, sig)).toBe(false);
+    expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, withOneNew, sig)).toBe(true);
+
+    // Opening 4 new tabs crosses the drift threshold and triggers an automatic AI refresh.
+    const withFourNew = [
+      ...initial,
+      tab(9, 'https://news.example/1', { title: 'News 1' }),
+      tab(10, 'https://news.example/2', { title: 'News 2' }),
+      tab(11, 'https://news.example/3', { title: 'News 3' }),
+      tab(12, 'https://news.example/4', { title: 'News 4' }),
+    ];
+    expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, withFourNew, sig)).toBe(false);
+
+    // Browser restart reusing the same tab IDs 1..8 for completely different websites:
+    // signature validation rejects the stale plan so windowPlan cleanly falls back to local.
+    const collidedAfterRestart = initial.map((entry) =>
+      tab(entry.id, `https://unrelated-${String(entry.id)}.example/page`, {
+        title: `Fresh session ${String(entry.id)}`,
+      }),
+    );
+    panelData.value = {
+      ...data(collidedAfterRestart),
+      settings: { ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true },
+    };
+    expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, collidedAfterRestart, sig)).toBe(
+      false,
+    );
+    expect(windowPlan.value.source).toBe('local');
   });
 });

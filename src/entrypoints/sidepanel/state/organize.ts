@@ -52,6 +52,9 @@ import {
 } from '@/platform/storage';
 import { NO_WINDOW } from '@/platform/tabs';
 import {
+  aiProposalCoversMovable,
+  aiProposalFreshForAutoRefresh,
+  filterProposalBySignature,
   isMovableTab,
   movableTabsSignature,
   organizeWindows,
@@ -443,19 +446,19 @@ export const windowOrganized = signal<{
 /** Whether a window organization or window undo is currently running. */
 export const windowWorking = signal(false);
 
-/** Most recent on-device AI window proposal persisted in `storage.session`. */
+/** Most recent on-device AI window proposal persisted in `storage.local`. */
 export const savedAiProposal = signal<GroupProposal | null>(null);
 
 /** Content signature that `savedAiProposal` was computed for. */
 export const savedAiProposalSignature = signal<string>('');
 
-/** Whether `savedAiProposal` has been hydrated from `storage.session` at least once. */
+/** Whether `savedAiProposal` has been hydrated from `storage.local` at least once. */
 export const savedAiProposalLoaded = signal(false);
 
 /** Movable-tab signature for which automatic AI window organization already ran this session. */
 export const lastAutoWindowAiSignature = signal<string | null>(null);
 
-/** Hydrates `savedAiProposal` from `storage.session` so the overview reflects background state. */
+/** Hydrates `savedAiProposal` from `storage.local` so the overview reflects persisted & background state. */
 let watchingAiProposalStorage = false;
 export async function loadSavedAiProposal(): Promise<void> {
   if (!watchingAiProposalStorage) {
@@ -496,27 +499,7 @@ export const movableTabs = computed<readonly TabInfo[]>(() =>
 /** Content-aware signature of the currently movable tabs (empty when fewer than 2 tabs exist). */
 export const movableTabSignature = computed<string>(() => movableTabsSignature(movableTabs.value));
 
-/** Whether `proposal` already accounts for every live movable tab with at least one valid group. */
-export function aiProposalCoversMovable(
-  proposal: GroupProposal | null,
-  movable: readonly TabInfo[],
-  savedSignature = '',
-): boolean {
-  if (proposal === null || movable.length < 2) return false;
-  if (savedSignature !== '' && savedSignature !== movableTabsSignature(movable)) return false;
-  const movableIds = new Set(movable.map((tab) => tab.id));
-  const known = new Set<number>(proposal.ungrouped);
-  let hasLiveGroup = false;
-  for (const group of proposal.groups) {
-    let liveCount = 0;
-    for (const id of group.tabIds) {
-      known.add(id);
-      if (movableIds.has(id)) liveCount += 1;
-    }
-    if (liveCount >= 2) hasLiveGroup = true;
-  }
-  return hasLiveGroup && movable.every((tab) => known.has(tab.id));
-}
+export { aiProposalCoversMovable, aiProposalFreshForAutoRefresh };
 
 export interface WindowPlanGroup {
   readonly key: string;
@@ -571,7 +554,10 @@ export const windowPlan = computed<WindowPlan>(() => {
       { minSiteTabs: 2, minClusterTabs: 2, includePinned: false, includeGrouped: true },
     );
 
-  const cached = mode.value === 'topic' && useAi.value ? savedAiProposal.value : null;
+  const cached =
+    mode.value === 'topic' && useAi.value
+      ? filterProposalBySignature(savedAiProposal.value, movable, savedAiProposalSignature.value)
+      : null;
   if (cached !== null) {
     const movableIds = new Set(movable.map((tab) => tab.id));
     const knownIds = new Set<number>(cached.ungrouped);

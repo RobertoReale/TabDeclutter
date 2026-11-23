@@ -36,13 +36,124 @@ export function isMovableTab(tab: TabInfo): boolean {
   return true;
 }
 
-/** Content-aware signature covering tab IDs, site keys, and titles so navigations invalidate stale AI plans. */
+/** Minimum new/navigated tabs before an automatic AI refresh wakes the model when ≥ 80% already match. */
+const AUTO_AI_MIN_DRIFT_TABS = 4;
+const AUTO_AI_MAX_DRIFT_RATIO = 0.2;
+
+function tabSignatureEntry(tab: TabInfo): string {
+  const title = tab.title
+    .replace(/^\(\d+\+?\)\s+/, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  return `${tab.id}\t${siteKey(tab.url)}\t${title}`;
+}
+
+function parseSignatureMap(savedSignature: string): Map<number, string> {
+  const entries = new Map<number, string>();
+  for (const line of savedSignature.split('\n')) {
+    const sep = line.indexOf('\t');
+    const id = sep > 0 ? Number(line.slice(0, sep)) : NaN;
+    if (Number.isInteger(id)) entries.set(id, line);
+  }
+  return entries;
+}
+
+/** Content-aware per-tab signature covering tab IDs, site keys, and normalized titles. */
 export function movableTabsSignature(movable: readonly TabInfo[]): string {
   if (movable.length < 2) return '';
   return [...movable]
     .sort((a, b) => a.id - b.id)
-    .map((tab) => `${tab.id}:${siteKey(tab.url)}:${tab.title.trim().slice(0, 60)}`)
-    .join('|');
+    .map(tabSignatureEntry)
+    .join('\n');
+}
+
+/**
+ * Strips any tab IDs from a persisted AI `proposal` whose live site or title no longer matches
+ * `savedSignature`. Prevents reused tab IDs after a browser restart from matching unrelated
+ * pages, and lets navigated tabs fall through to incremental placement immediately.
+ */
+export function filterProposalBySignature(
+  proposal: GroupProposal | null,
+  movable: readonly TabInfo[],
+  savedSignature = '',
+): GroupProposal | null {
+  if (proposal === null || savedSignature === '') return proposal;
+  const savedEntries = parseSignatureMap(savedSignature);
+  if (savedEntries.size === 0) return null;
+
+  const validIds = new Set<number>();
+  for (const tab of movable) {
+    if (savedEntries.get(tab.id) === tabSignatureEntry(tab)) validIds.add(tab.id);
+  }
+  if (validIds.size === 0) return null;
+
+  return {
+    ...proposal,
+    groups: proposal.groups.map((group) => ({
+      ...group,
+      tabIds: group.tabIds.filter((id) => validIds.has(id)),
+    })),
+    ungrouped: proposal.ungrouped.filter((id) => validIds.has(id)),
+  };
+}
+
+/** Returns drifted (new/navigated) tab count, or `-1` if `proposal` has no valid live group. */
+function proposalDriftCount(
+  proposal: GroupProposal | null,
+  movable: readonly TabInfo[],
+  savedSignature: string,
+): number {
+  if (proposal === null || movable.length < 2) return -1;
+  const verified = filterProposalBySignature(proposal, movable, savedSignature);
+  if (verified === null) return -1;
+
+  const movableIds = new Set(movable.map((tab) => tab.id));
+  const known = new Set<number>(verified.ungrouped);
+  let hasLiveGroup = false;
+  for (const group of verified.groups) {
+    let liveCount = 0;
+    for (const id of group.tabIds) {
+      known.add(id);
+      if (movableIds.has(id)) liveCount += 1;
+    }
+    if (liveCount >= 2) hasLiveGroup = true;
+  }
+  if (!hasLiveGroup) return -1;
+
+  let drifted = 0;
+  for (const tab of movable) {
+    if (!known.has(tab.id)) drifted += 1;
+  }
+  return drifted;
+}
+
+/** Whether `proposal` exactly covers every live movable tab with at least one valid group. */
+export function aiProposalCoversMovable(
+  proposal: GroupProposal | null,
+  movable: readonly TabInfo[],
+  savedSignature = '',
+): boolean {
+  return proposalDriftCount(proposal, movable, savedSignature) === 0;
+}
+
+/**
+ * Whether a cached AI proposal is fresh enough for automatic mount/background sweeps: tolerates
+ * closed tabs and 1–3 newly opened/navigated tabs while ≥ 80% of open tabs still match, avoiding
+ * cold `LanguageModel.create()` stalls on minor browsing changes. Explicit clicks always bypass.
+ */
+export function aiProposalFreshForAutoRefresh(
+  proposal: GroupProposal | null,
+  movable: readonly TabInfo[],
+  savedSignature = '',
+): boolean {
+  const drifted = proposalDriftCount(proposal, movable, savedSignature);
+  return (
+    drifted === 0 ||
+    (drifted > 0 &&
+      drifted < AUTO_AI_MIN_DRIFT_TABS &&
+      drifted / movable.length <= AUTO_AI_MAX_DRIFT_RATIO)
+  );
 }
 
 export interface WindowsOrganizeApi {
@@ -69,6 +180,8 @@ export interface OrganizeWindowsOptions {
   readonly focusedWindowId?: number;
   /** Optional precomputed proposal (e.g. from Chrome's on-device AI in the side panel). */
   readonly proposal?: GroupProposal;
+  /** Optional signature captured alongside `proposal`, used to reject stale/reused tab IDs. */
+  readonly proposalSignature?: string;
   readonly api?: WindowsOrganizeApi;
 }
 
@@ -163,6 +276,7 @@ export async function organizeWindows(
       options.clusterMode,
       options.focusedWindowId,
       options.proposal,
+      options.proposalSignature,
       api,
     );
     return {
@@ -178,6 +292,7 @@ export async function organizeWindows(
     options.clusterMode,
     options.focusedWindowId,
     options.proposal,
+    options.proposalSignature,
     api,
   );
   return {
@@ -281,6 +396,7 @@ async function mergeAndSortIntoOneWindow(
   clusterMode: ClusterMode,
   focusedWindowId: number | undefined,
   precomputed: GroupProposal | undefined,
+  proposalSignature: string | undefined,
   api: WindowsOrganizeApi,
 ): Promise<number> {
   const windowCounts = new Map<number, number>();
@@ -305,7 +421,13 @@ async function mergeAndSortIntoOneWindow(
     (tab) => tab.windowId === targetWindowId && tab.pinned,
   ).length;
 
-  const sortedIds = orderedTabIds(movable, clusterMode, targetWindowId, precomputed);
+  const sortedIds = orderedTabIds(
+    movable,
+    clusterMode,
+    targetWindowId,
+    precomputed,
+    proposalSignature,
+  );
 
   // Check if everything is already in targetWindowId in this exact order.
   const currentInTarget = allTabs
@@ -401,12 +523,13 @@ async function splitIntoThematicWindows(
   clusterMode: ClusterMode,
   focusedWindowId: number | undefined,
   precomputed: GroupProposal | undefined,
+  proposalSignature: string | undefined,
   api: WindowsOrganizeApi,
 ): Promise<{ readonly movedTabs: number; readonly windowsCount: number }> {
   const movable = allTabs.filter(isMovableTab);
   if (movable.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
-  const proposal = resolveWindowProposal(movable, clusterMode, 1, precomputed);
+  const proposal = resolveWindowProposal(movable, clusterMode, 1, precomputed, proposalSignature);
 
   const byId = new Map(movable.map((tab) => [tab.id, tab]));
 
@@ -586,6 +709,7 @@ function resolveWindowProposal(
   clusterMode: ClusterMode,
   virtualWindowId: number,
   precomputed: GroupProposal | undefined,
+  proposalSignature?: string,
 ): { readonly groups: readonly (readonly number[])[]; readonly ungrouped: readonly number[] } {
   const clusterLocal = (subset: readonly TabInfo[]) =>
     clusterTabIds(
@@ -599,12 +723,16 @@ function resolveWindowProposal(
       { minSiteTabs: 2, minClusterTabs: 2, includePinned: false, includeGrouped: true },
     );
 
-  if (precomputed !== undefined) {
+  const verified =
+    precomputed === undefined
+      ? null
+      : filterProposalBySignature(precomputed, movable, proposalSignature ?? '');
+  if (verified !== null) {
     const movableIds = new Set(movable.map((tab) => tab.id));
-    const knownIds = new Set<number>(precomputed.ungrouped);
+    const knownIds = new Set<number>(verified.ungrouped);
     const placed = new Set<number>();
     const groups: number[][] = [];
-    for (const group of precomputed.groups) {
+    for (const group of verified.groups) {
       for (const id of group.tabIds) knownIds.add(id);
       const live = group.tabIds.filter((id) => movableIds.has(id) && !placed.has(id));
       if (live.length < 2) continue;
@@ -670,8 +798,15 @@ function orderedTabIds(
   clusterMode: ClusterMode,
   virtualWindowId: number,
   precomputed: GroupProposal | undefined,
+  proposalSignature?: string,
 ): readonly number[] {
-  const proposal = resolveWindowProposal(tabs, clusterMode, virtualWindowId, precomputed);
+  const proposal = resolveWindowProposal(
+    tabs,
+    clusterMode,
+    virtualWindowId,
+    precomputed,
+    proposalSignature,
+  );
   const byId = new Map(tabs.map((tab) => [tab.id, tab]));
   return [...proposal.groups.flat(), ...sortBySite(proposal.ungrouped, byId)];
 }

@@ -73,14 +73,6 @@ export async function checkAi(deps: AiDeps = {}): Promise<AiAvailability> {
   const state = await module.checkAvailability();
   availability.value = state;
   if (state !== 'downloading') downloadProgress.value = null;
-  // When the model is already downloaded and the user opted in, begin warming the session
-  // in the background immediately so weights and D3D12 shaders load before Organize is clicked.
-  if (state === 'available' && useAi.value) {
-    void module
-      .panelSession({ timeoutMs: PANEL_AI_TIMEOUT_MS })
-      .open?.()
-      .catch(() => undefined);
-  }
   return state;
 }
 

@@ -44,7 +44,7 @@ import {
   aiBadge,
   aiFallbackDetail,
   aiFallbackNotice,
-  aiProposalCoversMovable,
+  aiProposalFreshForAutoRefresh,
   aiQuestion,
   aiStageDetail,
   aiWorking,
@@ -492,7 +492,7 @@ function AiPanel({
     if (isAiAutoCoolingDown()) return;
     if (lastAutoSig === movableSig) return;
     if (
-      aiProposalCoversMovable(
+      aiProposalFreshForAutoRefresh(
         savedAiProposal.value,
         movableTabs.value,
         savedAiProposalSignature.value,

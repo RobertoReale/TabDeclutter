@@ -18,7 +18,7 @@ import { useEffect } from 'preact/hooks';
 import { caps } from '@/platform/capabilities';
 import type { LanguageSetting } from '@/core/types';
 import { t, type MessageKey } from '@/platform/i18n';
-import { aiProposalItem } from '@/platform/storage';
+import { saveAiProposalState } from '@/platform/storage';
 import {
   domainsText,
   durationChoices,
@@ -231,7 +231,7 @@ function MainSettings({ language }: { language: string }) {
               value={current.useOnDeviceAi}
               onPick={(value) => {
                 setSetting('useOnDeviceAi', value);
-                if (!value) void aiProposalItem.setValue(null).catch(() => undefined);
+                if (!value) void saveAiProposalState(null, '').catch(() => undefined);
               }}
             />
             {current.useOnDeviceAi && aiState !== null && (

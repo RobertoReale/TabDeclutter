@@ -3509,3 +3509,26 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   budget; `clustering 300 tabs` 1-window from 12.58 ms to 6.34 ms and 6-window from 8.23 ms to
   3.91 ms vs 50 ms budget), eliminates cross-context storage and GPU races, and aligns every
   lifecycle and API pattern with official MV3 specifications.
+
+## Post-release — Persistent `local:aiProposal`, read-only `checkAi()`, and drift-tolerant auto-refresh
+- **Context:** keeping `aiProposal` and `aiProposalSignature` in `storage.session` meant every
+  extension reload or update wiped the cached AI window plan and immediately triggered a 2–5 min
+  cold `LanguageModel.create()` on 4 GB VRAM laptops. Three additional triggers compounded cold
+  starts: (1) `checkAi()` eagerly called `panelSession().open()` outside `withAiLock` even when
+  opening Settings or when a valid cached plan already covered open tabs; (2) exact whole-string
+  signature comparison invalidated the entire plan whenever a single tab closed, opened, or updated
+  a `(1)` unread notification badge; and (3) moving `aiProposal` to `storage.local` requires
+  guarding against reused numeric tab IDs across browser restarts.
+- **Decision:** moved `aiProposalItem` and `aiProposalSignatureItem` from `session:` to `local:`
+  (and made `SettingsView` clear both atomically via `saveAiProposalState(null, '')`); switched
+  `movableTabsSignature` to per-tab `id\tsiteKey\tnormalizedTitle` lines (stripping leading `(N)`
+  unread counters); added shared `filterProposalBySignature` and `aiProposalFreshForAutoRefresh`
+  helpers in `src/platform/windows.ts` so both `windows.ts` and `windowPlan` discard any tab ID whose live site/title no longer matches `savedSignature` (zero
+  post-restart ID collisions), while automatic mount/background sweeps tolerate closed tabs and
+  1–3 drifted tabs when ≥ 80% of open tabs still match (explicit "Organize windows now" clicks
+  always force a fresh AI pass); and removed the eager `panelSession().open()` call from
+  `checkAi()`.
+- **Why:** reloading the extension, opening Settings, closing tabs, or opening 1–3 tabs no longer
+  wakes `OnDeviceModelService` for a multi-minute cold shader compile, while `windows.ts` and
+  `windowPlan` keep placing the few new tabs incrementally in < 2 ms and stale plans from prior
+  browser sessions are rejected deterministically.

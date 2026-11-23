@@ -114,14 +114,17 @@ export const guardStateItem = defineVersioned<GuardState>('session:guardState', 
 });
 
 /**
- * The most recent on-device AI window proposal from the side panel or background autopilot,
- * kept for this browser session so background autopilot preserves AI topic windows instead of
- * overwriting them with the deterministic heuristic.
+ * The most recent on-device AI window proposal from the side panel or background autopilot.
+ *
+ * Stored in `storage.local` (paired with `local:aiProposalSignature`) so extension reloads and
+ * updates do not wipe a valid plan and trigger a multi-minute cold `LanguageModel.create()`.
+ * Every consumer validates live tab IDs, site keys, and titles against `aiProposalSignatureItem`,
+ * so stale plans from a previous browser restart are automatically ignored.
  */
-export const aiProposalItem = defineVersioned<GroupProposal | null>('session:aiProposal', null);
+export const aiProposalItem = defineVersioned<GroupProposal | null>('local:aiProposal', null);
 
-/** Content signature (tab IDs + hosts + titles) that `aiProposalItem` was generated for. */
-export const aiProposalSignatureItem = defineVersioned<string>('session:aiProposalSignature', '');
+/** Per-tab content signature (tab IDs + hosts + titles) that `aiProposalItem` was generated for. */
+export const aiProposalSignatureItem = defineVersioned<string>('local:aiProposalSignature', '');
 
 /**
  * Timestamp (ms epoch) until which an on-device AI prompt is currently running in either the
@@ -323,7 +326,7 @@ export async function readSettingsAndWhitelist(): Promise<{
   };
 }
 
-/** Reads the cached session AI proposal and its tab signature in one batched IPC call. */
+/** Reads the cached AI proposal and its tab signature in one batched IPC call. */
 export async function readAiProposalState(): Promise<{
   readonly proposal: GroupProposal | null;
   readonly signature: string;
@@ -335,7 +338,7 @@ export async function readAiProposalState(): Promise<{
   };
 }
 
-/** Writes the cached session AI proposal and its tab signature in one atomic batched IPC call. */
+/** Writes the cached AI proposal and its tab signature in one atomic batched IPC call. */
 export async function saveAiProposalState(
   proposal: GroupProposal | null,
   signature: string,

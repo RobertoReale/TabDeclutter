@@ -27,7 +27,6 @@ import { caps, type Capabilities } from '@/platform/capabilities';
 import {
   aiBgCooldownUntilItem,
   aiBusyUntilItem,
-  aiProposalItem,
   duplicateWhitelistItem,
   keepsItem,
   onBackgroundAiPreempt,
@@ -42,7 +41,12 @@ import {
   withAiLock,
 } from '@/platform/storage';
 import { activateTab, closeTabs, closeWindow, NO_WINDOW, queryTabs } from '@/platform/tabs';
-import { isMovableTab, movableTabsSignature, organizeWindows } from '@/platform/windows';
+import {
+  aiProposalFreshForAutoRefresh,
+  isMovableTab,
+  movableTabsSignature,
+  organizeWindows,
+} from '@/platform/windows';
 
 import { reportBackgroundError } from './report';
 
@@ -176,7 +180,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     if (movable.length < 2) return;
     const signature = movableTabsSignature(movable);
     if (
-      proposalCoversMovable(proposalState.proposal, movable, proposalState.signature, signature) ||
+      aiProposalFreshForAutoRefresh(proposalState.proposal, movable, proposalState.signature) ||
       lastBgAiSignature === signature
     ) {
       return;
@@ -332,23 +336,21 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       if (snoozeUntil > at) {
         return { closedTabs, closedWindows, groupedWindows };
       }
-      const aiProposal =
-        !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi
-          ? ((await aiProposalItem.getValue().catch(() => null)) ?? undefined)
-          : undefined;
+      const useAiWindows =
+        !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi;
+      const aiState = useAiWindows
+        ? await readAiProposalState().catch(() => ({ proposal: null, signature: '' }))
+        : { proposal: null, signature: '' };
       const winResult = await organizeWindows({
         windowMode: settings.autoWindowMode,
         clusterMode: settings.autoOrganizeMode,
         useTabGroups: settings.useTabGroups,
         focusedWindowId: focusedId,
-        proposal: aiProposal,
+        proposal: aiState.proposal ?? undefined,
+        proposalSignature: aiState.signature,
       });
       groupedWindows = winResult.windowsCount;
-      if (
-        !settings.useTabGroups &&
-        settings.autoOrganizeMode === 'topic' &&
-        settings.useOnDeviceAi
-      ) {
+      if (useAiWindows) {
         void refreshAiInBackground(focusedId).catch(ignore);
       }
     }
@@ -405,6 +407,21 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   return { run };
 }
 
+function errorName(value: unknown): string {
+  return value !== null && typeof value === 'object' && 'name' in value
+    ? String((value as { name: unknown }).name)
+    : '';
+}
+
+function onceDestroy(target: BackgroundLanguageModelSession): () => void {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    target.destroy?.();
+  };
+}
+
 /**
  * Prompts Chrome's on-device `LanguageModel` directly in the service worker and always destroys
  * the ephemeral session in `finally` so the worker never retains ~4 GiB of VRAM or keep-alive
@@ -434,10 +451,7 @@ async function promptBackgroundProposal(
       try {
         return await modelApi.create({ ...EXPECTED_TEXT_OPTIONS, ...GREEDY_SAMPLING, signal: s });
       } catch (error: unknown) {
-        const name =
-          error !== null && typeof error === 'object' && 'name' in error
-            ? String((error as { name: unknown }).name)
-            : '';
+        const name = errorName(error);
         if (
           s.aborted ||
           (name !== 'NotSupportedError' && name !== 'TypeError' && name !== 'RangeError')
@@ -449,12 +463,7 @@ async function promptBackgroundProposal(
     },
   );
 
-  let sessionDestroyed = false;
-  const destroySession = (): void => {
-    if (sessionDestroyed) return;
-    sessionDestroyed = true;
-    session.destroy?.();
-  };
+  const destroySession = onceDestroy(session);
   preemptSignal.addEventListener('abort', destroySession, { once: true });
 
   try {
@@ -477,12 +486,7 @@ async function promptBackgroundProposal(
         async (s) => {
           if (batches.length > 1 && typeof session.clone === 'function') {
             const clone = await session.clone({ signal: s });
-            let destroyed = false;
-            const destroyClone = (): void => {
-              if (destroyed) return;
-              destroyed = true;
-              clone.destroy?.();
-            };
+            const destroyClone = onceDestroy(clone);
             s.addEventListener('abort', destroyClone, { once: true });
             try {
               return await runBgPrompt(clone, promptInput, s, destroyClone);
@@ -539,48 +543,25 @@ async function runBgPrompt(
   }
   const stream = await target.promptStreaming(input, { signal });
   let acc = '';
-  const step = (chunk: string): string | null => {
-    if (chunk === '') return null;
-    acc = acc.length > 0 && chunk.startsWith(acc) ? chunk : acc + chunk;
-    const complete = extractCompleteGroupsJson(acc);
-    if (complete !== null) return complete;
-    return isDegenerateStream(acc) ? acc : null;
-  };
   try {
-    if ('getReader' in stream && typeof stream.getReader === 'function') {
-      const reader = stream.getReader();
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (typeof value !== 'string') continue;
-          const early = step(value);
-          if (early !== null) {
-            void reader.cancel().catch(ignore);
-            stopSession();
-            return early;
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
-    } else {
-      for await (const chunk of stream as AsyncIterable<string>) {
-        if (typeof chunk !== 'string') continue;
-        const early = step(chunk);
-        if (early !== null) {
-          stopSession();
-          return early;
-        }
+    // Both `ReadableStream` (WHATWG Streams) and `AsyncIterable` support `for await`; returning
+    // early automatically cancels the underlying stream reader and releases its lock.
+    for await (const chunk of stream as AsyncIterable<string>) {
+      if (typeof chunk !== 'string' || chunk === '') continue;
+      acc = acc.length > 0 && chunk.startsWith(acc) ? chunk : acc + chunk;
+      const early = extractCompleteGroupsJson(acc) ?? (isDegenerateStream(acc) ? acc : null);
+      if (early !== null) {
+        stopSession();
+        return early;
       }
     }
     return acc;
   } catch (error: unknown) {
-    const reasonName =
-      signal.reason !== null && typeof signal.reason === 'object' && 'name' in signal.reason
-        ? String((signal.reason as { name: unknown }).name)
-        : '';
-    if (signal.aborted && reasonName === 'TimeoutError' && hasRecoverableGroupSnippet(acc)) {
+    if (
+      signal.aborted &&
+      errorName(signal.reason) === 'TimeoutError' &&
+      hasRecoverableGroupSnippet(acc)
+    ) {
       return acc;
     }
     throw error;
@@ -715,28 +696,6 @@ function onlyAiToggleChanged(
     JSON.stringify({ ...oldVal, useOnDeviceAi: false }) ===
     JSON.stringify({ ...newVal, useOnDeviceAi: false })
   );
-}
-
-function proposalCoversMovable(
-  proposal: GroupProposal | null,
-  movable: readonly TabInfo[],
-  savedSignature: string,
-  currentSignature: string,
-): boolean {
-  if (proposal === null || movable.length < 2) return false;
-  if (savedSignature !== '' && savedSignature !== currentSignature) return false;
-  const movableIds = new Set(movable.map((tab) => tab.id));
-  const known = new Set<number>(proposal.ungrouped);
-  let hasLiveGroup = false;
-  for (const group of proposal.groups) {
-    let liveCount = 0;
-    for (const id of group.tabIds) {
-      known.add(id);
-      if (movableIds.has(id)) liveCount += 1;
-    }
-    if (liveCount >= 2) hasLiveGroup = true;
-  }
-  return hasLiveGroup && movable.every((tab) => known.has(tab.id));
 }
 
 function failed(error: unknown): void {

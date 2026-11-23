@@ -16,8 +16,10 @@ import {
   aiBgCooldownUntilItem,
   preemptBackgroundAi,
   readAiProposalState,
+  saveAiProposalState,
   saveSettings,
 } from '../../src/platform/storage';
+import { movableTabsSignature } from '../../src/platform/windows';
 
 const NOW = Date.UTC(2026, 10, 22, 12, 0, 0);
 
@@ -410,6 +412,101 @@ describe('background/autopilot reliability', () => {
     const saved = await readAiProposalState();
     expect(saved.proposal?.groups[0]?.title).toBe('Math');
     expect(saved.proposal?.groups[0]?.tabIds).toEqual([50, 51]);
+  });
+
+  it('reuses a persisted local AI proposal across reloads and minor tab drift without calling LanguageModel.create()', async () => {
+    const createSpy = vi.fn(async () => ({
+      prompt: vi.fn(async () => JSON.stringify({ groups: [{ name: 'Fresh', tabIds: [1, 2] }] })),
+      destroy: vi.fn(),
+    }));
+    vi.stubGlobal('LanguageModel', {
+      availability: vi.fn(async () => 'available'),
+      create: createSpy,
+    });
+
+    const baseTabs = Array.from({ length: 8 }, (_, idx) => ({
+      id: 200 + idx,
+      windowId: 1,
+      index: idx,
+      url:
+        idx < 4 ? `https://math.example/${String(idx)}` : `https://history.example/${String(idx)}`,
+      title: idx < 4 ? `Algebra ${String(idx)}` : `Rome ${String(idx)}`,
+      pinned: false,
+      audible: false,
+      active: idx === 0,
+      discarded: false,
+      hidden: false,
+      incognito: false,
+      groupId: NO_GROUP_ID,
+    }));
+    const sig = movableTabsSignature(baseTabs);
+    await saveAiProposalState(
+      {
+        mode: 'topic',
+        groups: [
+          { key: 'math', title: 'Math', color: 'blue', windowId: 1, tabIds: [200, 201, 202, 203] },
+          {
+            key: 'history',
+            title: 'History',
+            color: 'green',
+            windowId: 1,
+            tabIds: [204, 205, 206, 207],
+          },
+        ],
+        ungrouped: [],
+      },
+      sig,
+    );
+
+    // Simulate reload + 1 closed tab + 1 newly opened tab (1/8 = 12.5% drift < 20% and < 4).
+    const afterReload = [
+      ...baseTabs.filter((entry) => entry.id !== 203),
+      {
+        id: 299,
+        windowId: 1,
+        index: 7,
+        url: 'https://news.example/today',
+        title: 'Daily brief',
+        pinned: false,
+        audible: false,
+        active: false,
+        discarded: false,
+        hidden: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+    ];
+    vi.spyOn(fakeBrowser.windows, 'getLastFocused').mockResolvedValue({ id: 1 } as never);
+    vi.spyOn(fakeBrowser.tabs, 'query').mockResolvedValue(afterReload as never);
+    vi.spyOn(fakeBrowser.tabs, 'move').mockResolvedValue({} as never);
+
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoOrganize: true,
+      useTabGroups: false,
+      autoOrganizeMode: 'topic',
+      autoWindowMode: 'merge-windows',
+      useOnDeviceAi: true,
+    });
+
+    const reloadedAutopilot = registerAutopilot({ now: () => NOW, capabilities: CHROME_CAPS });
+    await reloadedAutopilot.run();
+    await flushAsync();
+
+    expect(createSpy).not.toHaveBeenCalled();
+
+    // After a browser restart reusing the same tab IDs for unrelated sites, stale proposal is
+    // rejected and background AI refreshes once cleanly.
+    const postRestartTabs = baseTabs.map((entry) => ({
+      ...entry,
+      url: `https://newsite-${String(entry.id)}.example/page`,
+      title: `Different page ${String(entry.id)}`,
+    }));
+    vi.spyOn(fakeBrowser.tabs, 'query').mockResolvedValue(postRestartTabs as never);
+    await reloadedAutopilot.run();
+    await flushAsync();
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -581,9 +581,9 @@ describe('batched storage IPC and Web Locks coordination', () => {
     expect(guardCfg.whitelist).toEqual(['*://example.com/*']);
   });
 
-  it('reads and writes the session AI proposal + signature in one call each', async () => {
-    const writes = vi.spyOn(fakeBrowser.storage.session, 'set');
-    const reads = vi.spyOn(fakeBrowser.storage.session, 'get');
+  it('reads and writes the local AI proposal + signature in one call each', async () => {
+    const writes = vi.spyOn(fakeBrowser.storage.local, 'set');
+    const reads = vi.spyOn(fakeBrowser.storage.local, 'get');
     const proposal = {
       mode: 'topic' as const,
       groups: [{ key: 'ai:1', title: 'Math', color: 'blue' as const, windowId: 1, tabIds: [1, 2] }],
@@ -596,6 +596,7 @@ describe('batched storage IPC and Web Locks coordination', () => {
     expect(writes).toHaveBeenCalledTimes(1);
     expect(reads).toHaveBeenCalledTimes(1);
     expect(loaded).toEqual({ proposal, signature: 'sig-1' });
+    expect(await fakeBrowser.storage.session.get(null)).toEqual({});
   });
 
   it('routes cross-context writes and AI locking through navigator.locks when present', async () => {
