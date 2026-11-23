@@ -33,7 +33,6 @@
 
 import { HOUR, MINUTE } from '@/core/time';
 import { caps } from '@/platform/capabilities';
-import { t } from '@/platform/i18n';
 import type { MessageKey } from '@/platform/i18n';
 import { addDuplicateWhitelistPattern } from '@/platform/storage';
 import { keepTab, protectSite } from '@/platform/tabs';
@@ -141,16 +140,19 @@ export function registerMenus(options: MenusOptions): Menus {
   const tabContext = options.tabContext ?? caps.tabContextMenu;
   const contexts = tabContext ? ['page', 'tab'] : ['page'];
 
+  const msg = (key: MessageKey): string =>
+    typeof browser === 'undefined' ? '' : (browser.i18n?.getMessage(key) ?? '');
+
   async function install(): Promise<void> {
     if (api === undefined) return;
     // The previous version's items, if the browser still holds them: `create` with an id
     // that already exists is an error, and an update fires `onInstalled`.
     await api.removeAll();
-    for (const [id, titleKey] of ITEMS) api.create({ id, title: t(titleKey), contexts });
+    for (const [id, titleKey] of ITEMS) api.create({ id, title: msg(titleKey), contexts });
     // The parent before its children: `create` with a `parentId` that does not exist yet is
     // an error, and `ACTION_ITEMS` is in that order.
     for (const [id, titleKey, parentId] of ACTION_ITEMS) {
-      api.create({ id, title: t(titleKey), contexts: ACTION_CONTEXTS, parentId });
+      api.create({ id, title: msg(titleKey), contexts: ACTION_CONTEXTS, parentId });
     }
   }
 

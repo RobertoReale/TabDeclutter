@@ -161,4 +161,34 @@ test.describe('in English', () => {
     await openSettings(panel, 'en');
     await expect(field(panel, 'en', 'settingsFieldStale')).toHaveValue('1');
   });
+
+  test('the hash-fragment rule and native tab-groups toggle remain visible when tab groups are off', async ({
+    panel,
+  }) => {
+    await openSettings(panel, 'en');
+
+    const ignoreHash = panel.getByLabel(message('en', 'matchIgnoreHash'));
+    const useTabGroups = panel.getByLabel(message('en', 'windowUseTabGroups'));
+    await expect(ignoreHash).toBeVisible();
+    await expect(useTabGroups).toBeVisible();
+
+    // The E2E fixture seeds `useTabGroups: true`; turning both toggles off must keep both
+    // controls visible right away and across navigation.
+    await expect(ignoreHash).toBeChecked();
+    await ignoreHash.uncheck();
+    await expect(useTabGroups).toBeChecked();
+    await useTabGroups.uncheck();
+    await expect(ignoreHash).not.toBeChecked();
+    await expect(useTabGroups).not.toBeChecked();
+    await expect(ignoreHash).toBeVisible();
+    await expect(useTabGroups).toBeVisible();
+
+    // Return to main view and re-open settings: both toggles stay visible and unchecked.
+    await panel.getByRole('button', { name: message('en', 'navDeclutter') }).click();
+    await openSettings(panel, 'en');
+    await expect(ignoreHash).toBeVisible();
+    await expect(ignoreHash).not.toBeChecked();
+    await expect(useTabGroups).toBeVisible();
+    await expect(useTabGroups).not.toBeChecked();
+  });
 });

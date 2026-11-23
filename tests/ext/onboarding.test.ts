@@ -92,4 +92,18 @@ describe('"Inizia" (§17.5)', () => {
       expect(onboardingNeeded.value).toBe(false);
     });
   });
+
+  it('enables autoDeclutter and autoOrganize only when automatic protection is chosen', async () => {
+    draftGuardMode.value = 'warn';
+    await finishOnboarding();
+    expect(await readSettings()).toMatchObject({ autoDeclutter: false, autoOrganize: false });
+
+    draftGuardMode.value = 'off';
+    await finishOnboarding();
+    expect(await readSettings()).toMatchObject({ autoDeclutter: false, autoOrganize: false });
+
+    draftGuardMode.value = 'auto';
+    await finishOnboarding();
+    expect(await readSettings()).toMatchObject({ autoDeclutter: true, autoOrganize: true });
+  });
 });

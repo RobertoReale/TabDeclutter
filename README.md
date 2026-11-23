@@ -71,7 +71,7 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
 
 ### 2. Autopilot & Declutter
 
-- **Background Autopilot** _(enabled by default)_: quietly archives and closes abandoned empty tabs
+- **Background Autopilot** _(enabled once you confirm setup; opt-out anytime)_: quietly archives and closes abandoned empty tabs
   (untouched for over 1 hour), tabs you have not opened for more than your configured threshold
   (default: **7 days**), and forgotten background windows.
 - **Manual Review & 1-Click Cleanup**: open the **Declutter** view to see tabs ranked by a readable

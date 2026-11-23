@@ -6,6 +6,13 @@ All notable changes to TabDeclutter are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Kept `autoDeclutter` and `autoOrganize` disabled until onboarding completes (including ignoring `runtime.onInstalled` `'install'` events) and updated store/privacy documentation to match.
+- Unified AI batch packing (`packClusterBatches`) and proposal assembly (`assembleAiProposal`) between the background service worker and side panel so background refreshes pre-cluster via TF-IDF, split on `QuotaExceededError`, merge equivalent topic names, and preserve overflow tabs in `ungrouped`.
+- Serialized post-AI background window organization inside the autopilot queue (`enqueue`), re-checking live guard/snooze/focus state and passing `proposalSignature` so `resolveWindowProposal` does not fall back unexpectedly.
+- Kept `matchIgnoreHash` and `windowUseTabGroups` visible in `SettingsView` whenever native tab groups are off.
+
 ## [0.1.0]
 
 First version, for Chrome (121 and later) and Firefox (140 and later).

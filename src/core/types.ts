@@ -206,8 +206,10 @@ export const DEFAULT_SETTINGS: Settings = {
   graceMs: 2 * HOUR,
   includeGroupedTabs: true,
   showBadge: true,
-  autoDeclutter: true,
-  autoOrganize: true,
+  // Left off until onboarding completes (`finishOnboarding()`), like `DEFAULT_GUARD_SETTINGS.mode`,
+  // so installing the extension never closes tabs or merges windows before the user answers §17.
+  autoDeclutter: false,
+  autoOrganize: false,
   autoOrganizeMode: 'site',
   autoWindowMode: 'merge-windows',
   useTabGroups: false,

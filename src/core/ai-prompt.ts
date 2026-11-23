@@ -6,9 +6,22 @@
  * model answers statically without pulling `groupByTopic`'s title/site tables into its bundle.
  */
 
-import { foldAccents, STOPWORDS, stripSiteSuffix } from './cluster';
+import {
+  foldAccents,
+  STOPWORDS,
+  stripSiteSuffix,
+  type GroupColor,
+  type GroupProposal,
+  type ProposedGroup,
+} from './cluster';
 import type { TabInfo } from './types';
 import { displayHost } from './url';
+
+export function errorName(error: unknown): string {
+  return error !== null && typeof error === 'object' && 'name' in error
+    ? String((error as { name: unknown }).name)
+    : '';
+}
 
 /**
  * The system prompt of PLAN.md §7.3, word for word. In English: the Prompt API officially
@@ -155,10 +168,10 @@ function cleanGroupTitle(raw: string, max: number): string {
   return (sp >= max >> 1 ? cut.slice(0, sp) : cut).replace(/[\s&,:;/-]+$/u, '') || cut.trim();
 }
 
-function titleWords(text: string): string[] {
+function wordTokens(text: string, minLen = 4, withDigits = false): string[] {
   return foldAccents(text.toLowerCase())
     .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length >= 4 && !STOPWORDS.has(w));
+    .filter((w) => (w.length >= minLen || (withDigits && /\d/.test(w))) && !STOPWORDS.has(w));
 }
 
 function sharesTwo(words: ReadonlySet<string>, ref: ReadonlySet<string>): boolean {
@@ -178,12 +191,12 @@ function pruneEntityOutliers(
   byId: ReadonlyMap<number, TabInfo>,
 ): readonly number[] {
   if (members.length < 5) return members;
-  const needles = titleWords(title);
+  const needles = wordTokens(title);
   if (needles.length === 0) return members;
 
   const sets = members.map((id) => {
     const tab = byId.get(id)!;
-    return new Set(titleWords(stripSiteSuffix(tab.title, tab.url)));
+    return new Set(wordTokens(stripSiteSuffix(tab.title, tab.url)));
   });
   const anchors: ReadonlySet<string>[] = [];
   const vocab = new Set<string>();
@@ -323,4 +336,113 @@ export function isDegenerateStream(text: string): boolean {
 /** Whether partial streamed text already carries at least one regex-recoverable group. */
 export function hasRecoverableGroupSnippet(text: string): boolean {
   return extractRegexGroups(text).some((g) => g.tabIds.length > 0);
+}
+
+/** Packs one window's pre-clustered groups and remaining tabs into batches of at most `maxBatchTabs`. */
+export function packClusterBatches(
+  own: readonly TabInfo[],
+  clusterGroups: readonly (readonly number[])[],
+  maxBatchTabs: number,
+): readonly (readonly TabInfo[])[] {
+  if (own.length <= maxBatchTabs) return own.length === 0 ? [] : [own];
+  const byId = new Map(own.map((tab) => [tab.id, tab]));
+  const grouped = new Set<number>();
+  const chunks: TabInfo[][] = [];
+  for (const groupIds of clusterGroups) {
+    const members: TabInfo[] = [];
+    for (const id of groupIds) {
+      grouped.add(id);
+      const tab = byId.get(id);
+      if (tab !== undefined) members.push(tab);
+    }
+    for (let at = 0; at < members.length; at += maxBatchTabs) {
+      chunks.push(members.slice(at, at + maxBatchTabs));
+    }
+  }
+  // Singletons resemble nothing in particular, so pack them into free batch slots.
+  for (const tab of own) {
+    if (!grouped.has(tab.id)) chunks.push([tab]);
+  }
+  const batches: TabInfo[][] = [];
+  for (const chunk of chunks) {
+    const last = batches.at(-1);
+    if (last !== undefined && last.length + chunk.length <= maxBatchTabs) last.push(...chunk);
+    else batches.push(chunk);
+  }
+  return batches;
+}
+
+function sameTopicTitle(
+  leftKey: string,
+  leftTokens: readonly string[],
+  rightKey: string,
+  rightTokens: readonly string[],
+): boolean {
+  return (
+    leftKey === rightKey ||
+    (leftTokens.length > 0 &&
+      rightTokens.length > 0 &&
+      (leftTokens.every((t) => rightTokens.includes(t)) ||
+        rightTokens.every((t) => leftTokens.includes(t))))
+  );
+}
+
+/**
+ * Merges drafts with identical or equivalent/subset topic tokens per window,
+ * keeps the largest `maxGroups` groups per window, and returns all remaining tabs in `ungrouped`.
+ */
+export function assembleAiProposal(
+  drafts: readonly AiDraft[],
+  ungrouped: readonly number[],
+  position: ReadonlyMap<number, number>,
+  windows: readonly number[],
+  maxGroups: number,
+  colorOf: (key: string) => GroupColor = () => 'grey',
+): GroupProposal {
+  const groups: ProposedGroup[] = [];
+  const rest = [...ungrouped];
+  const at = (id: number): number => position.get(id) ?? 0;
+
+  for (const windowId of windows) {
+    const merged: {
+      key: string;
+      title: string;
+      tokens: readonly string[];
+      tabIds: number[];
+    }[] = [];
+    for (const draft of drafts) {
+      if (draft.windowId !== windowId || draft.tabIds.length === 0) continue;
+      const key = draft.title.toLowerCase();
+      const tokens = wordTokens(draft.title, 3, true);
+      const found = merged.find((entry) => sameTopicTitle(entry.key, entry.tokens, key, tokens));
+      if (found === undefined) {
+        merged.push({ key, title: draft.title, tokens, tabIds: [...draft.tabIds] });
+      } else {
+        found.tabIds.push(...draft.tabIds);
+      }
+    }
+
+    for (const group of merged) group.tabIds.sort((a, b) => at(a) - at(b));
+    merged.sort((a, b) =>
+      a.tabIds.length !== b.tabIds.length
+        ? b.tabIds.length - a.tabIds.length
+        : at(a.tabIds[0]!) - at(b.tabIds[0]!),
+    );
+
+    merged.forEach((group, rank) => {
+      if (rank >= maxGroups) {
+        rest.push(...group.tabIds);
+        return;
+      }
+      groups.push({
+        key: group.key,
+        title: group.title,
+        color: colorOf(group.key),
+        windowId,
+        tabIds: group.tabIds,
+      });
+    });
+  }
+
+  return { mode: 'topic', groups, ungrouped: rest.sort((a, b) => at(a) - at(b)) };
 }

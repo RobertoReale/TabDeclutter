@@ -7,17 +7,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 
-import { DEFAULT_SETTINGS, NO_GROUP_ID } from '../../src/core/types';
+import { DEFAULT_SETTINGS, NO_GROUP_ID, type TabInfo } from '../../src/core/types';
 import { registerAutopilot } from '../../src/entrypoints/background/autopilot';
 import { reportBackgroundError } from '../../src/entrypoints/background/report';
 import type { Capabilities } from '../../src/platform/capabilities';
 import {
   activityItem,
   aiBgCooldownUntilItem,
+  pauseGuard,
   preemptBackgroundAi,
   readAiProposalState,
+  readSettings,
   saveAiProposalState,
   saveSettings,
+  startGuardGrace,
 } from '../../src/platform/storage';
 import { movableTabsSignature } from '../../src/platform/windows';
 
@@ -530,6 +533,283 @@ describe('background/autopilot reliability', () => {
     await flushAsync();
 
     expect(createSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('defaults to non-destructive mode before onboarding and ignores runtime.onInstalled install events', async () => {
+    expect(DEFAULT_SETTINGS.autoDeclutter).toBe(false);
+    expect(DEFAULT_SETTINGS.autoOrganize).toBe(false);
+    expect(await readSettings()).toMatchObject({ autoDeclutter: false, autoOrganize: false });
+
+    const tabs: TabInfo[] = [
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'about:blank',
+        title: 'Blank',
+        pinned: false,
+        audible: false,
+        active: false,
+        discarded: false,
+        hidden: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 2,
+        windowId: 2,
+        index: 0,
+        url: 'https://docs.example/a',
+        title: 'Docs A',
+        pinned: false,
+        audible: false,
+        active: true,
+        discarded: false,
+        hidden: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+    ];
+    const removeSpy = vi.spyOn(fakeBrowser.tabs, 'remove').mockResolvedValue(undefined as never);
+    const moveSpy = vi.spyOn(fakeBrowser.tabs, 'move').mockResolvedValue({} as never);
+    vi.spyOn(fakeBrowser.tabs, 'query').mockResolvedValue(tabs as never);
+    vi.spyOn(fakeBrowser.windows, 'getLastFocused').mockResolvedValue({ id: 2 } as never);
+    await activityItem.setValue({
+      1: {
+        tabId: 1,
+        url: 'about:blank',
+        createdAt: NOW - 3 * 3_600_000,
+        lastActiveAt: NOW - 2 * 3_600_000,
+        activations: 0,
+        foregroundMs: 0,
+      },
+    });
+
+    registerAutopilot({ now: () => NOW, debounceMs: 5, capabilities: CHROME_CAPS });
+    await fakeBrowser.runtime.onInstalled.trigger({
+      reason: 'install',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(removeSpy).not.toHaveBeenCalled();
+    expect(moveSpy).not.toHaveBeenCalled();
+
+    // Updating an already-configured profile with autopilot enabled still schedules a sweep.
+    await saveSettings({ ...DEFAULT_SETTINGS, autoDeclutter: true, autoOrganize: false });
+    await fakeBrowser.runtime.onInstalled.trigger({
+      reason: 'update',
+      previousVersion: '0.1.0',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 35));
+
+    expect(removeSpy).toHaveBeenCalledWith([1]);
+    expect(moveSpy).not.toHaveBeenCalled();
+  });
+
+  it('merges equivalent topics, splits QuotaExceededError batches, and keeps overflow tabs in ungrouped', async () => {
+    const fakeTabs: TabInfo[] = Array.from({ length: 40 }, (_, i) => ({
+      id: 100 + i,
+      windowId: 1,
+      index: i,
+      url: `https://topic${String(Math.floor(i / 4))}.example/${String(i)}`,
+      title:
+        i < 4
+          ? `Corrado Augias part ${String(i)}`
+          : i >= 36
+            ? `Augias Corrado extra ${String(i)}`
+            : `Topic ${String(Math.floor(i / 4))} item ${String(i)}`,
+      pinned: false,
+      audible: false,
+      active: i === 0,
+      discarded: false,
+      hidden: false,
+      incognito: false,
+      groupId: NO_GROUP_ID,
+    }));
+
+    let callIndex = 0;
+    const batchLengths: number[] = [];
+    vi.stubGlobal('LanguageModel', {
+      availability: vi.fn(async () => 'available'),
+      create: vi.fn(async () => ({
+        prompt: vi.fn(async (input: string) => {
+          const lines = input
+            .split('\n')
+            .slice(1)
+            .filter((line) => /^\d+\|/.test(line));
+          batchLengths.push(lines.length);
+          const idx = callIndex++;
+          if (idx === 0) {
+            throw new DOMException('Context full', 'QuotaExceededError');
+          }
+          const ids = lines.map((line) => Number(line.split('|')[0]));
+          if (ids.length > 25) {
+            return JSON.stringify({
+              groups: [
+                { name: 'Topic Alpha', tabIds: ids.slice(0, 4) },
+                { name: 'Topic Beta', tabIds: ids.slice(4, 8) },
+                { name: 'Topic Gamma', tabIds: ids.slice(8, 12) },
+                { name: 'Topic Delta', tabIds: ids.slice(12, 16) },
+                { name: 'Topic Epsilon', tabIds: ids.slice(16, 20) },
+                { name: 'Topic Zeta', tabIds: ids.slice(20, 24) },
+                { name: 'Corrado Augias', tabIds: ids.slice(24) },
+              ],
+            });
+          }
+          // Remaining halved batches return tiny/subset groups plus an overflow 9th group.
+          return JSON.stringify({
+            groups: [
+              { name: 'Augias Corrado', tabIds: ids.slice(0, 3) },
+              { name: 'SmallOverflowGroup', tabIds: ids.slice(3, 5) },
+              { name: 'Topic Omega', tabIds: ids.slice(5) },
+            ],
+          });
+        }),
+        destroy: vi.fn(),
+      })),
+    });
+
+    vi.spyOn(fakeBrowser.windows, 'getLastFocused').mockResolvedValue({ id: 1 } as never);
+    vi.spyOn(fakeBrowser.tabs, 'query').mockResolvedValue(fakeTabs as never);
+    vi.spyOn(fakeBrowser.tabs, 'move').mockResolvedValue({} as never);
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoOrganize: true,
+      useTabGroups: false,
+      autoOrganizeMode: 'topic',
+      autoWindowMode: 'merge-windows',
+      useOnDeviceAi: true,
+    });
+
+    const autopilot = registerAutopilot({ now: () => NOW, capabilities: CHROME_CAPS });
+    await autopilot.run();
+    await flushAsync();
+
+    // QuotaExceededError halved the first batch instead of triggering failure cooldown.
+    expect(batchLengths.length).toBeGreaterThanOrEqual(3);
+    expect(await aiBgCooldownUntilItem.getValue()).toBe(0);
+
+    const saved = await readAiProposalState();
+    const proposal = saved.proposal!;
+    expect(proposal.groups.length).toBeLessThanOrEqual(8);
+    // Equivalent names ("Corrado Augias" and "Augias Corrado") merged rather than splitting.
+    const augiasGroups = proposal.groups.filter((g) => /augias/i.test(g.title));
+    expect(augiasGroups).toHaveLength(1);
+    // Zero movable tabs are dropped: grouped + ungrouped covers every one of the 40 tabs.
+    const covered = new Set([
+      ...proposal.groups.flatMap((g) => [...g.tabIds]),
+      ...proposal.ungrouped,
+    ]);
+    expect(covered.size).toBe(fakeTabs.length);
+  });
+
+  it('serializes post-AI window moves with fresh focus and skips organizing if paused mid-inference', async () => {
+    let releasePrompt!: (value: string) => void;
+    let promptCount = 0;
+    vi.stubGlobal('LanguageModel', {
+      availability: vi.fn(async () => 'available'),
+      create: vi.fn(async () => ({
+        prompt: vi.fn(
+          () =>
+            new Promise<string>((resolve) => {
+              promptCount += 1;
+              releasePrompt = resolve;
+            }),
+        ),
+        destroy: vi.fn(),
+      })),
+    });
+
+    const tabs: TabInfo[] = [
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://rust-lang.org/a',
+        title: 'Rust book',
+        pinned: false,
+        audible: false,
+        active: false,
+        discarded: false,
+        hidden: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 2,
+        windowId: 2,
+        index: 0,
+        url: 'https://rust-lang.org/b',
+        title: 'Rust traits',
+        pinned: false,
+        audible: false,
+        active: true,
+        discarded: false,
+        hidden: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 3,
+        windowId: 1,
+        index: 1,
+        url: 'https://cooking.example/soup',
+        title: 'Soup recipe',
+        pinned: false,
+        audible: false,
+        active: true,
+        discarded: false,
+        hidden: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+    ];
+    let focusedWin = 1;
+    vi.spyOn(fakeBrowser.windows, 'getLastFocused').mockImplementation(
+      async () => ({ id: focusedWin }) as never,
+    );
+    vi.spyOn(fakeBrowser.tabs, 'query').mockResolvedValue(tabs as never);
+    const moveSpy = vi.spyOn(fakeBrowser.tabs, 'move').mockResolvedValue({} as never);
+    const createWinSpy = vi
+      .spyOn(fakeBrowser.windows, 'create')
+      .mockResolvedValue({ id: 99 } as never);
+
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoOrganize: true,
+      useTabGroups: false,
+      autoOrganizeMode: 'topic',
+      autoWindowMode: 'split-windows',
+      useOnDeviceAi: true,
+    });
+
+    const autopilot = registerAutopilot({ now: () => NOW, capabilities: CHROME_CAPS });
+    await autopilot.run();
+    await flushAsync();
+    expect(promptCount).toBe(1);
+
+    // While inference was running, user paused duplicate guard & moved focus to window 2.
+    focusedWin = 2;
+    await pauseGuard(NOW + 60_000, 'auto');
+    moveSpy.mockClear();
+    createWinSpy.mockClear();
+    releasePrompt(JSON.stringify({ groups: [{ name: 'Rust', tabIds: [1, 2] }] }));
+    await flushAsync();
+    // Paused mid-inference -> post-AI enqueue skips organizing windows.
+    expect(moveSpy).not.toHaveBeenCalled();
+
+    // Clear pause + startup grace -> next fresh run uses updated focused window 2 on apply.
+    await pauseGuard(NOW - 1, 'auto');
+    await startGuardGrace(NOW - 1);
+    await saveAiProposalState(null, '');
+    focusedWin = 1;
+    await autopilot.run();
+    await flushAsync();
+    focusedWin = 2;
+    releasePrompt(JSON.stringify({ groups: [{ name: 'Rust', tabIds: [1, 2] }] }));
+    await flushAsync();
+    // Rust bucket keeps window 2 (where its active focused tab 2 sits) and pulls tab 1 into win 2.
+    expect(moveSpy).toHaveBeenCalledWith(1, expect.objectContaining({ windowId: 2 }));
   });
 });
 

@@ -19,10 +19,18 @@
  * above `maxBatchTabs` tabs, the pre-clustering the batches are built from.
  */
 
-import { buildPrompt, SYSTEM_PROMPT, tabLine, validateAiAnswer } from './ai-prompt';
+import {
+  assembleAiProposal,
+  buildPrompt,
+  errorName,
+  packClusterBatches,
+  SYSTEM_PROMPT,
+  tabLine,
+  validateAiAnswer,
+} from './ai-prompt';
 import type { AiDraft } from './ai-prompt';
-import type { ClusterOptions, GroupProposal, ProposedGroup } from './cluster';
-import { colorFor, DEFAULT_CLUSTER_OPTIONS, foldAccents, groupByTopic, STOPWORDS } from './cluster';
+import type { ClusterOptions, GroupProposal } from './cluster';
+import { colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic } from './cluster';
 import type { TabInfo } from './types';
 
 export { buildPrompt, SYSTEM_PROMPT, tabLine };
@@ -232,12 +240,6 @@ class PromptTimeout extends Error {}
 /** The name Chrome's Prompt API throws when the input does not fit the session. */
 const QUOTA_ERROR = 'QuotaExceededError';
 
-function errorName(error: unknown): string {
-  return error !== null && typeof error === 'object' && 'name' in error
-    ? String((error as { name: unknown }).name)
-    : '';
-}
-
 function errorDetail(error: unknown): string | undefined {
   if (error === null || error === undefined) return undefined;
   if (typeof error === 'object') {
@@ -405,64 +407,17 @@ function byWindow(tabs: readonly TabInfo[]): readonly { windowId: number; tabs: 
   return [...windows].map(([windowId, own]) => ({ windowId, tabs: own }));
 }
 
-/**
- * The macro-clusters of one window, biggest first: §7.2's groups, then its "Altro" tabs
- * one by one, with anything longer than a batch cut into batch-sized pieces.
- */
-function macroClusters(
-  own: readonly TabInfo[],
-  fallback: GroupProposal,
-  windowId: number,
-  settings: Settings,
-): readonly TabInfo[][] {
-  const byId = new Map(own.map((tab) => [tab.id, tab]));
-  const clusters: TabInfo[][] = [];
-  const grouped = new Set<number>();
-  for (const group of fallback.groups) {
-    if (group.windowId !== windowId) continue;
-    const members = group.tabIds.map((id) => byId.get(id)).filter((tab) => tab !== undefined);
-    for (const id of group.tabIds) grouped.add(id);
-    for (let at = 0; at < members.length; at += settings.maxBatchTabs) {
-      clusters.push(members.slice(at, at + settings.maxBatchTabs));
-    }
-  }
-  // "Altro" is not one cluster: those tabs resemble nothing in particular, so each is free
-  // to be packed with whatever comes next, and the model may still find a topic in them.
-  for (const tab of own) {
-    if (!grouped.has(tab.id)) clusters.push([tab]);
-  }
-  return clusters;
-}
-
-/**
- * The prompts the run will make (PLAN.md §7.3): one per window while the window fits in a
- * batch, otherwise §7.2's macro-clusters packed into batches of at most `maxBatchTabs`.
- *
- * Packing rather than one prompt per macro-cluster: with 300 tabs the clusters are mostly
- * pairs, and 150 prompts would never finish inside the 20 s budget. A macro-cluster is
- * never spread over two prompts unless it is larger than a whole batch
- * (docs/DECISIONS.md, M5.1).
- */
 function planBatches(
   eligible: readonly TabInfo[],
   fallback: GroupProposal,
   settings: Settings,
-): readonly TabInfo[][] {
-  const batches: TabInfo[][] = [];
+): readonly (readonly TabInfo[])[] {
+  const batches: (readonly TabInfo[])[] = [];
   for (const { windowId, tabs: own } of byWindow(eligible)) {
-    if (own.length <= settings.maxBatchTabs) {
-      batches.push(own);
-      continue;
-    }
-    let current: TabInfo[] = [];
-    for (const cluster of macroClusters(own, fallback, windowId, settings)) {
-      if (current.length > 0 && current.length + cluster.length > settings.maxBatchTabs) {
-        batches.push(current);
-        current = [];
-      }
-      current.push(...cluster);
-    }
-    if (current.length > 0) batches.push(current);
+    const windowGroups = fallback.groups
+      .filter((group) => group.windowId === windowId)
+      .map((group) => group.tabIds);
+    batches.push(...packClusterBatches(own, windowGroups, settings.maxBatchTabs));
   }
   return batches;
 }
@@ -482,100 +437,6 @@ function fallbackDrafts(
     drafts.push({ title: group.title, windowId: group.windowId, tabIds: members });
   }
   return { drafts, ungrouped: [...failedIds].filter((id) => !claimed.has(id)) };
-}
-
-/**
- * The drafts turned into a proposal: merged by name inside a window, biggest group first,
- * at most `maxGroups` per window, the rest in "Altro" (PLAN.md §7.2.4, §7.2.6).
- *
- * Two drafts with the same name in the same window are one group: the name is what the
- * user sees, and two prompts about one window have no way of agreeing not to collide. The
- * key, and so the colour, is the lower-case name, exactly as in §7.2 (docs/DECISIONS.md,
- * M4.1).
- */
-function titleTokens(title: string): readonly string[] {
-  return foldAccents(title.toLowerCase())
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => (w.length >= 3 || /\d/.test(w)) && !STOPWORDS.has(w));
-}
-
-function sameTopicTitle(
-  leftKey: string,
-  leftTokens: readonly string[],
-  rightKey: string,
-  rightTokens: readonly string[],
-): boolean {
-  if (leftKey === rightKey) return true;
-  if (leftTokens.length === 0 || rightTokens.length === 0) return false;
-  const rightSet = new Set(rightTokens);
-  if (leftTokens.every((t) => rightSet.has(t))) return true;
-  const leftSet = new Set(leftTokens);
-  return rightTokens.every((t) => leftSet.has(t));
-}
-
-function assemble(
-  drafts: readonly AiDraft[],
-  ungrouped: readonly number[],
-  position: ReadonlyMap<number, number>,
-  windows: readonly number[],
-  settings: Settings,
-): GroupProposal {
-  const groups: ProposedGroup[] = [];
-  const rest = [...ungrouped];
-  /** Where a tab sits in the scope, which is every tie-break below. */
-  const at = (id: number): number => position.get(id) ?? 0;
-
-  for (const windowId of windows) {
-    // Merge drafts that share the same lower-case name OR equivalent/subset topic tokens
-    // (e.g. AI's "Corrado Augias" + local fallback's "Augias · Corrado"), keeping the first
-    // (AI-authored) spelling.
-    const mergedGroups: {
-      key: string;
-      title: string;
-      tokens: readonly string[];
-      tabIds: number[];
-    }[] = [];
-    for (const draft of drafts) {
-      if (draft.windowId !== windowId) continue;
-      const key = draft.title.toLowerCase();
-      const tokens = titleTokens(draft.title);
-      const found = mergedGroups.find((entry) =>
-        sameTopicTitle(entry.key, entry.tokens, key, tokens),
-      );
-      if (found === undefined) {
-        mergedGroups.push({ key, title: draft.title, tokens, tabIds: [...draft.tabIds] });
-      } else {
-        found.tabIds.push(...draft.tabIds);
-      }
-    }
-
-    const ordered = mergedGroups
-      .map((group) => ({
-        ...group,
-        tabIds: group.tabIds.sort((a, b) => at(a) - at(b)),
-      }))
-      .sort((a, b) =>
-        a.tabIds.length !== b.tabIds.length
-          ? b.tabIds.length - a.tabIds.length
-          : at(a.tabIds[0] as number) - at(b.tabIds[0] as number),
-      );
-
-    for (const [rank, group] of ordered.entries()) {
-      if (rank >= settings.maxGroups) {
-        rest.push(...group.tabIds);
-        continue;
-      }
-      groups.push({
-        key: group.key,
-        title: group.title,
-        color: colorFor(group.key),
-        windowId,
-        tabIds: group.tabIds,
-      });
-    }
-  }
-
-  return { mode: 'topic', groups, ungrouped: rest.sort((a, b) => at(a) - at(b)) };
 }
 
 /**
@@ -637,12 +498,13 @@ export async function groupByAi(
 
   const recovered = fallbackDrafts(fallback, new Set(outcome.failed), settings);
   const position = new Map(eligible.map((tab, at) => [tab.id, at]));
-  const proposal = assemble(
+  const proposal = assembleAiProposal(
     [...outcome.drafts, ...recovered.drafts],
     [...outcome.ungrouped, ...recovered.ungrouped],
     position,
     byWindow(eligible).map((window) => window.windowId),
-    settings,
+    settings.maxGroups,
+    colorFor,
   );
   return {
     proposal,

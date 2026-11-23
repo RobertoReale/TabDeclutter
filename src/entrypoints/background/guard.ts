@@ -36,7 +36,7 @@ import type { DuplicateResolution, GuardContext } from '@/core/duplicate-guard';
 import { resolveAllDuplicates, resolveDuplicate } from '@/core/duplicate-guard';
 import type { DuplicateOptions } from '@/core/duplicates';
 import { duplicateKey, duplicateOptions, tabUrl } from '@/core/duplicates';
-import { compile } from '@/core/patterns';
+import { compileMatcher } from '@/core/patterns';
 import type { ArchivedTab, GuardMode, GuardSettings, MatchOptions, TabInfo } from '@/core/types';
 import { STARTUP_GRACE_MS } from '@/core/types';
 import type { Capabilities } from '@/platform/capabilities';
@@ -64,7 +64,13 @@ import {
   restoreTabs,
 } from '@/platform/tabs';
 
-import { alarmsApi, backgroundError, createSerialQueue, focusedWindow, localKeys } from './report';
+import {
+  alarmsApi,
+  backgroundError,
+  createSerialQueue,
+  focusedWindow,
+  watchLocalKeys,
+} from './report';
 
 /** The alarm that ends a timed pause (PLAN.md §8.1). */
 const RESUME_ALARM = 'guard-resume';
@@ -78,7 +84,7 @@ const RESUME_ALARM = 'guard-resume';
  */
 const UNTIL_RESTART_MS = 365 * 24 * 60 * 60 * 1_000;
 
-const WATCHED = localKeys([settingsItem, duplicateWhitelistItem]);
+const WATCHED_ITEMS = [settingsItem, duplicateWhitelistItem];
 
 /** Why a tab is being looked at, which is what tells a creation from a navigation. */
 type Origin = 'created' | 'navigated' | 'moved';
@@ -345,7 +351,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
       match: settings.match,
       keyOptions: duplicateOptions({ match: settings.match, guard }),
       // Compiled once and kept, because the guard runs on every navigation (§8.3).
-      isWhitelisted: compile(whitelist).match,
+      isWhitelisted: compileMatcher(whitelist),
       ownOrigin: browser.runtime.getURL(''),
     };
   }
@@ -785,10 +791,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
 
   // §8.3: the whitelist is recompiled only on a change, and a change of mode must take
   // effect at once. The guard writes neither of these keys, so there is no loop.
-  browser.storage.onChanged.addListener((changes: Record<string, unknown>, area: string) => {
-    if (area !== 'local') return;
-    if (WATCHED.some((key) => key in changes)) invalidate();
-  });
+  watchLocalKeys(WATCHED_ITEMS, invalidate);
 
   return {
     pause,

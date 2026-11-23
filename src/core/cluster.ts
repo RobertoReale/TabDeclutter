@@ -21,7 +21,7 @@
 
 import type { TabInfo } from './types';
 import { NO_GROUP_ID } from './types';
-import { displayHost, registrableDomain, unwrapSuspendedUrl } from './url';
+import { registrableDomain, stripWww, unwrapSuspendedUrl } from './url';
 
 /** The tab group colours Chrome accepts (`chrome.tabGroups.ColorEnum`, PLAN.md §7.1). */
 export type GroupColor =
@@ -369,7 +369,7 @@ interface ParsedTabUrl {
  * (+ search query), avoiding repeated `new URL()` and PSL trie lookups across suffix stripping,
  * tokenization, vectorization, and dominant-site selection.
  */
-function parseTabUrl(url: string): ParsedTabUrl {
+function parseTabUrl(url: string, withPath = true): ParsedTabUrl {
   const trimmed = unwrapSuspendedUrl(url).trim();
   let parsed: URL | null;
   try {
@@ -381,27 +381,25 @@ function parseTabUrl(url: string): ParsedTabUrl {
     const domain = registrableDomain(trimmed) ?? '';
     return { key: domain, host: '', domain, path: '' };
   }
-  const query =
-    parsed.searchParams.get('search_query') ??
-    parsed.searchParams.get('q') ??
-    parsed.searchParams.get('query') ??
-    '';
-  const rawPath = query !== '' ? `${parsed.pathname}/${query}` : parsed.pathname;
-  let path = rawPath;
-  try {
-    path = decodeURIComponent(rawPath);
-  } catch {
-    // A stray `%` is not an escape; the raw path still tokenizes.
+  let path = '';
+  if (withPath) {
+    const query =
+      parsed.searchParams.get('search_query') ??
+      parsed.searchParams.get('q') ??
+      parsed.searchParams.get('query') ??
+      '';
+    const rawPath = query !== '' ? `${parsed.pathname}/${query}` : parsed.pathname;
+    path = rawPath;
+    try {
+      path = decodeURIComponent(rawPath);
+    } catch {
+      // A stray `%` is not an escape; the raw path still tokenizes.
+    }
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { key: '', host: '', domain: '', path };
   }
-  let host = parsed.hostname.toLowerCase();
-  while (host.startsWith('www.')) {
-    const rest = host.slice(4);
-    if (!rest.includes('.')) break;
-    host = rest;
-  }
+  const host = stripWww(parsed.hostname.toLowerCase());
   const domain = registrableDomain(host) ?? '';
   const key = host in APP_SUBDOMAINS ? host : domain !== '' ? domain : host;
   return { key, host, domain, path };
@@ -415,16 +413,7 @@ function parseTabUrl(url: string): ParsedTabUrl {
  * can therefore not be grouped by site under an internal ID.
  */
 export function siteKey(url: string): string {
-  const trimmed = unwrapSuspendedUrl(url).trim();
-  try {
-    const protocol = new URL(trimmed).protocol;
-    if (protocol !== 'http:' && protocol !== 'https:') return '';
-  } catch {
-    // Let registrableDomain / displayHost handle bare hostnames or unparseable strings.
-  }
-  const host = displayHost(trimmed);
-  if (host in APP_SUBDOMAINS) return host;
-  return registrableDomain(trimmed) ?? host;
+  return parseTabUrl(url, false).key;
 }
 
 /** The label of a domain: `example.co.uk` → `example`, `localhost` → `localhost`. */
@@ -1391,15 +1380,14 @@ function topicWindowClusters(
   }
   candidates.sort(compareBuckets);
 
-  for (const cut of candidates.slice(resolved.maxGroups)) ungrouped.push(...cut.tabIds);
   const kept: typeof candidates = [];
-  for (const entry of candidates.slice(0, resolved.maxGroups)) {
-    if (!hasContentToken(entry.indexes, vectors, vocabulary)) {
+  candidates.forEach((entry, rank) => {
+    if (rank >= resolved.maxGroups || !hasContentToken(entry.indexes, vectors, vocabulary)) {
       ungrouped.push(...entry.tabIds);
-      continue;
+      return;
     }
     kept.push(entry);
-  }
+  });
   return { windowId, vectors, vocabulary, siteKeys, surfacePairs, kept, ungrouped };
 }
 

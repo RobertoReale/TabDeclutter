@@ -54,11 +54,11 @@ import { NO_WINDOW } from '@/platform/tabs';
 import {
   aiProposalCoversMovable,
   aiProposalFreshForAutoRefresh,
-  filterProposalBySignature,
   isMovableTab,
   movableTabsSignature,
   organizeWindows,
   partitionUngroupedBySite,
+  reconcileAiProposal,
   undoOrganizeWindows,
   type OrganizeWindowsResult,
   type OrganizeWindowsSnapshot,
@@ -554,65 +554,24 @@ export const windowPlan = computed<WindowPlan>(() => {
       { minSiteTabs: 2, minClusterTabs: 2, includePinned: false, includeGrouped: true },
     );
 
-  const cached =
-    mode.value === 'topic' && useAi.value
-      ? filterProposalBySignature(savedAiProposal.value, movable, savedAiProposalSignature.value)
-      : null;
-  if (cached !== null) {
-    const movableIds = new Set(movable.map((tab) => tab.id));
-    const knownIds = new Set<number>(cached.ungrouped);
-    const placed = new Set<number>();
-    const groups: WindowPlanGroup[] = [];
-    for (const group of cached.groups) {
-      for (const id of group.tabIds) knownIds.add(id);
-      const live = group.tabIds.filter((id) => movableIds.has(id) && !placed.has(id));
-      if (live.length < 2) continue;
-      for (const id of live) placed.add(id);
-      groups.push({ key: group.key, title: group.title, color: group.color, tabIds: live });
-    }
-    const knownMovable = movable.filter((tab) => knownIds.has(tab.id)).length;
-    if (groups.length > 0 && knownMovable * 2 >= movable.length) {
-      const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
-      if (newTabs.length >= 1) {
-        const fullLocal = clusterLocal(movable);
-        const remainingNew: TabInfo[] = [];
-        for (const newTab of newTabs) {
-          const localCluster = fullLocal.groups.find((g) => g.tabIds.includes(newTab.id));
-          let bestGroupIdx = -1;
-          let bestOverlap = 0;
-          if (localCluster !== undefined) {
-            for (const [idx, group] of groups.entries()) {
-              const overlap = group.tabIds.filter((id) => localCluster.tabIds.includes(id)).length;
-              if (overlap > bestOverlap) {
-                bestOverlap = overlap;
-                bestGroupIdx = idx;
-              }
-            }
-          }
-          if (bestGroupIdx >= 0) {
-            const target = groups[bestGroupIdx]!;
-            groups[bestGroupIdx] = { ...target, tabIds: [...target.tabIds, newTab.id] };
-            placed.add(newTab.id);
-          } else {
-            remainingNew.push(newTab);
-          }
-        }
-        if (remainingNew.length >= 2) {
-          const extra = clusterLocal(remainingNew);
-          for (const extraGroup of extra.groups) {
-            if (groups.length >= 8) break;
-            groups.push({
-              key: `new:${extraGroup.key}`,
-              title: extraGroup.title,
-              color: extraGroup.color,
-              tabIds: extraGroup.tabIds,
-            });
-            for (const id of extraGroup.tabIds) placed.add(id);
-          }
-        }
-      }
-      const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
-      return finalize('ai', groups, ungrouped);
+  if (mode.value === 'topic' && useAi.value) {
+    const reconciled = reconcileAiProposal(
+      movable,
+      savedAiProposal.value,
+      savedAiProposalSignature.value,
+      (subset) => clusterLocal(subset).groups,
+    );
+    if (reconciled !== null) {
+      return finalize(
+        'ai',
+        reconciled.groups.map(({ key, title, tabIds }) => ({
+          key,
+          title,
+          color: colorFor(key),
+          tabIds,
+        })),
+        reconciled.ungrouped,
+      );
     }
   }
 

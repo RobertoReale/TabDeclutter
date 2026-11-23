@@ -273,6 +273,17 @@ async function archiveAndStore(
   return entries;
 }
 
+/** Runs a browser batch API call and falls back to one-by-one calls when a single item rejects. */
+export async function retryBatch<T>(
+  items: readonly T[],
+  run: (batch: T[]) => Promise<unknown>,
+): Promise<void> {
+  const first = await attempt(() => run([...items]));
+  if (!first.ok) {
+    for (const item of items) await attempt(() => run([item]));
+  }
+}
+
 export async function closeTabs(
   tabs: readonly TabInfo[],
   now: number,
@@ -283,10 +294,10 @@ export async function closeTabs(
   const entries = await archiveAndStore(tabs, now, options);
   // One call for the batch: a tab the user closed a moment ago makes the whole call fail
   // on Chrome, so the ids are tried again one by one rather than left open.
-  const removed = await attempt(() => api.tabs.remove(tabs.map((tab) => tab.id)));
-  if (!removed.ok) {
-    for (const tab of tabs) await attempt(() => api.tabs.remove([tab.id]));
-  }
+  await retryBatch(
+    tabs.map((tab) => tab.id),
+    (batch) => api.tabs.remove(batch),
+  );
   return entries;
 }
 

@@ -57,7 +57,7 @@ WHAT IT DOES
 • Badge with the number of suggested tabs, keyboard shortcuts, light and dark theme, Italian and English.
 
 PRIVATE BY DESIGN
-No account, no servers, no analytics, no network requests, no remote code. Tab information is read and stored only in your browser. Nothing is ever closed without a gesture of yours.
+No account, no servers, no analytics, no network requests, no remote code. Tab information is read and stored only in your browser. Automatic cleanup and duplicate closing only run after setup when enabled, obey strict safety guardrails, and archive every closed tab locally so nothing is ever lost.
 
 WHY THE "READ YOUR BROWSING HISTORY ON ALL YOUR SIGNED-IN DEVICES" WARNING
 It is how Chrome words the permissions to see the address and title of your open tabs and to restore a tab you closed with Undo. The extension only uses the tabs of this browser, and needs both to work. The extension reads nothing from the pages themselves.
@@ -78,7 +78,7 @@ COSA FA
 • Badge con il numero di schede suggerite, scorciatoie da tastiera, tema chiaro e scuro, italiano e inglese.
 
 PRIVATO PER SCELTA
-Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. Nulla viene chiuso senza un tuo gesto.
+Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. Pulizia automatica e protezione duplicati agiscono solo dopo la configurazione quando attive, rispettano rigide protezioni e salvano ogni scheda chiusa nell'Archivio locale così puoi sempre ripristinarla.
 
 PERCHÉ L'AVVISO "LEGGERE LA CRONOLOGIA DI NAVIGAZIONE SU TUTTI I DISPOSITIVI SU CUI VIENE ESEGUITO L'ACCESSO"
 È il modo in cui Chrome descrive i permessi di vedere indirizzo e titolo delle schede aperte e di ripristinare una scheda chiusa con Annulla. L'estensione usa solo le schede di questo browser e ha bisogno di entrambi. Dalle pagine stesse non legge nulla.
@@ -132,7 +132,7 @@ Too many open tabs? TabDeclutter tells you which ones you can close, sorts the r
 </ul>
 
 <b>Private by design</b>
-No account, no servers, no analytics, no network requests, no remote code. Tab information is read and stored only in your browser. Nothing is ever closed without a gesture of yours. The "Access browser tabs" permission is needed to see the address and title of your open tabs, and "Access recently closed tabs" to restore a tab you closed with Undo; the extension reads nothing from the pages themselves.
+No account, no servers, no analytics, no network requests, no remote code. Tab information is read and stored only in your browser. Automatic cleanup and duplicate closing only run after setup when enabled, obey strict safety guardrails, and archive every closed tab locally so it can always be restored. The "Access browser tabs" permission is needed to see the address and title of your open tabs, and "Access recently closed tabs" to restore a tab you closed with Undo; the extension reads nothing from the pages themselves.
 
 Requires Firefox 140 or later. If you still use Duplicate Tabs Closer, turn it off to avoid conflicts.
 ```
@@ -152,7 +152,7 @@ Troppe schede aperte? TabDeclutter ti dice quali puoi chiudere, mette le altre i
 </ul>
 
 <b>Privato per scelta</b>
-Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. Nulla viene chiuso senza un tuo gesto. Il permesso "Accedere alle schede del browser" serve a vedere indirizzo e titolo delle schede aperte, e "Accedere alle schede chiuse di recente" a ripristinare con Annulla una scheda chiusa; dalle pagine stesse l'estensione non legge nulla.
+Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. Pulizia automatica e protezione duplicati agiscono solo dopo la configurazione quando attive, rispettano rigide protezioni e salvano ogni scheda chiusa nell'Archivio locale così puoi sempre ripristinarla. Il permesso "Accedere alle schede del browser" serve a vedere indirizzo e titolo delle schede aperte, e "Accedere alle schede chiuse di recente" a ripristinare con Annulla una scheda chiusa; dalle pagine stesse l'estensione non legge nulla.
 
 Richiede Firefox 140 o successivo. Se usi ancora Duplicate Tabs Closer, disattivalo per evitare conflitti.
 ```

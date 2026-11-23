@@ -153,33 +153,38 @@ function MainSettings({ language }: { language: string }) {
           value={current.useBookmarks && bookmarksGranted.value}
           onPick={setUseBookmarks}
         />
-        {current.useTabGroups && (
-          <>
-            <CheckField
-              label="windowUseTabGroups"
-              hint="windowUseTabGroupsHint"
-              value={current.useTabGroups}
-              onPick={(value) => {
-                setSetting('useTabGroups', value);
-              }}
-            />
-            <CheckField
-              label="settingsIncludeGrouped"
-              hint="settingsIncludeGroupedHint"
-              value={current.includeGroupedTabs}
-              onPick={(value) => {
-                setSetting('includeGroupedTabs', value);
-              }}
-            />
-            <CheckField
-              label="matchIgnoreHash"
-              hint="settingsIgnoreHashHint"
-              value={match.ignoreHash}
-              onPick={(value) => {
-                setMatchOption('ignoreHash', value);
-              }}
-            />
-          </>
+        <CheckField
+          label="matchIgnoreHash"
+          hint="settingsIgnoreHashHint"
+          value={match.ignoreHash}
+          onPick={(value) => {
+            setMatchOption('ignoreHash', value);
+          }}
+        />
+        {caps.tabGroups && (
+          <CheckField
+            label="windowUseTabGroups"
+            hint="windowUseTabGroupsHint"
+            value={current.useTabGroups}
+            onPick={(value) => {
+              setSetting('useTabGroups', value);
+              if (!value) {
+                void import('@/platform/windows')
+                  .then((windows) => windows.ungroupAllOpenTabs())
+                  .catch(() => undefined);
+              }
+            }}
+          />
+        )}
+        {caps.tabGroups && current.useTabGroups && (
+          <CheckField
+            label="settingsIncludeGrouped"
+            hint="settingsIncludeGroupedHint"
+            value={current.includeGroupedTabs}
+            onPick={(value) => {
+              setSetting('includeGroupedTabs', value);
+            }}
+          />
         )}
         {/* A refusal is the browser's answer, so the page says what became of the choice. */}
         <div class="td-warnings" role="status" aria-live="polite">

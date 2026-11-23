@@ -17,11 +17,25 @@
  */
 
 import { isAuthUrl, isBlankUrl } from '../core/classify';
-import { clusterTabIds, siteKey, type ClusterMode, type GroupProposal } from '../core/cluster';
+import {
+  clusterTabIds,
+  siteKey,
+  type ClusterMode,
+  type GroupProposal,
+  type ProposedGroup,
+} from '../core/cluster';
 import { tabUrl } from '../core/duplicates';
 import { INTERNAL_SCHEMES } from '../core/rules';
 import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '../core/types';
-import { asTabInfos, attempt, NO_WINDOW, type BrowserTab } from './tabs';
+import { asTabInfos, attempt, NO_WINDOW, retryBatch, type BrowserTab } from './tabs';
+
+/** Shared clustering options used by background window/AI batching and window organization. */
+export const ORGANIZE_CLUSTER_OPTIONS = {
+  minSiteTabs: 2,
+  minClusterTabs: 2,
+  includePinned: false,
+  includeGrouped: true,
+} as const;
 
 /**
  * A tab that may be safely moved between windows or reordered:
@@ -60,6 +74,19 @@ export function movableTabsSignature(movable: readonly TabInfo[]): string {
     .join('\n');
 }
 
+function validSignatureIds(
+  movable: readonly TabInfo[],
+  savedSignature: string,
+): Set<number> | null {
+  const savedLines = new Set(savedSignature.split('\n').filter((line) => line.includes('\t')));
+  if (savedLines.size === 0) return null;
+  const validIds = new Set<number>();
+  for (const tab of movable) {
+    if (savedLines.has(tabSignatureEntry(tab))) validIds.add(tab.id);
+  }
+  return validIds.size === 0 ? null : validIds;
+}
+
 /**
  * Strips any tab IDs from a persisted AI `proposal` whose live site or title no longer matches
  * `savedSignature`. Prevents reused tab IDs after a browser restart from matching unrelated
@@ -71,14 +98,8 @@ export function filterProposalBySignature(
   savedSignature = '',
 ): GroupProposal | null {
   if (proposal === null || savedSignature === '') return proposal;
-  const savedLines = new Set(savedSignature.split('\n').filter((line) => line.includes('\t')));
-  if (savedLines.size === 0) return null;
-
-  const validIds = new Set<number>();
-  for (const tab of movable) {
-    if (savedLines.has(tabSignatureEntry(tab))) validIds.add(tab.id);
-  }
-  if (validIds.size === 0) return null;
+  const validIds = validSignatureIds(movable, savedSignature);
+  if (validIds === null) return null;
 
   return {
     ...proposal,
@@ -90,28 +111,44 @@ export function filterProposalBySignature(
   };
 }
 
+function extractLiveProposal(
+  movable: readonly TabInfo[],
+  proposal: GroupProposal | null | undefined,
+  savedSignature = '',
+): {
+  readonly groups: (ProposedGroup & { tabIds: number[] })[];
+  readonly placed: Set<number>;
+  readonly newTabs: TabInfo[];
+} | null {
+  if (proposal === null || proposal === undefined || movable.length < 2) return null;
+  const allowedIds =
+    savedSignature === ''
+      ? new Set(movable.map((tab) => tab.id))
+      : validSignatureIds(movable, savedSignature);
+  if (allowedIds === null) return null;
+
+  const knownIds = new Set<number>(proposal.ungrouped.filter((id) => allowedIds.has(id)));
+  const placed = new Set<number>();
+  const groups: (ProposedGroup & { tabIds: number[] })[] = [];
+  for (const group of proposal.groups) {
+    const valid = group.tabIds.filter((id) => allowedIds.has(id));
+    for (const id of valid) knownIds.add(id);
+    const live = valid.filter((id) => !placed.has(id));
+    if (live.length < 2) continue;
+    for (const id of live) placed.add(id);
+    groups.push({ ...group, tabIds: live });
+  }
+  if (groups.length === 0) return null;
+  return { groups, placed, newTabs: movable.filter((tab) => !knownIds.has(tab.id)) };
+}
+
 /** Returns drifted (new/navigated) tab count, or `-1` if `proposal` has no valid live group. */
 function proposalDriftCount(
   proposal: GroupProposal | null,
   movable: readonly TabInfo[],
   savedSignature: string,
 ): number {
-  const verified =
-    movable.length < 2 ? null : filterProposalBySignature(proposal, movable, savedSignature);
-  if (verified === null) return -1;
-
-  const ids = new Set(movable.map((tab) => tab.id));
-  const known = new Set<number>(verified.ungrouped);
-  let live = false;
-  for (const group of verified.groups) {
-    let n = 0;
-    for (const id of group.tabIds) {
-      known.add(id);
-      if (ids.has(id)) n += 1;
-    }
-    if (n >= 2) live = true;
-  }
-  return live ? movable.filter((tab) => !known.has(tab.id)).length : -1;
+  return extractLiveProposal(movable, proposal, savedSignature)?.newTabs.length ?? -1;
 }
 
 /** Whether `proposal` exactly covers every live movable tab with at least one valid group. */
@@ -196,13 +233,16 @@ export interface OrganizeWindowsResult {
 
 async function ungroupIds(api: WindowsOrganizeApi, groupedIds: readonly number[]): Promise<number> {
   if (typeof api.tabs.ungroup !== 'function' || groupedIds.length === 0) return 0;
-  const batch = await attempt(() => api.tabs.ungroup!(groupedIds));
-  if (!batch.ok) {
-    for (const id of groupedIds) {
-      await attempt(() => api.tabs.ungroup!([id]));
-    }
-  }
+  await retryBatch(groupedIds, (batch) => api.tabs.ungroup!(batch));
   return groupedIds.length;
+}
+
+function countPinned(allTabs: readonly TabInfo[], windowId: number): number {
+  let count = 0;
+  for (const tab of allTabs) {
+    if (tab.windowId === windowId && tab.pinned) count += 1;
+  }
+  return count;
 }
 
 /**
@@ -248,18 +288,20 @@ export async function organizeWindows(
   const allTabs = rawTabs.filter((tab) => !tab.incognito && tab.windowId !== NO_WINDOW);
   if (allTabs.length === 0) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
 
+  const movable = allTabs.filter(isMovableTab);
   const snapshot: OrganizeWindowsSnapshot = {
-    tabs: allTabs
-      .filter(isMovableTab)
-      .sort((a, b) => (a.windowId !== b.windowId ? a.windowId - b.windowId : a.index - b.index))
+    tabs: [...movable]
+      .sort((a, b) => a.windowId - b.windowId || a.index - b.index)
       .map((tab) => ({
         tabId: tab.id,
         windowId: tab.windowId,
         index: tab.index,
         active: tab.active,
       })),
-    ...(options.focusedWindowId === undefined ? {} : { focusedWindowId: options.focusedWindowId }),
   };
+  if (options.focusedWindowId !== undefined) {
+    (snapshot as { focusedWindowId?: number }).focusedWindowId = options.focusedWindowId;
+  }
 
   const result =
     options.windowMode === 'merge-windows'
@@ -282,11 +324,12 @@ export async function organizeWindows(
           options.proposalSignature,
           api,
         );
-  return {
+  const out: OrganizeWindowsResult & { undo?: OrganizeWindowsSnapshot } = {
     ...result,
     ungroupedTabs,
-    ...(result.movedTabs > 0 ? { undo: snapshot } : {}),
   };
+  if (result.movedTabs > 0) out.undo = snapshot;
+  return out;
 }
 
 /**
@@ -405,19 +448,24 @@ async function mergeAndSortIntoOneWindow(
   // Always merge into the primary window (the one with the most tabs, breaking ties in
   // favour of `focusedWindowId`), so opening a small 1-tab window never pulls 20 tabs out
   // of the main window into the small one.
-  const targetWindowId = [...windowCounts.entries()].sort((a, b) => {
-    if (b[1] !== a[1]) return b[1] - a[1];
-    if (a[0] === focusedWindowId) return -1;
-    if (b[0] === focusedWindowId) return 1;
-    return a[0] - b[0];
-  })[0]?.[0];
+  let targetWindowId: number | undefined;
+  let bestCount = -1;
+  for (const [id, count] of windowCounts) {
+    if (
+      count > bestCount ||
+      (count === bestCount &&
+        targetWindowId !== undefined &&
+        (id === focusedWindowId || (targetWindowId !== focusedWindowId && id < targetWindowId)))
+    ) {
+      bestCount = count;
+      targetWindowId = id;
+    }
+  }
   if (targetWindowId === undefined) return 0;
 
   const movable = allTabs.filter(isMovableTab);
   if (movable.length === 0) return 0;
-  const pinnedInTarget = allTabs.filter(
-    (tab) => tab.windowId === targetWindowId && tab.pinned,
-  ).length;
+  const pinnedInTarget = countPinned(allTabs, targetWindowId);
 
   const sortedIds = orderedTabIds(
     movable,
@@ -517,7 +565,7 @@ async function splitIntoThematicWindows(
 
   // Build desired window buckets: one per proposed group, then fallback site windows for any
   // ungrouped site with ≥ 2 tabs (in topic mode), plus one catch-all for remaining singletons.
-  const buckets: number[][] = proposal.groups.map((group) => [...group]);
+  const buckets: (readonly number[])[] = [...proposal.groups];
   if (proposal.ungrouped.length > 0) {
     if (clusterMode === 'topic') {
       const { siteBuckets, remaining } = partitionUngroupedBySite(
@@ -525,8 +573,8 @@ async function splitIntoThematicWindows(
         byId,
         buckets.length,
       );
-      for (const bucket of siteBuckets) buckets.push([...bucket.tabIds]);
-      if (remaining.length > 0) buckets.push([...remaining]);
+      for (const bucket of siteBuckets) buckets.push(bucket.tabIds);
+      if (remaining.length > 0) buckets.push(remaining);
     } else {
       buckets.push(sortBySite(proposal.ungrouped, byId));
     }
@@ -538,17 +586,17 @@ async function splitIntoThematicWindows(
   const existingWindows = [...new Set(movable.map((tab) => tab.windowId))];
   const usedWindows = new Set<number>();
 
-  const isFocusedActive = (id: number): boolean => {
-    const tab = byId.get(id);
-    return tab !== undefined && tab.active && tab.windowId === focusedWindowId;
-  };
+  const focusedActiveId =
+    focusedWindowId === undefined
+      ? undefined
+      : movable.find((tab) => tab.active && tab.windowId === focusedWindowId)?.id;
 
   // Reserve `focusedWindowId` first for whichever bucket holds the active tab of the focused window,
   // so the topic/site cluster the user is currently working on stays in their active window.
   const focusedBucketIndex =
-    focusedWindowId === undefined
+    focusedActiveId === undefined
       ? -1
-      : buckets.findIndex((tabIds) => tabIds.some(isFocusedActive));
+      : buckets.findIndex((tabIds) => tabIds.includes(focusedActiveId));
   if (focusedBucketIndex >= 0 && focusedWindowId !== undefined) {
     usedWindows.add(focusedWindowId);
   }
@@ -561,13 +609,18 @@ async function splitIntoThematicWindows(
         return { tabIds, windowId: focusedWindowId };
       }
       const counts = new Map<number, number>();
+      let best: number | undefined;
+      let bestCount = 0;
       for (const id of tabIds) {
         const w = byId.get(id)?.windowId;
-        if (w !== undefined) counts.set(w, (counts.get(w) ?? 0) + 1);
+        if (w === undefined || usedWindows.has(w)) continue;
+        const c = (counts.get(w) ?? 0) + 1;
+        counts.set(w, c);
+        if (c > bestCount) {
+          bestCount = c;
+          best = w;
+        }
       }
-      const best = [...counts.entries()]
-        .filter(([w]) => !usedWindows.has(w))
-        .sort((a, b) => b[1] - a[1])[0]?.[0];
       if (best !== undefined) {
         usedWindows.add(best);
         return { tabIds, windowId: best };
@@ -600,7 +653,8 @@ async function splitIntoThematicWindows(
     // Filter out the currently active tab of the focused window if this slot would move it
     // into a different unfocused window, so we never yank a tab out from under the user.
     const safeTabIds = slot.tabIds.filter(
-      (tabId) => byId.has(tabId) && !(slot.windowId !== focusedWindowId && isFocusedActive(tabId)),
+      (tabId) =>
+        byId.has(tabId) && !(slot.windowId !== focusedWindowId && tabId === focusedActiveId),
     );
     const [firstId, ...restIds] = safeTabIds;
     if (firstId === undefined) continue;
@@ -613,9 +667,7 @@ async function splitIntoThematicWindows(
     const existingWindowId = slot.windowId;
     if (isWindowOrdered(allTabs, existingWindowId, safeTabIds)) continue;
 
-    const pinnedCount = allTabs.filter(
-      (tab) => tab.windowId === existingWindowId && tab.pinned,
-    ).length;
+    const pinnedCount = countPinned(allTabs, existingWindowId);
     const moved = await moveSequence(api, safeTabIds, existingWindowId, pinnedCount, byId);
     // If an earlier slot drained every tab out of `existingWindowId`, Chrome auto-closed that
     // window so all moves into it failed; create a dedicated window instead of stranding tabs.
@@ -674,6 +726,61 @@ function sortBySite(ids: readonly number[], byId: ReadonlyMap<number, TabInfo>):
 }
 
 /**
+ * Reconciles a cached AI `proposal` against the live `movable` tabs: drops groups under 2 live
+ * tabs, rejects plans covering < 50% of tabs, places newly opened tabs into matching AI groups or
+ * new extra local clusters in `< 5 ms`, and preserves group metadata when `clusterExtras` provides it.
+ */
+export function reconcileAiProposal(
+  movable: readonly TabInfo[],
+  precomputed: GroupProposal | null | undefined,
+  proposalSignature: string | undefined,
+  clusterExtras: (subset: readonly TabInfo[]) => readonly ProposedGroup[],
+): { readonly groups: readonly ProposedGroup[]; readonly ungrouped: readonly number[] } | null {
+  const extracted = extractLiveProposal(movable, precomputed, proposalSignature);
+  if (extracted === null || (movable.length - extracted.newTabs.length) * 2 < movable.length) {
+    return null;
+  }
+  const { groups, placed, newTabs } = extracted;
+  if (newTabs.length >= 1) {
+    const fullLocal = clusterExtras(movable);
+    const remainingNew: TabInfo[] = [];
+    for (const newTab of newTabs) {
+      const localCluster = fullLocal.find((g) => g.tabIds.includes(newTab.id));
+      let bestGroup: (ProposedGroup & { tabIds: number[] }) | undefined;
+      let bestOverlap = 0;
+      if (localCluster !== undefined) {
+        for (const group of groups) {
+          const overlap = group.tabIds.filter((id) => localCluster.tabIds.includes(id)).length;
+          if (overlap > bestOverlap) {
+            bestOverlap = overlap;
+            bestGroup = group;
+          }
+        }
+      }
+      if (bestGroup !== undefined) {
+        bestGroup.tabIds.push(newTab.id);
+        placed.add(newTab.id);
+      } else {
+        remainingNew.push(newTab);
+      }
+    }
+    if (remainingNew.length >= 2) {
+      for (const extraGroup of clusterExtras(remainingNew)) {
+        if (groups.length >= 8) break;
+        groups.push({
+          ...extraGroup,
+          key: `new:${extraGroup.key}`,
+          tabIds: [...extraGroup.tabIds],
+        });
+        for (const id of extraGroup.tabIds) placed.add(id);
+      }
+    }
+  }
+  const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
+  return { groups, ungrouped };
+}
+
+/**
  * Resolves the cluster buckets for `movable` tabs: uses a precomputed AI proposal when
  * supplied (strictly filtered to `movable` tabs so protected tabs are never touched), or
  * falls back to the deterministic local clustering (`clusterTabIds`).
@@ -694,70 +801,17 @@ function resolveWindowProposal(
         groupId: NO_GROUP_ID,
       })),
       clusterMode,
-      { minSiteTabs: 2, minClusterTabs: 2, includePinned: false, includeGrouped: true },
+      ORGANIZE_CLUSTER_OPTIONS,
     );
 
-  const verified =
-    precomputed === undefined
-      ? null
-      : filterProposalBySignature(precomputed, movable, proposalSignature ?? '');
-  if (verified !== null) {
-    const movableIds = new Set(movable.map((tab) => tab.id));
-    const knownIds = new Set<number>(verified.ungrouped);
-    const placed = new Set<number>();
-    const groups: number[][] = [];
-    for (const group of verified.groups) {
-      for (const id of group.tabIds) knownIds.add(id);
-      const live = group.tabIds.filter((id) => movableIds.has(id) && !placed.has(id));
-      if (live.length < 2) continue;
-      for (const id of live) placed.add(id);
-      groups.push(live);
-    }
-    const knownMovable = movable.filter((tab) => knownIds.has(tab.id)).length;
-    // Reuse a cached AI proposal only while it still has real (>=2-tab) groups and covers at
-    // least half of the current movable tabs; otherwise re-cluster everything fresh so new
-    // browsing sessions never pile into the ungrouped catch-all window.
-    if (groups.length > 0 && knownMovable * 2 >= movable.length) {
-      const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
-      if (newTabs.length >= 1) {
-        // 1. First try matching each newly opened tab against existing AI groups using fast
-        //    full-window local clustering, so opening even a single new tab on an active topic
-        //    lands in its thematic window immediately (< 5 ms) before the LLM re-runs.
-        const fullLocal = clusterLocal(movable);
-        const remainingNew: TabInfo[] = [];
-        for (const newTab of newTabs) {
-          const localCluster = fullLocal.groups.find((g) => g.includes(newTab.id));
-          let bestGroupIdx = -1;
-          let bestOverlap = 0;
-          if (localCluster !== undefined) {
-            for (const [idx, group] of groups.entries()) {
-              const overlap = group.filter((id) => localCluster.includes(id)).length;
-              if (overlap > bestOverlap) {
-                bestOverlap = overlap;
-                bestGroupIdx = idx;
-              }
-            }
-          }
-          if (bestGroupIdx >= 0) {
-            groups[bestGroupIdx]!.push(newTab.id);
-            placed.add(newTab.id);
-          } else {
-            remainingNew.push(newTab);
-          }
-        }
-        // 2. Any remaining new tabs that form a brand-new topic pair get their own new window.
-        if (remainingNew.length >= 2) {
-          const extra = clusterLocal(remainingNew);
-          for (const extraGroup of extra.groups) {
-            if (groups.length >= 8) break;
-            groups.push([...extraGroup]);
-            for (const id of extraGroup) placed.add(id);
-          }
-        }
-      }
-      const ungrouped = movable.filter((tab) => !placed.has(tab.id)).map((tab) => tab.id);
-      return { groups, ungrouped };
-    }
+  const reconciled = reconcileAiProposal(movable, precomputed, proposalSignature, (subset) =>
+    clusterLocal(subset).groups.map((tabIds) => ({ tabIds }) as unknown as ProposedGroup),
+  );
+  if (reconciled !== null) {
+    return {
+      groups: reconciled.groups.map((g) => g.tabIds),
+      ungrouped: reconciled.ungrouped,
+    };
   }
 
   return clusterLocal(movable);

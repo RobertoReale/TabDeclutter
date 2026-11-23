@@ -10,15 +10,19 @@
  */
 
 import {
+  type AiDraft,
+  assembleAiProposal,
   buildPrompt,
+  errorName,
   extractCompleteGroupsJson,
   hasRecoverableGroupSnippet,
   isDegenerateStream,
+  packClusterBatches,
   SYSTEM_PROMPT,
   validateAiAnswer,
 } from '@/core/ai-prompt';
-import { colorFor, type GroupProposal, type ProposedGroup } from '@/core/cluster';
-import { compile } from '@/core/patterns';
+import { clusterTabIds, type GroupProposal } from '@/core/cluster';
+import { compileMatcher } from '@/core/patterns';
 import { scoreTabs, type ScoredTab } from '@/core/scoring';
 import { DAY, HOUR, MINUTE } from '@/core/time';
 import { NO_GROUP_ID, STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
@@ -45,17 +49,19 @@ import {
   aiProposalFreshForAutoRefresh,
   isMovableTab,
   movableTabsSignature,
+  ORGANIZE_CLUSTER_OPTIONS,
   organizeWindows,
 } from '@/platform/windows';
 
 import {
   alarmsApi,
   backgroundError,
+  createDebouncer,
   createSerialQueue,
   ensurePeriodicAlarm,
   focusedWindow,
   ignore,
-  localKeys,
+  watchLocalKeys,
 } from './report';
 
 const AUTOPILOT_DEBOUNCE_MS = 1_200;
@@ -79,7 +85,9 @@ const EXPECTED_TEXT_OPTIONS = {
   expectedOutputs: TEXT_EN,
 } as const;
 
-const GREEDY_SAMPLING = { temperature: 0, topK: 1 } as const;
+const unrefTimer = (timer: ReturnType<typeof setTimeout>): void => {
+  (timer as unknown as { unref?: () => void }).unref?.();
+};
 
 interface BackgroundLanguageModelSession {
   prompt(input: string, options?: { readonly signal?: AbortSignal }): Promise<string>;
@@ -113,10 +121,31 @@ function backgroundLanguageModel(): BackgroundLanguageModelApi | undefined {
 }
 
 const EMPTY_AI = { proposal: null, signature: '' } as const;
+const EMPTY_REPORT: AutopilotReport = { closedTabs: 0, closedWindows: 0, groupedWindows: 0 };
 const readZero = (item: { getValue(): Promise<number> }): Promise<number> =>
   item.getValue().catch(() => 0);
+const isBlocked = (
+  state: { readonly graceUntil?: number; readonly pausedUntil?: number },
+  at: number,
+): boolean => (state.graceUntil ?? 0) > at || (state.pausedUntil ?? 0) > at;
+const isTopicAiWindows = (s: Settings): boolean =>
+  !s.useTabGroups && s.autoOrganizeMode === 'topic' && s.useOnDeviceAi;
+const runOrganize = (
+  s: Settings,
+  focusedWindowId: number | undefined,
+  proposal?: GroupProposal,
+  proposalSignature?: string,
+) =>
+  organizeWindows({
+    windowMode: s.autoWindowMode,
+    clusterMode: s.autoOrganizeMode,
+    useTabGroups: s.useTabGroups,
+    focusedWindowId,
+    proposal,
+    proposalSignature,
+  });
 
-const WATCHED = localKeys([settingsItem, keepsItem, protectedDomainsItem, duplicateWhitelistItem]);
+const WATCHED_ITEMS = [settingsItem, keepsItem, protectedDomainsItem, duplicateWhitelistItem];
 
 export interface AutopilotOptions {
   readonly now?: () => number;
@@ -141,7 +170,6 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   const capabilities = options.capabilities ?? caps;
   const flash = options.flash;
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
   const enqueue = createSerialQueue();
   let bgAiInFlight = false;
   let lastBgAiSignature = '';
@@ -150,12 +178,9 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     return enqueue(sweep);
   }
 
-  function schedule(): void {
-    timer ??= setTimeout(() => {
-      timer = undefined;
-      void run().catch(failed);
-    }, debounceMs);
-  }
+  const schedule = createDebouncer(debounceMs, () => {
+    void run().catch(failed);
+  });
 
   async function setBgCooldown(): Promise<void> {
     await aiBgCooldownUntilItem.setValue(now() + BG_AI_COOLDOWN_MS).catch(ignore);
@@ -193,6 +218,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       return;
     }
 
+    let restored: GroupProposal | null = null;
     await withAiLock(true, async () => {
       if (bgAiInFlight) return;
       bgAiInFlight = true;
@@ -205,45 +231,23 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
           .getPlatformInfo?.()
           .catch(ignore);
       }, SW_KEEPALIVE_MS);
-      (heartbeat as unknown as { unref?: () => void }).unref?.();
+      unrefTimer(heartbeat);
 
       const bgController = new AbortController();
       const unsubPreempt = onBackgroundAiPreempt(() => {
-        bgController.abort(new DOMException('', 'AbortError'));
+        bgController.abort();
       });
 
       try {
-        const restored = await promptBackgroundProposal(modelApi, movable, bgController.signal);
+        const result = await promptBackgroundProposal(modelApi, movable, bgController.signal);
         if (bgController.signal.aborted) return;
-        if (restored === null || restored.groups.length === 0) {
+        if (result === null || result.groups.length === 0) {
           await setBgCooldown();
           return;
         }
         lastBgAiSignature = signature;
-        await saveAiProposalState(restored, signature);
-
-        // Inference can take 30-90 s; re-read settings and snooze before moving any window.
-        const [latest, snoozeUntil] = await Promise.all([
-          readSettings(),
-          readZero(organizeSnoozeUntilItem),
-        ]);
-        if (
-          bgController.signal.aborted ||
-          !latest.autoOrganize ||
-          latest.useTabGroups ||
-          latest.autoOrganizeMode !== 'topic' ||
-          !latest.useOnDeviceAi ||
-          snoozeUntil > now()
-        ) {
-          return;
-        }
-        await organizeWindows({
-          windowMode: latest.autoWindowMode,
-          clusterMode: latest.autoOrganizeMode,
-          useTabGroups: latest.useTabGroups,
-          focusedWindowId: focusedId ?? (await focusedWindow()),
-          proposal: restored,
-        });
+        await saveAiProposalState(result, signature);
+        restored = result;
       } catch {
         // Yielding to the foreground side panel is normal, not a failure cooldown.
         if (!bgController.signal.aborted) {
@@ -256,20 +260,37 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         void aiBusyUntilItem.setValue(0).catch(ignore);
       }
     });
+
+    if (restored === null) return;
+    // Queue window moves inside `enqueue` so they never overlap another sweep; re-read settings,
+    // guard state, snooze, and the live focused window now that inference has finished.
+    const proposal = restored;
+    await enqueue(async () => {
+      const [latest, guardState, snoozeUntil, liveFocusedId] = await Promise.all([
+        readSettings(),
+        readGuardState(),
+        readZero(organizeSnoozeUntilItem),
+        focusedWindow(),
+      ]);
+      if (
+        isBlocked(guardState, now()) ||
+        !latest.autoOrganize ||
+        !isTopicAiWindows(latest) ||
+        snoozeUntil > now()
+      ) {
+        return;
+      }
+      await runOrganize(latest, liveFocusedId ?? focusedId, proposal, signature);
+    });
   }
 
   async function sweep(): Promise<AutopilotReport> {
     const settings = await readSettings();
-    if (!settings.autoDeclutter && !settings.autoOrganize) {
-      return { closedTabs: 0, closedWindows: 0, groupedWindows: 0 };
-    }
+    if (!settings.autoDeclutter && !settings.autoOrganize) return EMPTY_REPORT;
 
     const at = now();
-    const guardState = await readGuardState();
     // Respect startup grace and pause so session restore is never touched automatically.
-    if ((guardState.graceUntil ?? 0) > at || (guardState.pausedUntil ?? 0) > at) {
-      return { closedTabs: 0, closedWindows: 0, groupedWindows: 0 };
-    }
+    if (isBlocked(await readGuardState(), at)) return EMPTY_REPORT;
 
     let closedTabs = 0;
     let closedWindows = 0;
@@ -280,20 +301,19 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       const [tabs, inputs] = await Promise.all([queryTabs(), readScoringInputs(at)]);
 
       const scoring = scoreTabs(tabs, inputs.activity, settings, at, {
-        isWhitelisted: compile(inputs.whitelist).match,
+        isWhitelisted: compileMatcher(inputs.whitelist),
         protectedSites: inputs.protectedSites,
         keeps: inputs.keeps,
         ownOrigin: browser.runtime.getURL(''),
         focusedWindowId: focusedId,
       });
 
-      const forgottenIds = new Set(
-        scoring.windows
-          .filter(
-            (win) => win.forgotten && win.windowId !== focusedId && scoring.windows.length > 1,
-          )
-          .map((win) => win.windowId),
-      );
+      const forgottenIds = new Set<number>();
+      if (scoring.windows.length > 1) {
+        for (const win of scoring.windows) {
+          if (win.forgotten && win.windowId !== focusedId) forgottenIds.add(win.windowId);
+        }
+      }
 
       for (const windowId of forgottenIds) {
         const archived = await closeWindow(windowId, tabs, at, { capabilities });
@@ -339,17 +359,14 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       if ((await readZero(organizeSnoozeUntilItem)) > at) {
         return { closedTabs, closedWindows, groupedWindows };
       }
-      const useAiWindows =
-        !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi;
+      const useAiWindows = isTopicAiWindows(settings);
       const aiState = useAiWindows ? await readAiProposalState().catch(() => EMPTY_AI) : EMPTY_AI;
-      const winResult = await organizeWindows({
-        windowMode: settings.autoWindowMode,
-        clusterMode: settings.autoOrganizeMode,
-        useTabGroups: settings.useTabGroups,
-        focusedWindowId: focusedId,
-        proposal: aiState.proposal ?? undefined,
-        proposalSignature: aiState.signature,
-      });
+      const winResult = await runOrganize(
+        settings,
+        focusedId,
+        aiState.proposal ?? undefined,
+        aiState.signature,
+      );
       groupedWindows = winResult.windowsCount;
       if (useAiWindows) {
         void refreshAiInBackground(focusedId, settings.aiRefreshEveryTab).catch(ignore);
@@ -366,22 +383,18 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     },
   );
 
-  browser.storage.onChanged.addListener(
-    (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
-      if (area !== 'local') return;
-      if (!WATCHED.some((key) => key in changes)) return;
-      // When only `useOnDeviceAi` changed, the side panel handles running the on-device model
-      // directly; avoid firing a competing heuristic sweep on top of it.
-      if (
-        Object.keys(changes).length === 1 &&
-        'settings' in changes &&
-        onlyAiToggleChanged(changes.settings)
-      ) {
-        return;
-      }
-      schedule();
-    },
-  );
+  watchLocalKeys(WATCHED_ITEMS, (changes) => {
+    // When only `useOnDeviceAi` changed, the side panel handles running the on-device model
+    // directly; avoid firing a competing heuristic sweep on top of it.
+    if (
+      Object.keys(changes).length === 1 &&
+      'settings' in changes &&
+      onlyAiToggleChanged(changes.settings)
+    ) {
+      return;
+    }
+    schedule();
+  });
 
   browser.alarms.onAlarm.addListener((alarm: { name: string }) => {
     if (alarm.name === ALARM_NAME || alarm.name === STARTUP_ALARM_NAME) {
@@ -401,19 +414,13 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       });
   });
 
-  browser.runtime.onInstalled.addListener(() => {
-    void run().catch(failed);
+  browser.runtime.onInstalled.addListener((details?: { reason?: string }) => {
+    if (details?.reason !== 'install') schedule();
   });
 
   void ensurePeriodicAlarm(ALARM_NAME, AUTOPILOT_PERIOD_MINUTES).catch(failed);
 
   return { run };
-}
-
-function errorName(value: unknown): string {
-  return value !== null && typeof value === 'object' && 'name' in value
-    ? String((value as { name: unknown }).name)
-    : '';
 }
 
 function onceDestroy(target: BackgroundLanguageModelSession): () => void {
@@ -450,7 +457,7 @@ async function promptBackgroundProposal(
   const session = await withTimeout(BG_AI_WARMUP_TIMEOUT_MS, preemptSignal, async (s) => {
     const base = { ...EXPECTED_TEXT_OPTIONS, signal: s };
     try {
-      return await modelApi.create({ ...base, ...GREEDY_SAMPLING });
+      return await modelApi.create({ ...base, temperature: 0, topK: 1 });
     } catch (error: unknown) {
       if (s.aborted || !/^(?:NotSupported|Type|Range)Error$/.test(errorName(error))) {
         throw error;
@@ -463,36 +470,53 @@ async function promptBackgroundProposal(
   preemptSignal.addEventListener('abort', destroySession, { once: true });
 
   try {
-    const groups: ProposedGroup[] = [];
+    const localClusters =
+      compact.length > BG_AI_MAX_BATCH_TABS
+        ? clusterTabIds(compact, 'topic', ORGANIZE_CLUSTER_OPTIONS).groups
+        : [];
+    const batches = packClusterBatches(compact, localClusters, BG_AI_MAX_BATCH_TABS);
+    const useClone = batches.length > 1 && typeof session.clone === 'function';
+    const drafts: AiDraft[] = [];
     const claimed = new Set<number>();
     let answered = 0;
 
-    for (let i = 0; i < compact.length; i += BG_AI_MAX_BATCH_TABS) {
-      if (preemptSignal.aborted) return null;
-      const batch = compact.slice(i, i + BG_AI_MAX_BATCH_TABS);
+    const askBatch = async (batch: readonly TabInfo[]): Promise<void> => {
+      if (preemptSignal.aborted || batch.length === 0) return;
       const promptInput = `${SYSTEM_PROMPT}\n\n${buildPrompt(batch)}`;
-      const raw = await withTimeout(BG_AI_TIMEOUT_MS, preemptSignal, async (s) => {
-        const cloned =
-          compact.length > BG_AI_MAX_BATCH_TABS && typeof session.clone === 'function'
-            ? await session.clone({ signal: s })
-            : undefined;
-        const stop = cloned === undefined ? destroySession : onceDestroy(cloned);
-        if (cloned !== undefined) s.addEventListener('abort', stop, { once: true });
-        try {
-          return await runBgPrompt(cloned ?? session, promptInput, s, stop);
-        } finally {
-          if (cloned !== undefined) {
-            s.removeEventListener('abort', stop);
-            stop();
+      let raw: string;
+      try {
+        raw = await withTimeout(BG_AI_TIMEOUT_MS, preemptSignal, async (s) => {
+          const cloned = useClone ? await session.clone!({ signal: s }) : undefined;
+          const stop = cloned === undefined ? destroySession : onceDestroy(cloned);
+          if (cloned !== undefined) s.addEventListener('abort', stop, { once: true });
+          try {
+            return await runBgPrompt(cloned ?? session, promptInput, s, stop);
+          } finally {
+            if (cloned !== undefined) {
+              s.removeEventListener('abort', stop);
+              stop();
+            }
           }
+        });
+      } catch (error: unknown) {
+        if (
+          !preemptSignal.aborted &&
+          errorName(error) === 'QuotaExceededError' &&
+          batch.length >= 2
+        ) {
+          const half = Math.ceil(batch.length / 2);
+          await askBatch(batch.slice(0, half));
+          await askBatch(batch.slice(half));
+          return;
         }
-      });
+        throw error;
+      }
 
       const verdict = validateAiAnswer(raw, batch, {
         maxNameLength: BG_AI_MAX_NAME_LENGTH,
         minClusterTabs: 2,
       });
-      if (!verdict.ok) continue;
+      if (!verdict.ok) return;
       answered += 1;
 
       for (const draft of verdict.drafts) {
@@ -501,25 +525,20 @@ async function promptBackgroundProposal(
           .filter((id): id is number => id !== undefined && !claimed.has(id));
         if (tabIds.length < 2) continue;
         for (const id of tabIds) claimed.add(id);
-        const existing = groups.find((g) => g.title.toLowerCase() === draft.title.toLowerCase());
-        if (existing !== undefined) {
-          (existing.tabIds as number[]).push(...tabIds);
-          continue;
-        }
-        if (groups.length >= BG_AI_MAX_GROUPS) break;
-        groups.push({
-          key: `ai:1:${groups.length}:${draft.title.toLowerCase()}`,
-          title: draft.title,
-          color: colorFor(draft.title),
-          windowId: 1,
-          tabIds,
-        });
+        drafts.push({ title: draft.title, windowId: 1, tabIds });
       }
+    };
+
+    for (const batch of batches) {
+      await askBatch(batch);
+      if (preemptSignal.aborted) return null;
     }
 
-    if (answered === 0 || groups.length === 0) return null;
+    if (answered === 0 || drafts.length === 0) return null;
+    const position = new Map(movable.map((tab, at) => [tab.id, at]));
     const ungrouped = movable.filter((tab) => !claimed.has(tab.id)).map((tab) => tab.id);
-    return { mode: 'topic', groups, ungrouped };
+    const assembled = assembleAiProposal(drafts, ungrouped, position, [1], BG_AI_MAX_GROUPS);
+    return assembled.groups.length === 0 ? null : assembled;
   } finally {
     preemptSignal.removeEventListener('abort', destroySession);
     destroySession();
@@ -576,7 +595,7 @@ async function withTimeout<T>(
   const timer = setTimeout(() => {
     controller.abort(new DOMException('', 'TimeoutError'));
   }, timeoutMs);
-  (timer as unknown as { unref?: () => void }).unref?.();
+  unrefTimer(timer);
   try {
     return await action(controller.signal);
   } finally {
@@ -631,13 +650,8 @@ function onlyAiToggleChanged(
 ): boolean {
   const a = change?.oldValue as Record<string, unknown> | undefined;
   const b = change?.newValue as Record<string, unknown> | undefined;
-  return (
-    !!a &&
-    !!b &&
-    a.useOnDeviceAi !== b.useOnDeviceAi &&
-    JSON.stringify({ ...a, useOnDeviceAi: false }) ===
-      JSON.stringify({ ...b, useOnDeviceAi: false })
-  );
+  const norm = (o: Record<string, unknown>) => JSON.stringify({ ...o, useOnDeviceAi: false });
+  return !!a && !!b && a.useOnDeviceAi !== b.useOnDeviceAi && norm(a) === norm(b);
 }
 
 const failed = backgroundError('autopilot');

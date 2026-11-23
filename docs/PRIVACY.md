@@ -1,6 +1,6 @@
 # TabDeclutter — Privacy policy
 
-_Last updated: 2026-11-17 (version 0.1.0)._
+_Last updated: 2026-11-23 (version 0.1.0)._
 
 **TabDeclutter does not collect, transmit or share any data.** Everything it knows stays in your
 browser, on your device.
@@ -22,7 +22,8 @@ that is dropped when the browser restarts):
 - the archive of tabs you closed from TabDeclutter (address, title, time), kept for the number of
   days set in the settings (30 by default) and at most 1000 entries;
 - your settings and your duplicate whitelist;
-- the short-lived state of the duplicate protection (a pause, tabs the extension itself reopened).
+- the optional cached on-device topic proposal and its tab signature (local only, used to avoid re-running Gemini Nano unnecessarily);
+- the short-lived state of the duplicate protection (a pause, tabs the extension itself reopened) and temporary AI/organization cooldown timers (`storage.session`).
 
 Nothing else is kept. Uninstalling the extension removes all of it.
 
@@ -54,8 +55,7 @@ Nothing else is kept. Uninstalling the extension removes all of it.
 
 ## Your control
 
-Every close is an explicit gesture of yours and can be undone. You can empty the archive from the
-extension itself, and removing the extension deletes everything it stored.
+Nothing happens automatically before you complete the first-run setup; after setup, automatic background cleanup and automatic duplicate closing only act according to the settings and safety guardrails you choose (never touching active, pinned, audible, login, local file, localhost, or protected tabs), and can be turned off at any time. Every closed tab — manual or automatic — is archived locally first so it can be undone or restored, you can empty the archive from the extension itself, and removing the extension deletes everything it stored.
 
 ## Changes and contact
 
@@ -75,8 +75,9 @@ resta nel tuo browser, sul tuo dispositivo.
   Li usa solo sul dispositivo.
 - **Cosa salva:** solo nell'archiviazione locale dell'estensione: l'ultima attività delle schede,
   le schede da mantenere e i siti protetti, l'archivio delle schede chiuse (per i giorni impostati,
-  30 di default, al massimo 1000), le impostazioni, la lista di eccezioni dei duplicati e lo stato
-  temporaneo della protezione duplicati. Disinstallando l'estensione tutto viene cancellato.
+  30 di default, al massimo 1000), le impostazioni, la lista di eccezioni dei duplicati, la proposta
+  opzionale di raggruppamento AI in cache e lo stato temporaneo della protezione duplicati e dei
+  timer locali. Disinstallando l'estensione tutto viene cancellato.
 - **Cosa non fa mai:** nessuna richiesta di rete, nessuna analisi d'uso o telemetria, nessuna
   pubblicità, nessun codice remoto, nessuna lettura del contenuto delle pagine, nessun
   funzionamento nelle finestre in incognito.
@@ -84,6 +85,10 @@ resta nel tuo browser, sul tuo dispositivo.
   per proporre nomi di gruppo; il modello gira in locale e il suo download parte solo dopo un tuo
   clic. Il permesso facoltativo `bookmarks` viene chiesto solo se attivi il segnale "già nei
   segnalibri"; l'estensione controlla soltanto se un indirizzo è nei segnalibri e non li modifica.
-- **Il tuo controllo:** ogni chiusura è un tuo gesto esplicito e si può annullare.
+- **Il tuo controllo:** nessuna azione automatica parte prima che tu completi la schermata iniziale;
+  dopo la configurazione, la pulizia automatica e la chiusura dei duplicati agiscono solo secondo le
+  impostazioni e le protezioni attive (mai su schede attive, fissate, audio, login, file locali,
+  localhost o siti protetti) e sono sempre disattivabili. Ogni chiusura finisce prima nell'Archivio
+  locale e può essere annullata o ripristinata.
 
 Domande: <https://github.com/RobertoReale/TabDeclutter/issues>.

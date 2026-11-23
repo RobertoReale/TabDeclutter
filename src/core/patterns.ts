@@ -115,6 +115,46 @@ function countWildcards(pattern: string): number {
   return (pattern.match(/\*/g) ?? []).length;
 }
 
+function compileLine(pattern: string): RegExp | null {
+  if (pattern.length > MAX_PATTERN_LENGTH) return null;
+  const asRegex = regexLine(pattern);
+  if (asRegex !== null) {
+    try {
+      return new RegExp(asRegex.body, asRegex.flags.replace(STATEFUL_FLAGS, ''));
+    } catch {
+      return null;
+    }
+  }
+  return countWildcards(pattern) > MAX_WILDCARDS ? null : wildcardToRegExp(pattern);
+}
+
+function diagnoseLineError(line: number, pattern: string): PatternError | null {
+  if (pattern.length > MAX_PATTERN_LENGTH) {
+    return {
+      line,
+      code: 'too-long',
+      message: `${pattern.length} characters, the limit is ${MAX_PATTERN_LENGTH}`,
+    };
+  }
+  const asRegex = regexLine(pattern);
+  if (asRegex !== null) {
+    try {
+      new RegExp(asRegex.body, asRegex.flags.replace(STATEFUL_FLAGS, ''));
+    } catch (error) {
+      return { line, code: 'invalid-regex', message: String(error) };
+    }
+  }
+  const wildcards = countWildcards(pattern);
+  if (wildcards > MAX_WILDCARDS) {
+    return {
+      line,
+      code: 'too-many-wildcards',
+      message: `${wildcards} wildcards, the limit is ${MAX_WILDCARDS}`,
+    };
+  }
+  return null;
+}
+
 /**
  * Compiles a whitelist, as one text block or as its lines.
  *
@@ -126,49 +166,35 @@ export function compile(patterns: string | readonly string[]): CompiledPatterns 
   const errors: PatternError[] = [];
 
   toLines(patterns).forEach((rawLine, index) => {
-    const line = index + 1;
     const pattern = rawLine.trim();
     if (pattern === '') return;
 
-    if (pattern.length > MAX_PATTERN_LENGTH) {
-      errors.push({
-        line,
-        code: 'too-long',
-        message: `${pattern.length} characters, the limit is ${MAX_PATTERN_LENGTH}`,
-      });
+    const compiled = compileLine(pattern);
+    if (compiled !== null) {
+      matchers.push(compiled);
       return;
     }
 
-    const asRegex = regexLine(pattern);
-    if (asRegex !== null) {
-      try {
-        matchers.push(new RegExp(asRegex.body, asRegex.flags.replace(STATEFUL_FLAGS, '')));
-      } catch (error) {
-        // `String`, not `error.message`: anything is throwable, and a branch on the type
-        // of what was thrown could never be reached by a test — `new RegExp` throws a
-        // `SyntaxError` or nothing. The type is part of the detail the user sees.
-        errors.push({ line, code: 'invalid-regex', message: String(error) });
-      }
-      return;
-    }
-
-    const wildcards = countWildcards(pattern);
-    if (wildcards > MAX_WILDCARDS) {
-      errors.push({
-        line,
-        code: 'too-many-wildcards',
-        message: `${wildcards} wildcards, the limit is ${MAX_WILDCARDS}`,
-      });
-      return;
-    }
-
-    matchers.push(wildcardToRegExp(pattern));
+    const error = diagnoseLineError(index + 1, pattern);
+    if (error !== null) errors.push(error);
   });
 
   return {
     match: (url) => matchers.some((matcher) => matcher.test(url)),
     errors,
   };
+}
+
+/** Compiles a whitelist into only a matcher predicate, omitting UI error diagnostics. */
+export function compileMatcher(patterns: string | readonly string[]): (url: string) => boolean {
+  const matchers: RegExp[] = [];
+  for (const rawLine of toLines(patterns)) {
+    const pattern = rawLine.trim();
+    if (pattern === '') continue;
+    const compiled = compileLine(pattern);
+    if (compiled !== null) matchers.push(compiled);
+  }
+  return (url) => matchers.some((matcher) => matcher.test(url));
 }
 
 /**

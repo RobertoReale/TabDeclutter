@@ -67,8 +67,27 @@ export function createSerialQueue(): SerialQueue {
   return run;
 }
 
-export function localKeys(items: readonly { readonly key: string }[]): readonly string[] {
-  return items.map((item) => item.key.slice(6));
+/** Returns a function that runs `fn` at most once per `ms` debounce window. */
+export function createDebouncer(ms: number, fn: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return () => {
+    timer ??= setTimeout(() => {
+      timer = undefined;
+      fn();
+    }, ms);
+  };
+}
+
+export function watchLocalKeys(
+  items: readonly { readonly key: string }[],
+  onMatch: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => void,
+): void {
+  const watched = items.map((item) => item.key.slice(6));
+  browser.storage.onChanged.addListener(
+    (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
+      if (area === 'local' && watched.some((key) => key in changes)) onMatch(changes);
+    },
+  );
 }
 
 export function backgroundError(scope: string): (error: unknown) => void {

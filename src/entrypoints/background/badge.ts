@@ -21,7 +21,7 @@
  * so a worker that died mid-flash leaves nothing to repair.
  */
 
-import { compile } from '@/core/patterns';
+import { compileMatcher } from '@/core/patterns';
 import { scoreTabs } from '@/core/scoring';
 import {
   activityItem,
@@ -36,10 +36,11 @@ import { queryTabs } from '@/platform/tabs';
 
 import {
   backgroundError,
+  createDebouncer,
   createSerialQueue,
   ensurePeriodicAlarm,
   focusedWindow,
-  localKeys,
+  watchLocalKeys,
 } from './report';
 
 /** PLAN.md §11 asks for a 2 s debounce on the tab events. */
@@ -66,13 +67,13 @@ const FLASH_COLOUR = '#1a73e8';
 /** White on both of the above, which is the contrast §4.7 asks of anything readable. */
 const TEXT_COLOUR = '#ffffff';
 
-const WATCHED = localKeys([
+const WATCHED_ITEMS = [
   activityItem,
   keepsItem,
   settingsItem,
   protectedDomainsItem,
   duplicateWhitelistItem,
-]);
+];
 
 export interface BadgeOptions {
   /** The clock, injected so the tests can be exact. */
@@ -105,7 +106,6 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
   const debounceMs = options.debounceMs ?? RECOMPUTE_DEBOUNCE_MS;
   const flashMs = options.flashMs ?? FLASH_MS;
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
   /** One recompute at a time, so a late score cannot overwrite a newer one. */
   const run = createSerialQueue();
 
@@ -131,7 +131,7 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
 
     const scoring = scoreTabs(tabs, inputs.activity, settings, at, {
       // Compiled once per score, never once per tab (PLAN.md §8.3).
-      isWhitelisted: compile(inputs.whitelist).match,
+      isWhitelisted: compileMatcher(inputs.whitelist),
       protectedSites: inputs.protectedSites,
       keeps: inputs.keeps,
       ownOrigin: browser.runtime.getURL(''),
@@ -149,12 +149,7 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
   };
 
   /** What every listener does: ask for a recompute, at most once per window. */
-  function schedule(): void {
-    timer ??= setTimeout(() => {
-      timer = undefined;
-      trigger();
-    }, debounceMs);
-  }
+  const schedule = createDebouncer(debounceMs, trigger);
 
   async function flash(): Promise<void> {
     // Nothing to flash when the user turned the badge off: §8.5's signal is the badge.
@@ -179,9 +174,7 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
     if (isScoringTabUpdate(change as Record<string, unknown> | undefined)) schedule();
   });
 
-  browser.storage.onChanged.addListener((changes: Record<string, unknown>, area: string) => {
-    if (area === 'local' && WATCHED.some((key) => key in changes)) schedule();
-  });
+  watchLocalKeys(WATCHED_ITEMS, schedule);
 
   browser.alarms.onAlarm.addListener((alarm: { name: string }) => {
     if (alarm.name === ALARM_NAME) trigger();
