@@ -9,7 +9,14 @@
  * `ServiceWorkerGlobalScope` by the HTML spec).
  */
 
-import { buildPrompt, SYSTEM_PROMPT, validateAiAnswer } from '@/core/ai-prompt';
+import {
+  buildPrompt,
+  extractCompleteGroupsJson,
+  hasRecoverableGroupSnippet,
+  isDegenerateStream,
+  SYSTEM_PROMPT,
+  validateAiAnswer,
+} from '@/core/ai-prompt';
 import { colorFor, type GroupProposal, type ProposedGroup } from '@/core/cluster';
 import { compile } from '@/core/patterns';
 import { scoreTabs, type ScoredTab } from '@/core/scoring';
@@ -45,7 +52,8 @@ const ALARM_NAME = 'autopilot-sweep';
 const STARTUP_ALARM_NAME = 'autopilot-startup';
 /** Chrome 120+ enforces a 30 s minimum alarm delay; using 30 s avoids dev console warnings while clearing the 15 s startup grace window. */
 const STARTUP_ALARM_DELAY_MS = Math.max(STARTUP_GRACE_MS + 500, 30_000);
-const BG_AI_WARMUP_TIMEOUT_MS = 60_000;
+/** Cold-loading Gemini Nano + D3D12 shaders on 4 GB VRAM laptops can take 3-5 min once per boot. */
+const BG_AI_WARMUP_TIMEOUT_MS = 300_000;
 const BG_AI_TIMEOUT_MS = 90_000;
 const BG_AI_COOLDOWN_MS = 2 * MINUTE;
 const BG_AI_MAX_BATCH_TABS = 40;
@@ -58,8 +66,17 @@ const EXPECTED_TEXT_OPTIONS = {
   expectedOutputs: [{ type: 'text', languages: ['en'] }],
 } as const;
 
+const GREEDY_SAMPLING = { temperature: 0, topK: 1 } as const;
+
 interface BackgroundLanguageModelSession {
   prompt(input: string, options?: { readonly signal?: AbortSignal }): Promise<string>;
+  promptStreaming?(
+    input: string,
+    options?: { readonly signal?: AbortSignal },
+  ):
+    | ReadableStream<string>
+    | AsyncIterable<string>
+    | Promise<ReadableStream<string> | AsyncIterable<string>>;
   clone?(options?: { readonly signal?: AbortSignal }): Promise<BackgroundLanguageModelSession>;
   destroy?(): void;
 }
@@ -67,7 +84,11 @@ interface BackgroundLanguageModelSession {
 interface BackgroundLanguageModelApi {
   availability(options?: typeof EXPECTED_TEXT_OPTIONS): Promise<string>;
   create(
-    options?: typeof EXPECTED_TEXT_OPTIONS & { readonly signal?: AbortSignal },
+    options?: typeof EXPECTED_TEXT_OPTIONS & {
+      readonly temperature?: number;
+      readonly topK?: number;
+      readonly signal?: AbortSignal;
+    },
   ): Promise<BackgroundLanguageModelSession>;
 }
 
@@ -409,7 +430,23 @@ async function promptBackgroundProposal(
     BG_AI_WARMUP_TIMEOUT_MS,
     'background AI warmup timed out',
     preemptSignal,
-    (s) => modelApi.create({ ...EXPECTED_TEXT_OPTIONS, signal: s }),
+    async (s) => {
+      try {
+        return await modelApi.create({ ...EXPECTED_TEXT_OPTIONS, ...GREEDY_SAMPLING, signal: s });
+      } catch (error: unknown) {
+        const name =
+          error !== null && typeof error === 'object' && 'name' in error
+            ? String((error as { name: unknown }).name)
+            : '';
+        if (
+          s.aborted ||
+          (name !== 'NotSupportedError' && name !== 'TypeError' && name !== 'RangeError')
+        ) {
+          throw error;
+        }
+        return modelApi.create({ ...EXPECTED_TEXT_OPTIONS, signal: s });
+      }
+    },
   );
 
   let sessionDestroyed = false;
@@ -448,13 +485,13 @@ async function promptBackgroundProposal(
             };
             s.addEventListener('abort', destroyClone, { once: true });
             try {
-              return await clone.prompt(promptInput, { signal: s });
+              return await runBgPrompt(clone, promptInput, s, destroyClone);
             } finally {
               s.removeEventListener('abort', destroyClone);
               destroyClone();
             }
           }
-          return session.prompt(promptInput, { signal: s });
+          return runBgPrompt(session, promptInput, s, destroySession);
         },
       );
 
@@ -488,6 +525,65 @@ async function promptBackgroundProposal(
   } finally {
     preemptSignal.removeEventListener('abort', destroySession);
     destroySession();
+  }
+}
+
+async function runBgPrompt(
+  target: BackgroundLanguageModelSession,
+  input: string,
+  signal: AbortSignal,
+  stopSession: () => void,
+): Promise<string> {
+  if (typeof target.promptStreaming !== 'function') {
+    return target.prompt(input, { signal });
+  }
+  const stream = await target.promptStreaming(input, { signal });
+  let acc = '';
+  const step = (chunk: string): string | null => {
+    if (chunk === '') return null;
+    acc = acc.length > 0 && chunk.startsWith(acc) ? chunk : acc + chunk;
+    const complete = extractCompleteGroupsJson(acc);
+    if (complete !== null) return complete;
+    return isDegenerateStream(acc) ? acc : null;
+  };
+  try {
+    if ('getReader' in stream && typeof stream.getReader === 'function') {
+      const reader = stream.getReader();
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (typeof value !== 'string') continue;
+          const early = step(value);
+          if (early !== null) {
+            void reader.cancel().catch(ignore);
+            stopSession();
+            return early;
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } else {
+      for await (const chunk of stream as AsyncIterable<string>) {
+        if (typeof chunk !== 'string') continue;
+        const early = step(chunk);
+        if (early !== null) {
+          stopSession();
+          return early;
+        }
+      }
+    }
+    return acc;
+  } catch (error: unknown) {
+    const reasonName =
+      signal.reason !== null && typeof signal.reason === 'object' && 'name' in signal.reason
+        ? String((signal.reason as { name: unknown }).name)
+        : '';
+    if (signal.aborted && reasonName === 'TimeoutError' && hasRecoverableGroupSnippet(acc)) {
+      return acc;
+    }
+    throw error;
   }
 }
 

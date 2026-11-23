@@ -158,11 +158,7 @@ function webLocks(): LockManager | undefined {
     : undefined;
 }
 
-function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T> {
-  const locks = webLocks();
-  if (locks !== undefined) {
-    return locks.request(`td:storage:${key}`, () => action());
-  }
+function serializeLocal<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T> {
   const previous = queues.get(key) ?? Promise.resolve();
   // `action` runs whether the operation before it resolved or rejected: one failed write
   // must not block the key forever.
@@ -172,6 +168,14 @@ function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T>
     next.catch(() => undefined),
   );
   return next;
+}
+
+function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T> {
+  const locks = webLocks();
+  if (locks !== undefined) {
+    return locks.request(`td:storage:${key}`, () => action());
+  }
+  return serializeLocal(key, action);
 }
 
 const AI_LOCK_NAME = 'td:on-device-ai';
@@ -432,7 +436,9 @@ export function pruneArchive(now: number, retentionDays: number): Promise<number
  * key, and the caller decides the moment both halves describe.
  */
 export function pruneActivity(openTabIds: readonly number[]): Promise<number> {
-  return serialize(activityItem.key, async () => {
+  // `local:activity` is written exclusively by the background worker (`tracker.ts` + `cleanup.ts`),
+  // so in-process serialization avoids `navigator.locks` Mojo IPC contention on high-frequency tab events.
+  return serializeLocal(activityItem.key, async () => {
     const stored = await activityItem.getValue();
     const { kept, dropped } = sweepActivity(stored, openTabIds);
     if (dropped > 0) await activityItem.setValue(kept);
@@ -442,13 +448,13 @@ export function pruneActivity(openTabIds: readonly number[]): Promise<number> {
 
 /**
  * Applies a set of per-tab activity updates/deletions on top of the latest stored `local:activity`
- * under the same per-key Web Lock as `pruneActivity`, so incremental tracker flushes never
- * resurrect pruned tabs or clobber concurrent writes from other contexts.
+ * under the same in-process queue as `pruneActivity`, so incremental tracker flushes never
+ * resurrect pruned tabs or clobber concurrent writes.
  */
 export function patchActivity(
   changes: ReadonlyMap<number, TabActivity | undefined>,
 ): Promise<ActivityStore> {
-  return serialize(activityItem.key, async () => {
+  return serializeLocal(activityItem.key, async () => {
     const next: ActivityStore = { ...(await activityItem.getValue()) };
     for (const [tabId, record] of changes) {
       if (record === undefined) delete next[tabId];
@@ -459,9 +465,9 @@ export function patchActivity(
   });
 }
 
-/** Replaces `local:activity` atomically under the per-key Web Lock (startup / install rebuild). */
+/** Replaces `local:activity` atomically under the activity queue (startup / install rebuild). */
 export function replaceActivity(next: ActivityStore): Promise<void> {
-  return serialize(activityItem.key, async () => {
+  return serializeLocal(activityItem.key, async () => {
     await activityItem.setValue(next);
   });
 }

@@ -222,3 +222,62 @@ export function validateAiAnswer(
     ? { ok: true, drafts, ungrouped: [], failed: leftover }
     : { ok: true, drafts, ungrouped: leftover, failed: [] };
 }
+
+/**
+ * Extracts the first complete balanced top-level `{...}` JSON object containing `"groups"`
+ * once all braces and strings close, allowing streaming inference to stop the instant valid
+ * JSON completes instead of waiting on trailing prose or EOS loops.
+ */
+export function extractCompleteGroupsJson(raw: string): string | null {
+  const start = raw.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        const candidate = raw.slice(start, i + 1);
+        if (!candidate.includes('"groups"')) return null;
+        try {
+          const parsed = JSON.parse(candidate) as { groups?: unknown };
+          return Array.isArray(parsed.groups) ? candidate : null;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Maximum chars streamed before stopping a runaway small-model generation loop. */
+const MAX_STREAM_CHARS = 4_000;
+
+/** Detects pathological token/substring repetition loops in unconstrained small-model output. */
+export function isDegenerateStream(text: string): boolean {
+  if (text.length >= MAX_STREAM_CHARS) return true;
+  if (text.length < 160) return false;
+  return /(.{4,32}?)\1{4,}/su.test(text.slice(-160));
+}
+
+/** Whether partial streamed text already carries at least one regex-recoverable group. */
+export function hasRecoverableGroupSnippet(text: string): boolean {
+  return /"name"\s*:\s*"[^"]+"[^{}[\]]*?"tabIds"\s*:\s*\[\s*\d+/u.test(text);
+}

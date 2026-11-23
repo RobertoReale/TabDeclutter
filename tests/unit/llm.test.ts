@@ -653,12 +653,44 @@ describe('AiSession', () => {
   });
 
   it('detects complete balanced groups JSON and runaway repetition loops', () => {
+    expect(extractCompleteGroupsJson('no braces here')).toBeNull();
     expect(extractCompleteGroupsJson('{"groups":[{"name":"A","tabIds":[1,2]}')).toBeNull();
+    expect(extractCompleteGroupsJson('{"other":1}')).toBeNull();
+    expect(extractCompleteGroupsJson('{"groups":broken}')).toBeNull();
+    expect(extractCompleteGroupsJson('{"groups":"not-array"}')).toBeNull();
     expect(
-      extractCompleteGroupsJson('Sure!\n{"groups":[{"name":"A","tabIds":[1,2]}]}\nHope this helps'),
-    ).toBe('{"groups":[{"name":"A","tabIds":[1,2]}]}');
+      extractCompleteGroupsJson(
+        'Sure!\n{"groups":[{"name":"A \\"quoted\\" {brace}","tabIds":[1,2]}]}\nHope this helps',
+      ),
+    ).toBe('{"groups":[{"name":"A \\"quoted\\" {brace}","tabIds":[1,2]}]}');
     expect(isDegenerateStream('{"groups":[{"name":"A","tabIds":[1,2]}]}')).toBe(false);
+    expect(isDegenerateStream('x'.repeat(4_001))).toBe(true);
     expect(isDegenerateStream('x'.repeat(200) + ',1,2,3'.repeat(10))).toBe(true);
+  });
+
+  it('requests greedy decoding (temperature=0, topK=1) and falls back cleanly if rejected', async () => {
+    const okApi = new FakeApi();
+    const okSession = new AiSession({ api: okApi });
+    await okSession.prompt('one');
+    expect(okApi.created[0]).toMatchObject({ temperature: 0, topK: 1 });
+
+    const seen: LanguageModelCreateOptions[] = [];
+    const fallbackApi = {
+      availability: async () => 'available',
+      create: async (opts: LanguageModelCreateOptions = {}) => {
+        seen.push(opts);
+        if (opts.topK !== undefined) {
+          throw new DOMException('topK not supported', 'NotSupportedError');
+        }
+        return new FakeSession(async () => '{"groups":[]}');
+      },
+    };
+    const fallbackSession = new AiSession({ api: fallbackApi });
+    await expect(fallbackSession.prompt('one')).resolves.toBe('{"groups":[]}');
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.topK).toBe(1);
+    expect(seen[1]?.topK).toBeUndefined();
+    expect(seen[1]?.temperature).toBeUndefined();
   });
 });
 

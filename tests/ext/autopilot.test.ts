@@ -336,6 +336,81 @@ describe('background/autopilot reliability', () => {
     expect(destroyed).toBe(1);
     expect(await aiBgCooldownUntilItem.getValue()).toBe(0);
   });
+
+  it('uses greedy decoding (temperature=0, topK=1) and stops promptStreaming() early once JSON closes', async () => {
+    let cancelled = false;
+    let createOpts: Record<string, unknown> | undefined;
+    vi.stubGlobal('LanguageModel', {
+      availability: vi.fn(async () => 'available'),
+      create: vi.fn(async (opts: Record<string, unknown>) => {
+        createOpts = opts;
+        return {
+          prompt: vi.fn(async () => {
+            throw new Error('should prefer promptStreaming');
+          }),
+          promptStreaming: () =>
+            new ReadableStream<string>({
+              start(controller) {
+                controller.enqueue('{"groups":[{"name":"Math","tabIds":[1,2]}]}');
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          destroy: vi.fn(),
+        };
+      }),
+    });
+    vi.spyOn(fakeBrowser.windows, 'getLastFocused').mockResolvedValue({ id: 1 } as never);
+    vi.spyOn(fakeBrowser.tabs, 'query').mockResolvedValue([
+      {
+        id: 50,
+        windowId: 1,
+        index: 0,
+        url: 'https://gemini.google.com/app/x',
+        title: 'Linear algebra',
+        pinned: false,
+        audible: false,
+        active: true,
+        discarded: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 51,
+        windowId: 1,
+        index: 1,
+        url: 'https://www.youtube.com/watch?v=y',
+        title: 'Calculus',
+        pinned: false,
+        audible: false,
+        active: false,
+        discarded: false,
+        incognito: false,
+        groupId: NO_GROUP_ID,
+      },
+    ] as never);
+    vi.spyOn(fakeBrowser.tabs, 'move').mockResolvedValue({} as never);
+
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoOrganize: true,
+      useTabGroups: false,
+      autoOrganizeMode: 'topic',
+      autoWindowMode: 'merge-windows',
+      useOnDeviceAi: true,
+    });
+
+    const autopilot = registerAutopilot({ now: () => NOW, capabilities: CHROME_CAPS });
+    await autopilot.run();
+    await flushAsync();
+
+    expect(createOpts).toMatchObject({ temperature: 0, topK: 1 });
+    expect(cancelled).toBe(true);
+    const saved = await readAiProposalState();
+    expect(saved.proposal?.groups[0]?.title).toBe('Math');
+    expect(saved.proposal?.groups[0]?.tabIds).toEqual([50, 51]);
+  });
 });
 
 describe('background/report shutdown-aware logging', () => {

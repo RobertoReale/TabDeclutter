@@ -34,6 +34,13 @@
 // without WXT's alias, and this module is tested there (`tests/unit/llm.test.ts`).
 import { SYSTEM_PROMPT } from '../core/ai-grouping';
 import type { Llm, LlmPromptOptions } from '../core/ai-grouping';
+import {
+  extractCompleteGroupsJson,
+  hasRecoverableGroupSnippet,
+  isDegenerateStream,
+} from '../core/ai-prompt';
+
+export { extractCompleteGroupsJson, isDegenerateStream };
 
 /** The states of PLAN.md §7.3, plus the one the API cannot report: it is not there. */
 export type AiAvailability =
@@ -76,6 +83,9 @@ export interface LanguageModelCreateOptions {
   readonly initialPrompts?: readonly { readonly role: string; readonly content: string }[];
   readonly expectedInputs?: readonly ExpectedText[];
   readonly expectedOutputs?: readonly ExpectedText[];
+  /** Deterministic greedy sampling (`temperature: 0, topK: 1`), supported in Chrome Extensions. */
+  readonly temperature?: number;
+  readonly topK?: number;
   readonly monitor?: (monitor: LanguageModelMonitor) => void;
   readonly signal?: AbortSignal;
 }
@@ -134,6 +144,16 @@ export function languageModel(globals: object = globalThis): LanguageModelApi | 
 const EXPECTED: Pick<LanguageModelCreateOptions, 'expectedInputs' | 'expectedOutputs'> = {
   expectedInputs: [{ type: 'text', languages: ['en'] }],
   expectedOutputs: [{ type: 'text', languages: ['en'] }],
+};
+
+/**
+ * Deterministic greedy decoding for structured JSON tab grouping: Chrome defaults to
+ * `temperature=1.0, top_k=64`, which adds randomness and JSON syntax errors on small models.
+ * Both fields are always passed together per the Chrome Extension Prompt API spec.
+ */
+const GREEDY_SAMPLING: Pick<LanguageModelCreateOptions, 'temperature' | 'topK'> = {
+  temperature: 0,
+  topK: 1,
 };
 
 /**
@@ -648,7 +668,7 @@ export class AiSession implements Llm {
     const api = this.#api;
     if (api === undefined) throw new Error('no on-device model on this browser');
     const lifetime = this.#lifetimeController;
-    const session = await api.create({
+    const baseOpts: LanguageModelCreateOptions = {
       ...EXPECTED,
       // Omit `initialPrompts` from `create()` so `AILanguageModel::Initialize` takes Chromium's
       // 0-token initialization barrier fast-path (`Input::New()`), resolving as soon as the
@@ -664,7 +684,15 @@ export class AiSession implements Llm {
               });
             },
           }),
-    });
+    };
+    let session: LanguageModelSession;
+    try {
+      session = await api.create({ ...baseOpts, ...GREEDY_SAMPLING });
+    } catch (error: unknown) {
+      if (signal.aborted || !isSamplingOptionError(error)) throw error;
+      // Future-proof fallback if a browser rejects legacy `temperature`/`topK` options.
+      session = await api.create(baseOpts);
+    }
     if (lifetime.signal.aborted) {
       session.destroy();
       throw new DOMException('the AI session was closed while opening', 'AbortError');
@@ -847,71 +875,15 @@ function isReadableStream(value: unknown): value is ReadableStream<string> {
   );
 }
 
+function isSamplingOptionError(error: unknown): boolean {
+  const name = errorNameOf(error);
+  return name === 'NotSupportedError' || name === 'TypeError' || name === 'RangeError';
+}
+
 function compactPreview(text: string): string {
   const clean = text.replace(/\s+/gu, ' ').trim();
   if (clean.length <= 80) return clean;
   return `${clean.slice(0, 48)}…${clean.slice(-28)}`;
-}
-
-/**
- * Extracts the first complete balanced top-level `{...}` JSON object containing `"groups"`
- * once all braces and strings close, allowing streaming inference to stop the instant valid
- * JSON completes instead of waiting on trailing prose or EOS loops.
- */
-export function extractCompleteGroupsJson(raw: string): string | null {
-  const start = raw.indexOf('{');
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < raw.length; i += 1) {
-    const ch = raw[i];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === '\\') {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-    } else if (ch === '{') {
-      depth += 1;
-    } else if (ch === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        const candidate = raw.slice(start, i + 1);
-        if (!candidate.includes('"groups"')) return null;
-        try {
-          const parsed = JSON.parse(candidate) as { groups?: unknown };
-          if (Array.isArray(parsed.groups)) return candidate;
-        } catch {
-          return null;
-        }
-        return null;
-      }
-    }
-  }
-  return null;
-}
-
-/** Maximum chars streamed before stopping a runaway small-model generation loop. */
-const MAX_STREAM_CHARS = 4_000;
-
-/** Detects pathological token/substring repetition loops in unconstrained small-model output. */
-export function isDegenerateStream(text: string): boolean {
-  if (text.length >= MAX_STREAM_CHARS) return true;
-  if (text.length < 160) return false;
-  const tail = text.slice(-160);
-  // 5+ consecutive repeats of any 4..32-char unit (e.g. `,1,1,1,1,1...` or repeated words/newlines).
-  return /(.{4,32}?)\1{4,}/su.test(tail);
-}
-
-function hasRecoverableGroupSnippet(text: string): boolean {
-  return /"name"\s*:\s*"[^"]+"[^{}[\]]*?"tabIds"\s*:\s*\[\s*\d+/u.test(text);
 }
 
 /**

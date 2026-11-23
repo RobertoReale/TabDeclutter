@@ -3501,7 +3501,9 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   background inference immediately instead of blocking on `td:on-device-ai`; and switched
   `AiSession` unconstrained calls to `session.promptStreaming()` with live sub-stage telemetry
   (`lock` → `warmup` → `measure` → `clone` → `prefill` → `streaming`), early balanced-JSON
-  completion, repetition-loop breaking, and `inputQuota`/`inputUsage` support
+  completion, repetition-loop breaking, `inputQuota`/`inputUsage` support, and explicit greedy
+  decoding (`temperature: 0, topK: 1`, with automatic fallback if rejected) in both `llm.ts` and
+  background `autopilot.ts` (which now also streams with early JSON stop)
   (https://developer.chrome.com/docs/ai/prompt-api).
 - **Why:** cuts CPU medians ~2× (`scoring 1000 tabs` from 13.45 ms normalized to 6.34 ms vs 15 ms
   budget; `clustering 300 tabs` 1-window from 12.58 ms to 6.34 ms and 6-window from 8.23 ms to
