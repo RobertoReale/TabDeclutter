@@ -230,7 +230,7 @@ const PATH_NOISE: ReadonlySet<string> = new Set(
 );
 
 /** Strips diacritics only when non-ASCII characters appear, so ASCII words stay zero-cost. */
-function foldAccents(word: string): string {
+export function foldAccents(word: string): string {
   for (let i = 0; i < word.length; i += 1) {
     if (word.charCodeAt(i) > 127) {
       return word.normalize('NFD').replace(/\p{Mn}+/gu, '');

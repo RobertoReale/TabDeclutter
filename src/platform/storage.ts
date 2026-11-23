@@ -72,22 +72,31 @@ function defineVersioned<T>(key: StorageItemKey, fallback: T, options?: Versione
 }
 
 /** `Record<tabId, TabActivity>`, what the tracker remembers (PLAN.md §6.1). */
-export const activityItem = defineVersioned<ActivityStore>('local:activity', {});
+export const activityItem = /*#__PURE__*/ defineVersioned<ActivityStore>('local:activity', {});
 
 /** Normalized URL → when the keep runs out, `null` for "Sempre". */
-export const keepsItem = defineVersioned<Keeps>('local:keeps', {});
+export const keepsItem = /*#__PURE__*/ defineVersioned<Keeps>('local:keeps', {});
 
 /** "Siti protetti" (PLAN.md §4.6): domain patterns such as `*.atlassian.net`. */
-export const protectedDomainsItem = defineVersioned<string[]>('local:protectedDomains', []);
+export const protectedDomainsItem = /*#__PURE__*/ defineVersioned<string[]>(
+  'local:protectedDomains',
+  [],
+);
 
 /** The closed tabs, newest first, capped at `ARCHIVE_CAP`. Write with `addToArchive`. */
-export const archiveItem = defineVersioned<ArchivedTab[]>('local:archive', []);
+export const archiveItem = /*#__PURE__*/ defineVersioned<ArchivedTab[]>('local:archive', []);
 
 /** Read with `readSettings`, which fills in the keys an older release did not store. */
-export const settingsItem = defineVersioned<Settings>('local:settings', DEFAULT_SETTINGS);
+export const settingsItem = /*#__PURE__*/ defineVersioned<Settings>(
+  'local:settings',
+  DEFAULT_SETTINGS,
+);
 
 /** The duplicate whitelist, as raw patterns, exactly as the user wrote them. */
-export const duplicateWhitelistItem = defineVersioned<string[]>('local:duplicateWhitelist', []);
+export const duplicateWhitelistItem = /*#__PURE__*/ defineVersioned<string[]>(
+  'local:duplicateWhitelist',
+  [],
+);
 
 /**
  * Whether the first-run screen of PLAN.md §17 has been answered.
@@ -96,7 +105,7 @@ export const duplicateWhitelistItem = defineVersioned<string[]>('local:duplicate
  * out of `Settings` leaves "the stored settings are the user's choices" true (docs/DECISIONS.md
  * M6.2). `false` for a profile that has never seen it, which is what a fresh install reads.
  */
-export const onboardedItem = defineVersioned<boolean>('local:onboarded', false);
+export const onboardedItem = /*#__PURE__*/ defineVersioned<boolean>('local:onboarded', false);
 
 /**
  * Which tab the foreground clock is running for, `null` when no window has focus.
@@ -105,10 +114,13 @@ export const onboardedItem = defineVersioned<boolean>('local:onboarded', false);
  * the service worker (invariant 6) and must not outlive the browser, or a restart would
  * charge a tab for the night.
  */
-export const foregroundItem = defineVersioned<ForegroundPeriod | null>('session:foreground', null);
+export const foregroundItem = /*#__PURE__*/ defineVersioned<ForegroundPeriod | null>(
+  'session:foreground',
+  null,
+);
 
 /** The guard's volatile state. `storage.session` is cleared when the browser restarts. */
-export const guardStateItem = defineVersioned<GuardState>('session:guardState', {
+export const guardStateItem = /*#__PURE__*/ defineVersioned<GuardState>('session:guardState', {
   ...DEFAULT_GUARD_STATE,
   exemptions: [],
 });
@@ -121,29 +133,41 @@ export const guardStateItem = defineVersioned<GuardState>('session:guardState', 
  * Every consumer validates live tab IDs, site keys, and titles against `aiProposalSignatureItem`,
  * so stale plans from a previous browser restart are automatically ignored.
  */
-export const aiProposalItem = defineVersioned<GroupProposal | null>('local:aiProposal', null);
+export const aiProposalItem = /*#__PURE__*/ defineVersioned<GroupProposal | null>(
+  'local:aiProposal',
+  null,
+);
 
 /** Per-tab content signature (tab IDs + hosts + titles) that `aiProposalItem` was generated for. */
-export const aiProposalSignatureItem = defineVersioned<string>('local:aiProposalSignature', '');
+export const aiProposalSignatureItem = /*#__PURE__*/ defineVersioned<string>(
+  'local:aiProposalSignature',
+  '',
+);
 
 /**
  * Timestamp (ms epoch) until which an on-device AI prompt is currently running in either the
  * side panel or background service worker, preventing both contexts from competing on the GPU.
  */
-export const aiBusyUntilItem = defineVersioned<number>('session:aiBusyUntil', 0);
+export const aiBusyUntilItem = /*#__PURE__*/ defineVersioned<number>('session:aiBusyUntil', 0);
 
 /**
  * Timestamp (ms epoch) until which background AI refreshes cool down after a failure,
  * stored in `storage.session` so MV3 service worker restarts never trigger retry storms.
  */
-export const aiBgCooldownUntilItem = defineVersioned<number>('session:aiBgCooldownUntil', 0);
+export const aiBgCooldownUntilItem = /*#__PURE__*/ defineVersioned<number>(
+  'session:aiBgCooldownUntil',
+  0,
+);
 
 /**
  * Timestamp (ms epoch) until which background `autoOrganize` pauses after the user clicks
  * Undo on a window organization, so autopilot does not immediately re-organize the tabs
  * without touching the user's persisted `autoOrganize` setting.
  */
-export const organizeSnoozeUntilItem = defineVersioned<number>('session:organizeSnoozeUntil', 0);
+export const organizeSnoozeUntilItem = /*#__PURE__*/ defineVersioned<number>(
+  'session:organizeSnoozeUntil',
+  0,
+);
 
 /**
  * One read-modify-write at a time per key, coordinated across extension contexts (background
@@ -530,13 +554,16 @@ export async function isKept(url: string, now: number): Promise<boolean> {
 export function pruneKeeps(now: number): Promise<number> {
   return serialize(keepsItem.key, async () => {
     const stored = await keepsItem.getValue();
-    const next: Keeps = {};
-    for (const [key, until] of Object.entries(stored)) {
-      if (!isExpired(until, now)) next[key] = until;
-    }
+    const next = filterActiveKeeps(stored, now);
     const dropped = Object.keys(stored).length - Object.keys(next).length;
     if (dropped > 0) await keepsItem.setValue(next);
     return dropped;
+  });
+}
+
+function updateGuardState(change: (state: GuardState) => GuardState): Promise<void> {
+  return serialize(guardStateItem.key, async () => {
+    await guardStateItem.setValue(change(await guardStateItem.getValue()));
   });
 }
 
@@ -556,17 +583,14 @@ export function addExemptions(
   now: number,
   ttlMs: number = EXEMPTION_TTL_MS,
 ): Promise<void> {
-  return serialize(guardStateItem.key, async () => {
-    if (targets.length === 0) return;
-    const state = await guardStateItem.getValue();
-    await guardStateItem.setValue({
-      ...state,
-      exemptions: [
-        ...activeOf(state.exemptions, now),
-        ...targets.map((target) => ({ ...target, until: now + ttlMs })),
-      ],
-    });
-  });
+  if (targets.length === 0) return Promise.resolve();
+  return updateGuardState((state) => ({
+    ...state,
+    exemptions: [
+      ...activeOf(state.exemptions, now),
+      ...targets.map((target) => ({ ...target, until: now + ttlMs })),
+    ],
+  }));
 }
 
 /** Exempts one tab the extension itself opened or restored (PLAN.md §8.6). */
@@ -578,6 +602,20 @@ export function addExemption(
   return addExemptions([target], now, ttlMs);
 }
 
+function appendUnique(
+  item: typeof protectedDomainsItem,
+  raw: string,
+  ignoreCase: boolean,
+): Promise<void> {
+  return serialize(item.key, async () => {
+    const wanted = ignoreCase ? raw.trim().toLowerCase() : raw.trim();
+    if (wanted === '') return;
+    const stored = await item.getValue();
+    if (stored.some((e) => (ignoreCase ? e.trim().toLowerCase() : e.trim()) === wanted)) return;
+    await item.setValue([...stored, wanted]);
+  });
+}
+
 /**
  * "Protect site" (PLAN.md §9): the domain joins "Siti protetti", once.
  *
@@ -586,13 +624,7 @@ export function addExemption(
  * item twice costs one write.
  */
 export function addProtectedDomain(domain: string): Promise<void> {
-  return serialize(protectedDomainsItem.key, async () => {
-    const wanted = domain.trim().toLowerCase();
-    if (wanted === '') return;
-    const stored = await protectedDomainsItem.getValue();
-    if (stored.some((entry) => entry.trim().toLowerCase() === wanted)) return;
-    await protectedDomainsItem.setValue([...stored, wanted]);
-  });
+  return appendUnique(protectedDomainsItem, domain, true);
 }
 
 /**
@@ -606,13 +638,7 @@ export function addProtectedDomain(domain: string): Promise<void> {
  * the same site costs one write.
  */
 export function addDuplicateWhitelistPattern(pattern: string): Promise<void> {
-  return serialize(duplicateWhitelistItem.key, async () => {
-    const wanted = pattern.trim();
-    if (wanted === '') return;
-    const stored = await duplicateWhitelistItem.getValue();
-    if (stored.some((entry) => entry.trim() === wanted)) return;
-    await duplicateWhitelistItem.setValue([...stored, wanted]);
-  });
+  return appendUnique(duplicateWhitelistItem, pattern, false);
 }
 
 function activeOf(exemptions: readonly GuardExemption[], now: number): GuardExemption[] {
@@ -641,29 +667,22 @@ export function readGuardState(): Promise<GuardState> {
  * guard reads, and `resumeMode` is only what the icon menu shows ("torna a: …").
  */
 export function pauseGuard(until: number, resumeMode: GuardMode): Promise<void> {
-  return serialize(guardStateItem.key, async () => {
-    const state = await guardStateItem.getValue();
-    await guardStateItem.setValue({ ...state, pausedUntil: until, resumeMode });
-  });
+  return updateGuardState((state) => ({ ...state, pausedUntil: until, resumeMode }));
 }
 
 /** The end of a pause, whether the alarm brought it or the user did (PLAN.md §8.1). */
 export function resumeGuard(): Promise<void> {
-  return serialize(guardStateItem.key, async () => {
-    const state = await guardStateItem.getValue();
+  return updateGuardState((state) => {
     const next = { ...state };
     delete next.pausedUntil;
     delete next.resumeMode;
-    await guardStateItem.setValue(next);
+    return next;
   });
 }
 
 /** The start-up grace period of PLAN.md §8.6 begins: no automatic close before `until`. */
 export function startGuardGrace(until: number): Promise<void> {
-  return serialize(guardStateItem.key, async () => {
-    const state = await guardStateItem.getValue();
-    await guardStateItem.setValue({ ...state, graceUntil: until });
-  });
+  return updateGuardState((state) => ({ ...state, graceUntil: until }));
 }
 
 /**
@@ -674,10 +693,7 @@ export function startGuardGrace(until: number): Promise<void> {
  * most recent matters: the menu item reopens the last tab, not a history.
  */
 export function rememberAutoClosed(archiveId: string): Promise<void> {
-  return serialize(guardStateItem.key, async () => {
-    const state = await guardStateItem.getValue();
-    await guardStateItem.setValue({ ...state, lastAutoClosedId: archiveId });
-  });
+  return updateGuardState((state) => ({ ...state, lastAutoClosedId: archiveId }));
 }
 
 /** The exemptions still standing at `now`. */

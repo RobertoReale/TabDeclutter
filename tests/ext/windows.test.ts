@@ -155,6 +155,51 @@ describe('platform/windows', () => {
     expect(tabs.find((t) => t.id === 5)?.windowId).toBe(4);
   });
 
+  it('never moves browser-internal pages or hijacks their window in split-windows, while keeping Tiny Suspender web tabs movable', async () => {
+    const { api, moves, tabs } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'chrome://extensions/',
+        title: 'Extensions',
+        active: true,
+      },
+      {
+        id: 2,
+        windowId: 2,
+        index: 0,
+        url: 'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D1',
+        title: 'Corrado Augias 1 - YouTube',
+      },
+      {
+        id: 3,
+        windowId: 2,
+        index: 1,
+        url: 'https://www.youtube.com/watch?v=2',
+        title: 'Corrado Augias 2 - YouTube',
+      },
+      { id: 4, windowId: 2, index: 2, url: 'https://github.com/a', title: 'GitHub A' },
+      { id: 5, windowId: 2, index: 3, url: 'https://github.com/b', title: 'GitHub B' },
+    ]);
+
+    await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    // `chrome://extensions/` stays untouched in window 1, and no topic bucket hijacks window 1.
+    expect(moves.some((m) => m.tabId === 1)).toBe(false);
+    expect(tabs.filter((t) => t.windowId === 1).map((t) => t.id)).toEqual([1]);
+    // Both YouTube tabs (including the Tiny Suspender one) stay grouped together in one window.
+    expect(tabs.find((t) => t.id === 2)?.windowId).toBe(tabs.find((t) => t.id === 3)?.windowId);
+    expect(tabs.find((t) => t.id === 4)?.windowId).toBe(tabs.find((t) => t.id === 5)?.windowId);
+    expect(tabs.find((t) => t.id === 2)?.windowId).not.toBe(tabs.find((t) => t.id === 4)?.windowId);
+  });
+
   it('never steals the active tab of the focused window into another window in split-windows mode', async () => {
     const { api, tabs } = fakeApi([
       { id: 1, windowId: 1, index: 0, url: 'https://github.com/a', title: 'GitHub A' },

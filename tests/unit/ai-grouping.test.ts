@@ -326,10 +326,84 @@ describe('the answer is not trusted', () => {
     expect(result.proposal.ungrouped).toEqual([2, 4, 5, 6]);
   });
 
-  it('truncates a name the model made too long', async () => {
-    const llm = fakeLlm(() => answerWith({ name: 'x'.repeat(40), tabIds: [1, 2, 3] }));
+  it('truncates a name the model made too long cleanly at word boundaries when possible', async () => {
+    const llm = fakeLlm(() =>
+      answerWith(
+        { name: 'x'.repeat(40), tabIds: [1, 2, 3] },
+        { name: 'Corrado Augias Discussions', tabIds: [4, 5, 6] },
+      ),
+    );
     const result = await groupByAi(SIX_TABS, llm, at(0));
-    expect(result.proposal.groups[0]?.title).toBe('x'.repeat(24));
+    expect(result.proposal.groups.map((group) => group.title)).toEqual([
+      'x'.repeat(24),
+      'Corrado Augias',
+    ]);
+  });
+
+  it('drops catch-all group names like Miscellaneous/General and ejects unrelated outliers from entity-anchored groups', async () => {
+    const realTabs: TabInfo[] = [
+      tab(
+        1,
+        'https://www.google.com/search?q=isomorfismo',
+        'se è un isomorfismo, una base finisce in una base? - Cerca con Google',
+      ),
+      tab(2, 'https://www.youtube.com/watch?v=a', 'Corrado Augias - I promessi sposi - YouTube'),
+      tab(
+        3,
+        'https://www.youtube.com/watch?v=b',
+        'Corrado Augias: I segreti del Vaticano - YouTube',
+      ),
+      tab(
+        4,
+        'https://www.youtube.com/watch?v=c',
+        'Corraudo Augias e Giorgio Zanchini - Storia - YouTube',
+      ),
+      tab(5, 'https://www.youtube.com/watch?v=d', 'Addio a Corrado Augias - YouTube'),
+      tab(6, 'https://www.repubblica.it/vaticano', 'Il dibattito sul Vaticano e la storia'),
+      tab(7, 'https://gemini.google.com/app/1', 'Prodotto scalare standard o generico?'),
+      tab(8, 'https://www.youtube.com/watch?v=e', 'Calcolo integrali - YouTube'),
+    ];
+    const llm = fakeLlm(() =>
+      answerWith(
+        // Model hallucinates a contiguous [1..6] run dragging `isomorfismo` into Corrado Augias,
+        // while tab 6 legitimately shares "vaticano"/"storia" with the Augias anchor tabs.
+        { name: 'Corrado Augias Discussions', tabIds: [1, 2, 3, 4, 5, 6] },
+        { name: 'Miscellaneous', tabIds: [7, 8] },
+        { name: 'Linear Algebra', tabIds: [1, 7, 8] },
+      ),
+    );
+    const result = await groupByAi(realTabs, llm, at(0));
+    expect(result.source).toBe('ai');
+    // Tab 1 (`isomorfismo`) was ejected from Corrado Augias and claimed by Linear Algebra;
+    // Tab 6 stayed because it shares anchor vocabulary; "Miscellaneous" was dropped as catch-all.
+    expect(membership(result.proposal)).toEqual({
+      'Corrado Augias': [2, 3, 4, 5, 6],
+      'Linear Algebra': [1, 7, 8],
+    });
+    expect(result.proposal.ungrouped).toEqual([]);
+  });
+
+  it('leaves large groups with generic-only or translated titles untouched by entity outlier pruning', async () => {
+    const translatedTabs: TabInfo[] = [
+      tab(1, 'https://it.wikipedia.org/wiki/Dino_Campana', 'Dino Campana'),
+      tab(2, 'https://it.wikipedia.org/wiki/Luigi_Magni', 'Luigi Magni'),
+      tab(3, 'https://it.wikipedia.org/wiki/Trilussa', 'Trilussa'),
+      tab(4, 'https://it.wikipedia.org/wiki/Cesare_Pascarella', 'Cesare Pascarella'),
+      tab(5, 'https://it.wikipedia.org/wiki/Giovanni_Papini', 'Giovanni Papini'),
+    ];
+    const translated = await groupByAi(
+      translatedTabs,
+      fakeLlm(() => answerWith({ name: 'Italian Poets', tabIds: [1, 2, 3, 4, 5] })),
+      at(0),
+    );
+    expect(membership(translated.proposal)).toEqual({ 'Italian Poets': [1, 2, 3, 4, 5] });
+
+    const genericTitle = await groupByAi(
+      translatedTabs,
+      fakeLlm(() => answerWith({ name: 'Study Videos', tabIds: [1, 2, 3, 4, 5] })),
+      at(0),
+    );
+    expect(membership(genericTitle.proposal)).toEqual({ 'Study Videos': [1, 2, 3, 4, 5] });
   });
 
   it('merges two groups of one window that came back with the same name', async () => {

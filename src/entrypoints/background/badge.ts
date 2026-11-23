@@ -60,22 +60,13 @@ const FLASH_COLOUR = '#1a73e8';
 /** White on both of the above, which is the contrast §4.7 asks of anything readable. */
 const TEXT_COLOUR = '#ffffff';
 
-/** `local:activity` → `activity`: the key the browser reports a change under. */
-function bareKey(key: string): string {
-  return key.slice(key.indexOf(':') + 1);
-}
-
-/**
- * The stored values the count depends on, under the names `onChanged` reports. The same
- * list the panel watches, plus nothing: the badge reads exactly what a score reads.
- */
 const WATCHED: readonly string[] = [
   activityItem,
   keepsItem,
   settingsItem,
   protectedDomainsItem,
   duplicateWhitelistItem,
-].map((item) => bareKey(item.key));
+].map((item) => item.key.slice(6));
 
 export interface BadgeOptions {
   /** The clock, injected so the tests can be exact. */

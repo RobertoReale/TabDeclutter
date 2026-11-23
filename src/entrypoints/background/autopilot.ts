@@ -60,14 +60,15 @@ const STARTUP_ALARM_DELAY_MS = Math.max(STARTUP_GRACE_MS + 500, 30_000);
 const BG_AI_WARMUP_TIMEOUT_MS = 300_000;
 const BG_AI_TIMEOUT_MS = 90_000;
 const BG_AI_COOLDOWN_MS = 2 * MINUTE;
-const BG_AI_MAX_BATCH_TABS = 40;
+const BG_AI_MAX_BATCH_TABS = 60;
 const BG_AI_MAX_GROUPS = 8;
 const BG_AI_MAX_NAME_LENGTH = 24;
 const SW_KEEPALIVE_MS = 20_000;
 
+const TEXT_EN = [{ type: 'text', languages: ['en'] }] as const;
 const EXPECTED_TEXT_OPTIONS = {
-  expectedInputs: [{ type: 'text', languages: ['en'] }],
-  expectedOutputs: [{ type: 'text', languages: ['en'] }],
+  expectedInputs: TEXT_EN,
+  expectedOutputs: TEXT_EN,
 } as const;
 
 const GREEDY_SAMPLING = { temperature: 0, topK: 1 } as const;
@@ -103,16 +104,12 @@ function backgroundLanguageModel(): BackgroundLanguageModelApi | undefined {
     : undefined;
 }
 
-function bareKey(key: string): string {
-  return key.slice(key.indexOf(':') + 1);
-}
-
 const WATCHED: readonly string[] = [
   settingsItem,
   keepsItem,
   protectedDomainsItem,
   duplicateWhitelistItem,
-].map((item) => bareKey(item.key));
+].map((item) => item.key.slice(6));
 
 export interface AutopilotOptions {
   readonly now?: () => number;
@@ -202,7 +199,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
 
       const bgController = new AbortController();
       const unsubPreempt = onBackgroundAiPreempt(() => {
-        bgController.abort(new DOMException('preempted by side panel', 'AbortError'));
+        bgController.abort(new DOMException('preempted', 'AbortError'));
       });
 
       try {
@@ -260,10 +257,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     const at = now();
     const guardState = await readGuardState();
     // Respect startup grace and pause so session restore is never touched automatically.
-    if (
-      (guardState.graceUntil !== undefined && guardState.graceUntil > at) ||
-      (guardState.pausedUntil !== undefined && guardState.pausedUntil > at)
-    ) {
+    if ((guardState.graceUntil ?? 0) > at || (guardState.pausedUntil ?? 0) > at) {
       return { closedTabs: 0, closedWindows: 0, groupedWindows: 0 };
     }
 
@@ -298,24 +292,24 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
 
       const byId = new Map(tabs.map((tab) => [tab.id, tab]));
       const staleMs = Math.max(1, settings.staleDays) * DAY;
-      const closeCandidates = scoring.tabs.filter((scored) => {
-        if (forgottenIds.has(scored.windowId)) return false;
+      const closeCandidates: ScoredTab[] = [];
+      const toClose: TabInfo[] = [];
+      for (const scored of scoring.tabs) {
+        if (forgottenIds.has(scored.windowId)) continue;
         const tab = byId.get(scored.tabId);
-        if (tab === undefined) return false;
-        return isSafeToAutoClose(tab, scored, settings, staleMs);
-      });
-      const toClose = closeCandidates
-        .map((scored) => byId.get(scored.tabId))
-        .filter((tab) => tab !== undefined);
+        if (tab !== undefined && isSafeToAutoClose(tab, scored, settings, staleMs)) {
+          closeCandidates.push(scored);
+          toClose.push(tab);
+        }
+      }
 
       if (toClose.length > 0) {
         const closingIds = new Set(toClose.map((tab) => tab.id));
-        let keptToActivate: { readonly id: number; readonly windowId: number } | undefined;
+        let keptToActivate: TabInfo | undefined;
         for (const scored of closeCandidates) {
           for (const reason of scored.reasons) {
             if (reason.code === 'duplicate' && !closingIds.has(reason.keptTabId)) {
-              const kept = byId.get(reason.keptTabId);
-              if (kept !== undefined) keptToActivate = kept;
+              keptToActivate = byId.get(reason.keptTabId) ?? keptToActivate;
             }
           }
         }
@@ -391,11 +385,13 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   // Use a durable alarm rather than `setTimeout` so an MV3 service worker suspended during
   // the 15 s startup grace window still runs its post-restore sweep on time (invariant 6).
   browser.runtime.onStartup.addListener(() => {
-    void scheduleStartupAlarm(now() + STARTUP_ALARM_DELAY_MS).catch(() => {
-      setTimeout(() => {
-        void run().catch(failed);
-      }, STARTUP_GRACE_MS + 500);
-    });
+    void api()
+      .alarms.create(STARTUP_ALARM_NAME, { when: now() + STARTUP_ALARM_DELAY_MS })
+      ?.catch(() => {
+        setTimeout(() => {
+          void run().catch(failed);
+        }, STARTUP_GRACE_MS + 500);
+      });
   });
 
   browser.runtime.onInstalled.addListener(() => {
@@ -436,68 +432,54 @@ async function promptBackgroundProposal(
   const availability = await modelApi.availability(EXPECTED_TEXT_OPTIONS);
   if (availability !== 'available' || preemptSignal.aborted) return null;
 
-  const realByShort = new Map<number, number>();
-  const compact: TabInfo[] = movable.map((tab, index) => {
-    const shortId = index + 1;
-    realByShort.set(shortId, tab.id);
-    return { ...tab, id: shortId, windowId: 1, index, groupId: NO_GROUP_ID };
-  });
+  const compact: TabInfo[] = movable.map((tab, index) => ({
+    ...tab,
+    id: index + 1,
+    windowId: 1,
+    index,
+    groupId: NO_GROUP_ID,
+  }));
 
-  const session = await withTimeout(
-    BG_AI_WARMUP_TIMEOUT_MS,
-    'background AI warmup timed out',
-    preemptSignal,
-    async (s) => {
-      try {
-        return await modelApi.create({ ...EXPECTED_TEXT_OPTIONS, ...GREEDY_SAMPLING, signal: s });
-      } catch (error: unknown) {
-        const name = errorName(error);
-        if (
-          s.aborted ||
-          (name !== 'NotSupportedError' && name !== 'TypeError' && name !== 'RangeError')
-        ) {
-          throw error;
-        }
-        return modelApi.create({ ...EXPECTED_TEXT_OPTIONS, signal: s });
+  const session = await withTimeout(BG_AI_WARMUP_TIMEOUT_MS, preemptSignal, async (s) => {
+    const base = { ...EXPECTED_TEXT_OPTIONS, signal: s };
+    try {
+      return await modelApi.create({ ...base, ...GREEDY_SAMPLING });
+    } catch (error: unknown) {
+      if (s.aborted || !/^(?:NotSupported|Type|Range)Error$/.test(errorName(error))) {
+        throw error;
       }
-    },
-  );
+      return modelApi.create(base);
+    }
+  });
 
   const destroySession = onceDestroy(session);
   preemptSignal.addEventListener('abort', destroySession, { once: true });
 
   try {
-    const batches: TabInfo[][] = [];
-    for (let i = 0; i < compact.length; i += BG_AI_MAX_BATCH_TABS) {
-      batches.push(compact.slice(i, i + BG_AI_MAX_BATCH_TABS));
-    }
-
     const groups: ProposedGroup[] = [];
     const claimed = new Set<number>();
     let answered = 0;
 
-    for (const batch of batches) {
+    for (let i = 0; i < compact.length; i += BG_AI_MAX_BATCH_TABS) {
       if (preemptSignal.aborted) return null;
+      const batch = compact.slice(i, i + BG_AI_MAX_BATCH_TABS);
       const promptInput = `${SYSTEM_PROMPT}\n\n${buildPrompt(batch)}`;
-      const raw = await withTimeout(
-        BG_AI_TIMEOUT_MS,
-        'background AI prompt timed out',
-        preemptSignal,
-        async (s) => {
-          if (batches.length > 1 && typeof session.clone === 'function') {
-            const clone = await session.clone({ signal: s });
-            const destroyClone = onceDestroy(clone);
-            s.addEventListener('abort', destroyClone, { once: true });
-            try {
-              return await runBgPrompt(clone, promptInput, s, destroyClone);
-            } finally {
-              s.removeEventListener('abort', destroyClone);
-              destroyClone();
-            }
+      const raw = await withTimeout(BG_AI_TIMEOUT_MS, preemptSignal, async (s) => {
+        const cloned =
+          compact.length > BG_AI_MAX_BATCH_TABS && typeof session.clone === 'function'
+            ? await session.clone({ signal: s })
+            : undefined;
+        const stop = cloned === undefined ? destroySession : onceDestroy(cloned);
+        if (cloned !== undefined) s.addEventListener('abort', stop, { once: true });
+        try {
+          return await runBgPrompt(cloned ?? session, promptInput, s, stop);
+        } finally {
+          if (cloned !== undefined) {
+            s.removeEventListener('abort', stop);
+            stop();
           }
-          return runBgPrompt(session, promptInput, s, destroySession);
-        },
-      );
+        }
+      });
 
       const verdict = validateAiAnswer(raw, batch, {
         maxNameLength: BG_AI_MAX_NAME_LENGTH,
@@ -509,7 +491,7 @@ async function promptBackgroundProposal(
       for (const draft of verdict.drafts) {
         if (groups.length >= BG_AI_MAX_GROUPS) break;
         const tabIds = draft.tabIds
-          .map((id) => realByShort.get(id))
+          .map((id) => movable[id - 1]?.id)
           .filter((id): id is number => id !== undefined && !claimed.has(id));
         if (tabIds.length < 2) continue;
         for (const id of tabIds) claimed.add(id);
@@ -570,7 +552,6 @@ async function runBgPrompt(
 
 async function withTimeout<T>(
   timeoutMs: number,
-  message: string,
   outerSignal: AbortSignal,
   action: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
@@ -578,13 +559,10 @@ async function withTimeout<T>(
   const onOuterAbort = (): void => {
     controller.abort(outerSignal.reason);
   };
-  if (outerSignal.aborted) {
-    controller.abort(outerSignal.reason);
-  } else {
-    outerSignal.addEventListener('abort', onOuterAbort, { once: true });
-  }
+  if (outerSignal.aborted) onOuterAbort();
+  else outerSignal.addEventListener('abort', onOuterAbort, { once: true });
   const timer = setTimeout(() => {
-    controller.abort(new DOMException(message, 'TimeoutError'));
+    controller.abort(new DOMException('timeout', 'TimeoutError'));
   }, timeoutMs);
   (timer as unknown as { unref?: () => void }).unref?.();
   try {
@@ -599,10 +577,6 @@ async function ensureAlarm(): Promise<void> {
   const alarms = api().alarms;
   if ((await alarms.get(ALARM_NAME)) !== undefined) return;
   await alarms.create(ALARM_NAME, { periodInMinutes: AUTOPILOT_PERIOD_MINUTES });
-}
-
-async function scheduleStartupAlarm(when: number): Promise<void> {
-  await api().alarms.create(STARTUP_ALARM_NAME, { when });
 }
 
 async function focusedWindow(): Promise<number | undefined> {
@@ -637,33 +611,25 @@ export function isSafeToAutoClose(
   settings: Settings,
   staleMs: number,
 ): boolean {
-  if (scored.bucket === 'keep') return false;
-  if (scored.bucket === 'review' && scored.idleMs < staleMs) return false;
-  if (tab.active || tab.pinned || tab.audible || tab.hidden || tab.incognito) return false;
-  const rawUrl = unwrapSuspendedUrl(tab.url).trim();
-  if (rawUrl === '') return false;
-
-  const lower = rawUrl.toLowerCase();
-  // Never auto-close local files or extension document viewers (Office / PDF viewers).
   if (
-    lower.startsWith('file:') ||
-    lower.startsWith('chrome-extension:') ||
-    lower.startsWith('moz-extension:')
+    scored.bucket === 'keep' ||
+    (scored.bucket === 'review' && scored.idleMs < staleMs) ||
+    tab.active ||
+    tab.pinned ||
+    tab.audible ||
+    tab.hidden ||
+    tab.incognito ||
+    scored.pageType === 'auth'
   ) {
     return false;
   }
-
-  // Never auto-close OAuth / sign-in pages in the background while a login might be in progress.
-  if (scored.pageType === 'auth') return false;
+  const rawUrl = unwrapSuspendedUrl(tab.url).trim();
+  if (rawUrl === '' || /^(?:file|chrome-extension|moz-extension):/i.test(rawUrl)) return false;
 
   // Never auto-close local development servers (localhost / 127.0.0.1 / [::1]).
   try {
-    const host = new URL(rawUrl).hostname.toLowerCase();
     if (
-      host === 'localhost' ||
-      host.endsWith('.localhost') ||
-      host === '127.0.0.1' ||
-      host === '[::1]'
+      /^(?:(?:.+\.)?localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(rawUrl).hostname.toLowerCase())
     ) {
       return false;
     }
@@ -671,30 +637,22 @@ export function isSafeToAutoClose(
     // Non-standard URL (e.g. about:blank), handled below.
   }
 
-  // Abandoned empty tabs (`about:blank`, `chrome://newtab`) idle for over 1 hour are safe to close.
-  if (scored.primaryReason === 'blank') {
-    return scored.idleMs > HOUR;
-  }
-
-  // Exact duplicates are only auto-closed when duplicate protection is set to automatic mode.
-  if (scored.primaryReason === 'duplicate') {
-    return settings.guard.mode === 'auto';
-  }
-
-  // Every other page (articles, videos, searches, etc.) is only auto-closed in the background
-  // once it has genuinely been untouched for at least the user's configured `staleDays`.
+  if (scored.primaryReason === 'blank') return scored.idleMs > HOUR;
+  if (scored.primaryReason === 'duplicate') return settings.guard.mode === 'auto';
   return scored.idleMs >= staleMs;
 }
 
 function onlyAiToggleChanged(
   change: { oldValue?: unknown; newValue?: unknown } | undefined,
 ): boolean {
-  const oldVal = change?.oldValue as Record<string, unknown> | undefined;
-  const newVal = change?.newValue as Record<string, unknown> | undefined;
-  if (!oldVal || !newVal || oldVal.useOnDeviceAi === newVal.useOnDeviceAi) return false;
+  const a = change?.oldValue as Record<string, unknown> | undefined;
+  const b = change?.newValue as Record<string, unknown> | undefined;
   return (
-    JSON.stringify({ ...oldVal, useOnDeviceAi: false }) ===
-    JSON.stringify({ ...newVal, useOnDeviceAi: false })
+    !!a &&
+    !!b &&
+    a.useOnDeviceAi !== b.useOnDeviceAi &&
+    JSON.stringify({ ...a, useOnDeviceAi: false }) ===
+      JSON.stringify({ ...b, useOnDeviceAi: false })
   );
 }
 

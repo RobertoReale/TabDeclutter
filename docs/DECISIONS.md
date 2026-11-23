@@ -3532,3 +3532,23 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
   wakes `OnDeviceModelService` for a multi-minute cold shader compile, while `windows.ts` and
   `windowPlan` keep placing the few new tabs incrementally in < 2 ms and stale plans from prior
   browser sessions are rejected deterministically.
+
+## Post-release — Guard AI grouping against internal pages, `[1,2]` ID priming, range outliers, and mid-word truncation
+- **Context:** real-world Chrome diagnostics (`chrome.storage.local.get('aiProposal')`) showed
+  Gemini Nano outputting `"tabIds": [1, 2, 3, ..., 31]` under `"Corrado Augias Discussio"`,
+  sucking `1: chrome://extensions/` and `2: se è un isomorfismo…` (Google Search) into a 29-tab
+  Corrado Augias window, truncating group titles mid-word at 24 characters, and splitting 48 tabs
+  across two 40-tab batches that separated related math/algebra tabs across prompts.
+- **Decision:** excluded browser-internal schemes (`INTERNAL_SCHEMES`, after `unwrapSuspendedUrl`
+  so suspended web pages remain movable) from `isMovableTab` and prevented `splitIntoThematicWindows`
+  from reusing windows that contain only non-movable tabs; replaced the literal `[1,2]` example in
+  `buildPrompt` with `[14,27]` and tightened `SYSTEM_PROMPT`; expanded `OTHER_NAMES` to catch
+  generic catch-alls (`Miscellaneous`, `General`, `Various`, etc.); trimmed long titles cleanly at
+  word boundaries; added entity-anchored outlier pruning (`pruneEntityOutliers`) in
+  `validateAiAnswer` (active only on ≥ 5-tab groups with ≥ 60% literal title-token anchors, so
+  small or translated semantic groups stay untouched); and raised window-organization AI batching
+  to 60 tabs (with automatic context-quota splitting preserved) so 41–60 tab sessions fit in one
+  coherent prompt.
+- **Why:** keeps `chrome://extensions/` out of topic windows, prevents 3B greedy range
+  hallucinations from stranding unrelated tabs inside dominant clusters, avoids mid-word title
+  cuts, and lets the model see all related tabs across a typical 40–60 tab session in one pass.

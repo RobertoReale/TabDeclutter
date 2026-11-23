@@ -19,6 +19,7 @@
 import { isAuthUrl, isBlankUrl } from '../core/classify';
 import { clusterTabIds, siteKey, type ClusterMode, type GroupProposal } from '../core/cluster';
 import { tabUrl } from '../core/duplicates';
+import { INTERNAL_SCHEMES } from '../core/rules';
 import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '../core/types';
 import { asTabInfos, attempt, NO_WINDOW, type BrowserTab } from './tabs';
 
@@ -27,13 +28,15 @@ import { asTabInfos, attempt, NO_WINDOW, type BrowserTab } from './tabs';
  * - never pinned tabs
  * - never tabs that are still loading (`url === ''`)
  * - never blank / New Tab pages (`chrome://newtab`, `about:blank`) while the user may be typing in the address bar
+ * - never browser-internal or extension pages (`chrome://extensions`, `chrome://settings`, non-suspender `chrome-extension://`)
  * - never OAuth / sign-in pages (`isAuthUrl`) which often open in dedicated popup windows
  */
 export function isMovableTab(tab: TabInfo): boolean {
   if (tab.pinned) return false;
   const url = tabUrl(tab);
   if (url === '' || isBlankUrl(url) || isAuthUrl(url)) return false;
-  return true;
+  const lower = url.toLowerCase();
+  return !INTERNAL_SCHEMES.some((prefix) => lower.startsWith(prefix));
 }
 
 /** Minimum new/navigated tabs before an automatic AI refresh wakes the model when ≥ 80% already match. */
@@ -42,21 +45,10 @@ const AUTO_AI_MAX_DRIFT_RATIO = 0.2;
 
 function tabSignatureEntry(tab: TabInfo): string {
   const title = tab.title
-    .replace(/^\(\d+\+?\)\s+/, '')
-    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/^\(\d+\+?\)\s+|[\r\n\t]+/g, ' ')
     .trim()
     .slice(0, 60);
   return `${tab.id}\t${siteKey(tab.url)}\t${title}`;
-}
-
-function parseSignatureMap(savedSignature: string): Map<number, string> {
-  const entries = new Map<number, string>();
-  for (const line of savedSignature.split('\n')) {
-    const sep = line.indexOf('\t');
-    const id = sep > 0 ? Number(line.slice(0, sep)) : NaN;
-    if (Number.isInteger(id)) entries.set(id, line);
-  }
-  return entries;
 }
 
 /** Content-aware per-tab signature covering tab IDs, site keys, and normalized titles. */
@@ -79,12 +71,12 @@ export function filterProposalBySignature(
   savedSignature = '',
 ): GroupProposal | null {
   if (proposal === null || savedSignature === '') return proposal;
-  const savedEntries = parseSignatureMap(savedSignature);
-  if (savedEntries.size === 0) return null;
+  const savedLines = new Set(savedSignature.split('\n').filter((line) => line.includes('\t')));
+  if (savedLines.size === 0) return null;
 
   const validIds = new Set<number>();
   for (const tab of movable) {
-    if (savedEntries.get(tab.id) === tabSignatureEntry(tab)) validIds.add(tab.id);
+    if (savedLines.has(tabSignatureEntry(tab))) validIds.add(tab.id);
   }
   if (validIds.size === 0) return null;
 
@@ -104,28 +96,22 @@ function proposalDriftCount(
   movable: readonly TabInfo[],
   savedSignature: string,
 ): number {
-  if (proposal === null || movable.length < 2) return -1;
-  const verified = filterProposalBySignature(proposal, movable, savedSignature);
+  const verified =
+    movable.length < 2 ? null : filterProposalBySignature(proposal, movable, savedSignature);
   if (verified === null) return -1;
 
-  const movableIds = new Set(movable.map((tab) => tab.id));
+  const ids = new Set(movable.map((tab) => tab.id));
   const known = new Set<number>(verified.ungrouped);
-  let hasLiveGroup = false;
+  let live = false;
   for (const group of verified.groups) {
-    let liveCount = 0;
+    let n = 0;
     for (const id of group.tabIds) {
       known.add(id);
-      if (movableIds.has(id)) liveCount += 1;
+      if (ids.has(id)) n += 1;
     }
-    if (liveCount >= 2) hasLiveGroup = true;
+    if (n >= 2) live = true;
   }
-  if (!hasLiveGroup) return -1;
-
-  let drifted = 0;
-  for (const tab of movable) {
-    if (!known.has(tab.id)) drifted += 1;
-  }
-  return drifted;
+  return live ? movable.filter((tab) => !known.has(tab.id)).length : -1;
 }
 
 /** Whether `proposal` exactly covers every live movable tab with at least one valid group. */
@@ -239,18 +225,20 @@ export async function organizeWindows(
 ): Promise<OrganizeWindowsResult> {
   const api = options.api ?? defaultApi();
   let ungroupedTabs = 0;
+  const query = async (): Promise<readonly TabInfo[] | null> => {
+    const q = await attempt(() => api.tabs.query({}));
+    return q.ok ? asTabInfos(q.value) : null;
+  };
 
-  let queried = await attempt(() => api.tabs.query({}));
-  if (!queried.ok) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
-  let rawTabs = asTabInfos(queried.value);
+  let rawTabs = await query();
+  if (rawTabs === null) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
 
   if (!options.useTabGroups && typeof api.tabs.ungroup === 'function') {
     const groupedIds = rawTabs.filter((tab) => tab.groupId !== NO_GROUP_ID).map((tab) => tab.id);
     if (groupedIds.length > 0) {
       ungroupedTabs = await ungroupIds(api, groupedIds);
-      queried = await attempt(() => api.tabs.query({}));
-      if (!queried.ok) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
-      rawTabs = asTabInfos(queried.value);
+      rawTabs = await query();
+      if (rawTabs === null) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
     }
   }
 
@@ -270,35 +258,30 @@ export async function organizeWindows(
     ...(options.focusedWindowId === undefined ? {} : { focusedWindowId: options.focusedWindowId }),
   };
 
-  if (options.windowMode === 'merge-windows') {
-    const moved = await mergeAndSortIntoOneWindow(
-      allTabs,
-      options.clusterMode,
-      options.focusedWindowId,
-      options.proposal,
-      options.proposalSignature,
-      api,
-    );
-    return {
-      movedTabs: moved,
-      ungroupedTabs,
-      windowsCount: 1,
-      ...(moved > 0 ? { undo: snapshot } : {}),
-    };
-  }
-
-  const result = await splitIntoThematicWindows(
-    allTabs,
-    options.clusterMode,
-    options.focusedWindowId,
-    options.proposal,
-    options.proposalSignature,
-    api,
-  );
+  const result =
+    options.windowMode === 'merge-windows'
+      ? {
+          movedTabs: await mergeAndSortIntoOneWindow(
+            allTabs,
+            options.clusterMode,
+            options.focusedWindowId,
+            options.proposal,
+            options.proposalSignature,
+            api,
+          ),
+          windowsCount: 1,
+        }
+      : await splitIntoThematicWindows(
+          allTabs,
+          options.clusterMode,
+          options.focusedWindowId,
+          options.proposal,
+          options.proposalSignature,
+          api,
+        );
   return {
-    movedTabs: result.movedTabs,
+    ...result,
     ungroupedTabs,
-    windowsCount: result.windowsCount,
     ...(result.movedTabs > 0 ? { undo: snapshot } : {}),
   };
 }
@@ -387,6 +370,18 @@ export async function undoOrganizeWindows(
   return restored;
 }
 
+function isWindowOrdered(
+  allTabs: readonly TabInfo[],
+  windowId: number,
+  desired: readonly number[],
+): boolean {
+  const current = allTabs
+    .filter((tab) => tab.windowId === windowId && isMovableTab(tab))
+    .sort((a, b) => a.index - b.index)
+    .map((tab) => tab.id);
+  return current.length === desired.length && current.every((id, i) => id === desired[i]);
+}
+
 /**
  * Mode 1: Consolidates movable tabs from secondary windows into the primary window and
  * sorts them by site or topic so tabs of the same site/topic sit next to each other.
@@ -407,12 +402,10 @@ async function mergeAndSortIntoOneWindow(
   // Always merge into the primary window (the one with the most tabs, breaking ties in
   // favour of `focusedWindowId`), so opening a small 1-tab window never pulls 20 tabs out
   // of the main window into the small one.
-  const targetWindowId = [...windowCounts.entries()].sort((a, b) => {
-    if (b[1] !== a[1]) return b[1] - a[1];
-    if (a[0] === focusedWindowId) return -1;
-    if (b[0] === focusedWindowId) return 1;
-    return a[0] - b[0];
-  })[0]?.[0];
+  const targetWindowId = [...windowCounts.entries()].sort(
+    (a, b) =>
+      b[1] - a[1] || (a[0] === focusedWindowId ? -1 : b[0] === focusedWindowId ? 1 : a[0] - b[0]),
+  )[0]?.[0];
   if (targetWindowId === undefined) return 0;
 
   const movable = allTabs.filter(isMovableTab);
@@ -421,28 +414,20 @@ async function mergeAndSortIntoOneWindow(
     (tab) => tab.windowId === targetWindowId && tab.pinned,
   ).length;
 
-  const sortedIds = orderedTabIds(
+  const byId = new Map(movable.map((tab) => [tab.id, tab]));
+  const proposal = resolveWindowProposal(
     movable,
     clusterMode,
     targetWindowId,
     precomputed,
     proposalSignature,
   );
+  const sortedIds = [...proposal.groups.flat(), ...sortBySite(proposal.ungrouped, byId)];
 
-  // Check if everything is already in targetWindowId in this exact order.
-  const currentInTarget = allTabs
-    .filter((tab) => tab.windowId === targetWindowId && isMovableTab(tab))
-    .sort((a, b) => a.index - b.index)
-    .map((tab) => tab.id);
-
-  if (
-    currentInTarget.length === sortedIds.length &&
-    currentInTarget.every((id, i) => id === sortedIds[i])
-  ) {
+  if (isWindowOrdered(allTabs, targetWindowId, sortedIds)) {
     return 0;
   }
 
-  const byId = new Map(movable.map((tab) => [tab.id, tab]));
   const moved = await moveSequence(api, sortedIds, targetWindowId, pinnedInTarget, byId);
 
   // If the user was looking at an active tab in a secondary window that just got merged into
@@ -551,20 +536,19 @@ async function splitIntoThematicWindows(
   }
   if (buckets.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
-  const existingWindows = [...new Set(allTabs.map((tab) => tab.windowId))];
+  // Only reuse existing windows that already hold movable tabs, so browser-internal or OAuth
+  // popup windows (`chrome://extensions`, `chrome://newtab`, sign-in windows) are never hijacked.
+  const existingWindows = [...new Set(movable.map((tab) => tab.windowId))];
   const usedWindows = new Set<number>();
 
   // Reserve `focusedWindowId` first for whichever bucket holds the active tab of the focused window,
   // so the topic/site cluster the user is currently working on stays in their active window.
-  const focusedBucketIndex =
-    focusedWindowId === undefined
-      ? -1
-      : buckets.findIndex((tabIds) =>
-          tabIds.some((id) => {
-            const tab = byId.get(id);
-            return tab !== undefined && tab.active && tab.windowId === focusedWindowId;
-          }),
-        );
+  const focusedBucketIndex = buckets.findIndex((tabIds) =>
+    tabIds.some((id) => {
+      const tab = byId.get(id);
+      return tab?.active === true && tab.windowId === focusedWindowId;
+    }),
+  );
   if (focusedBucketIndex >= 0 && focusedWindowId !== undefined) {
     usedWindows.add(focusedWindowId);
   }
@@ -608,16 +592,10 @@ async function splitIntoThematicWindows(
     // into a different unfocused window, so we never yank a tab out from under the user.
     const safeTabIds = slot.tabIds.filter((tabId) => {
       const tab = byId.get(tabId);
-      if (tab === undefined) return false;
-      if (
-        tab.active &&
-        focusedWindowId !== undefined &&
-        tab.windowId === focusedWindowId &&
-        slot.windowId !== focusedWindowId
-      ) {
-        return false;
-      }
-      return true;
+      return (
+        tab !== undefined &&
+        !(tab.active && tab.windowId === focusedWindowId && slot.windowId !== focusedWindowId)
+      );
     });
     const [firstId, ...restIds] = safeTabIds;
     if (firstId === undefined) continue;
@@ -633,15 +611,7 @@ async function splitIntoThematicWindows(
 
     const existingWindowId = targetWindowId;
 
-    // Check if the bucket's tabs are already in `existingWindowId` in order.
-    const currentInWindow = allTabs
-      .filter((tab) => tab.windowId === existingWindowId && isMovableTab(tab))
-      .sort((a, b) => a.index - b.index)
-      .map((tab) => tab.id);
-    if (
-      currentInWindow.length === safeTabIds.length &&
-      currentInWindow.every((id, i) => id === safeTabIds[i])
-    ) {
+    if (isWindowOrdered(allTabs, existingWindowId, safeTabIds)) {
       continue;
     }
 
@@ -739,12 +709,11 @@ function resolveWindowProposal(
       for (const id of live) placed.add(id);
       groups.push(live);
     }
-    const knownMovable = movable.filter((tab) => knownIds.has(tab.id)).length;
+    const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
     // Reuse a cached AI proposal only while it still has real (>=2-tab) groups and covers at
     // least half of the current movable tabs; otherwise re-cluster everything fresh so new
     // browsing sessions never pile into the ungrouped catch-all window.
-    if (groups.length > 0 && knownMovable * 2 >= movable.length) {
-      const newTabs = movable.filter((tab) => !knownIds.has(tab.id));
+    if (groups.length > 0 && (movable.length - newTabs.length) * 2 >= movable.length) {
       if (newTabs.length >= 1) {
         // 1. First try matching each newly opened tab against existing AI groups using fast
         //    full-window local clustering, so opening even a single new tab on an active topic
@@ -787,26 +756,4 @@ function resolveWindowProposal(
   }
 
   return clusterLocal(movable);
-}
-
-/**
- * Computes a clean, deterministic ordering of `tabs` by site or by topic:
- * clusters with the most tabs come first, followed by remaining tabs sorted by domain.
- */
-function orderedTabIds(
-  tabs: readonly TabInfo[],
-  clusterMode: ClusterMode,
-  virtualWindowId: number,
-  precomputed: GroupProposal | undefined,
-  proposalSignature?: string,
-): readonly number[] {
-  const proposal = resolveWindowProposal(
-    tabs,
-    clusterMode,
-    virtualWindowId,
-    precomputed,
-    proposalSignature,
-  );
-  const byId = new Map(tabs.map((tab) => [tab.id, tab]));
-  return [...proposal.groups.flat(), ...sortBySite(proposal.ungrouped, byId)];
 }
