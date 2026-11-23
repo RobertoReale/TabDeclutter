@@ -404,6 +404,144 @@ describe('the answer is not trusted', () => {
       at(0),
     );
     expect(membership(genericTitle.proposal)).toEqual({ 'Study Videos': [1, 2, 3, 4, 5] });
+
+    const shortTitle = await groupByAi(
+      translatedTabs,
+      fakeLlm(() => answerWith({ name: 'AI', tabIds: [1, 2, 3, 4, 5] })),
+      at(0),
+    );
+    expect(membership(shortTitle.proposal)).toEqual({ AI: [1, 2, 3, 4, 5] });
+  });
+
+  it('prunes massive entity range dumps even below 50% anchors, rejects single-word cross-pollination, and locally recovers ejected topics', async () => {
+    const dumpTabs: TabInfo[] = [
+      // 7 real Corrado Augias anchors (including "live", "storia", "segreti", "lectio magistralis")
+      tab(
+        1,
+        'https://www.youtube.com/watch?v=a1',
+        'Senza Filtri Live, Corrado Augias - Siamo davvero scimmie - YouTube',
+      ),
+      tab(
+        2,
+        'https://www.youtube.com/watch?v=a2',
+        'TIRARE LE SOMME DELLA STORIA - Corrado Augias con Zanchini - YouTube',
+      ),
+      tab(
+        3,
+        'https://www.youtube.com/watch?v=a3',
+        'Corraudo Augias: I segreti del Vaticano - YouTube',
+      ),
+      tab(4, 'https://www.youtube.com/watch?v=a4', 'Corrado Augias - I promessi sposi - YouTube'),
+      tab(
+        5,
+        'https://www.youtube.com/watch?v=a5',
+        'Addio a Corrado Augias, ultimo saluto - YouTube',
+      ),
+      tab(
+        6,
+        'https://www.youtube.com/watch?v=a6',
+        'Corrado Augias: Breviario per un confuso presente - YouTube',
+      ),
+      tab(
+        7,
+        'https://www.youtube.com/watch?v=a7',
+        'Lectio magistralis. Il grande romanzo dei Vangeli - Corrado Augias - YouTube',
+      ),
+      // 1 legitimate Augias tab whose title omits "Augias" but shares 2 content words with anchor #7
+      tab(
+        8,
+        'https://www.youtube.com/watch?v=a8',
+        'Lectio magistralis sulla laicità Stato e Chiesa - YouTube',
+      ),
+      // 10 completely unrelated tabs dumped into Corrado Augias (7/18 = 38.9% anchors!)
+      tab(9, 'https://it.wikipedia.org/wiki/Trilussa', 'Trilussa - Wikipedia'),
+      tab(10, 'https://it.wikipedia.org/wiki/Luigi_Magni', 'Luigi Magni - Wikipedia'),
+      tab(11, 'https://www.youtube.com/watch?v=m1', 'Gigi Magni Racconta Roma - YouTube'),
+      tab(
+        12,
+        'https://www.youtube.com/watch?v=h1',
+        'You can play this Hendrix riff FOREVER - YouTube',
+      ),
+      tab(
+        13,
+        'https://gemini.google.com/app/1',
+        'Prodotto scalare standard o generico? - Google Gemini',
+      ),
+      tab(14, 'https://gemini.google.com/app/2', 'Spiegazione del secondo esempio - Google Gemini'),
+      tab(
+        15,
+        'https://www.youtube.com/watch?v=p1',
+        'Gigi Proietti parla un napoletano inventato - YouTube',
+      ),
+      tab(
+        16,
+        'https://www.youtube.com/watch?v=p2',
+        'Mattarella scoppia a ridere con Gigi Proietti - YouTube',
+      ),
+      // Cross-pollinated with anchor #1 ("live") + anchor #2 ("storia") and stopword "degli"
+      tab(
+        17,
+        'https://www.youtube.com/watch?v=x1',
+        'Live #30 - Anti-storia degli Italiani - YouTube',
+      ),
+      tab(18, 'https://www.youtube.com/watch?v=x2', 'I SEGRETI DEGLI STATI UNITI - YouTube'),
+    ];
+    const llm = fakeLlm(() =>
+      answerWith({
+        name: 'Corrado Augias',
+        tabIds: dumpTabs.map((t) => t.id),
+      }),
+    );
+    const result = await groupByAi(dumpTabs, llm, at(0));
+    expect(result.source).toBe('ai');
+    const byName = membership(result.proposal);
+    // Corrado Augias keeps ONLY the 7 anchors + tab 8 (shares "lectio" + "magistralis" with #7).
+    expect(byName['Corrado Augias']).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    // Ejected unrelated pairs are automatically recovered by local TF-IDF fallbackDrafts.
+    expect(Object.values(byName)).toContainEqual([10, 11]);
+    expect(Object.values(byName)).toContainEqual([15, 16]);
+    // Cross-pollinated unrelated tabs (#17, #18) and Hendrix (#12) never stay in Corrado Augias.
+    expect(byName['Corrado Augias']).not.toContain(12);
+    expect(byName['Corrado Augias']).not.toContain(17);
+    expect(byName['Corrado Augias']).not.toContain(18);
+  });
+
+  it('merges equivalent AI and local fallback titles such as "Corrado Augias" and "Augias · Corrado"', async () => {
+    const augiasTabs: TabInfo[] = [
+      tab(1, 'https://www.youtube.com/watch?v=1', 'Corrado Augias - I promessi sposi - YouTube'),
+      tab(
+        2,
+        'https://www.youtube.com/watch?v=2',
+        'Corrado Augias - I segreti del Vaticano - YouTube',
+      ),
+      tab(
+        3,
+        'https://www.youtube.com/watch?v=3',
+        'Corrado Augias - La vita e il romanzo - YouTube',
+      ),
+      tab(
+        4,
+        'https://www.youtube.com/watch?v=4',
+        'Corrado Augias - Breviario per un confuso presente - YouTube',
+      ),
+      tab(
+        5,
+        'https://www.youtube.com/watch?v=5',
+        'Corrado Augias - Lectio magistralis sulla laicità - YouTube',
+      ),
+      tab(
+        6,
+        'https://www.youtube.com/watch?v=6',
+        'Corrado Augias - Addio ai telespettatori - YouTube',
+      ),
+    ];
+    // Truncated JSON leaves tabs 4..6 to local fallback, which titles them "Augias · Corrado".
+    const llm = fakeLlm(() => '```json\n{"groups":[{"name":"Corrado Augias","tabIds":[1,2,3');
+    const result = await groupByAi(augiasTabs, llm, at(0));
+    expect(result.source).toBe('ai');
+    expect(membership(result.proposal)).toEqual({
+      'Corrado Augias': [1, 2, 3, 4, 5, 6],
+    });
   });
 
   it('merges two groups of one window that came back with the same name', async () => {

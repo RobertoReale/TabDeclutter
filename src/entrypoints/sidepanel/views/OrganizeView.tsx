@@ -358,7 +358,15 @@ export function OrganizeView({ language }: { language: string }) {
           language={language}
           useTabGroups={currentSettings.useTabGroups}
           isAuto={isAuto}
+          refreshEveryTab={currentSettings.aiRefreshEveryTab}
           onToggleAi={handleToggleAi}
+          onToggleRefreshEveryTab={(checked) => {
+            if (checked) {
+              clearAiAutoCooldown();
+              lastAutoWindowAiSignature.value = null;
+            }
+            setSetting('aiRefreshEveryTab', checked);
+          }}
           onAutoRunAi={() => {
             runWindowOrganizeNow(undefined, undefined, undefined, undefined, true);
           }}
@@ -459,13 +467,17 @@ function AiPanel({
   language,
   useTabGroups,
   isAuto,
+  refreshEveryTab,
   onToggleAi,
+  onToggleRefreshEveryTab,
   onAutoRunAi,
 }: {
   language: string;
   useTabGroups: boolean;
   isAuto: boolean;
+  refreshEveryTab: boolean;
   onToggleAi: (checked: boolean) => void;
+  onToggleRefreshEveryTab: (checked: boolean) => void;
   onAutoRunAi: () => void;
 }) {
   const wanted = useAi.value;
@@ -496,13 +508,14 @@ function AiPanel({
         savedAiProposal.value,
         movableTabs.value,
         savedAiProposalSignature.value,
+        refreshEveryTab,
       )
     ) {
       return;
     }
     lastAutoWindowAiSignature.value = movableSig;
     onAutoRunAi();
-  }, [useTabGroups, isAuto, active, hydrated, busy, movableSig, lastAutoSig]);
+  }, [useTabGroups, isAuto, active, hydrated, busy, movableSig, lastAutoSig, refreshEveryTab]);
 
   const state = availability.value;
   // Never hide or discard the AI panel once the user has turned on-device AI on: if the model
@@ -525,6 +538,22 @@ function AiPanel({
           />
           <span>{t('organizeAiUse')}</span>
         </label>
+      )}
+
+      {wanted && !useTabGroups && isAuto && !unavailable && (
+        <>
+          <label class="td-check">
+            <input
+              type="checkbox"
+              checked={refreshEveryTab}
+              onChange={(event) => {
+                onToggleRefreshEveryTab(event.currentTarget.checked);
+              }}
+            />
+            <span>{t('organizeAiRefreshEveryTab')}</span>
+          </label>
+          <p class="td-field-hint">{t('organizeAiRefreshEveryTabHint')}</p>
+        </>
       )}
 
       {state === 'downloadable' && (

@@ -22,7 +22,7 @@
 import { buildPrompt, SYSTEM_PROMPT, tabLine, validateAiAnswer } from './ai-prompt';
 import type { AiDraft } from './ai-prompt';
 import type { ClusterOptions, GroupProposal, ProposedGroup } from './cluster';
-import { colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic } from './cluster';
+import { colorFor, DEFAULT_CLUSTER_OPTIONS, foldAccents, groupByTopic, STOPWORDS } from './cluster';
 import type { TabInfo } from './types';
 
 export { buildPrompt, SYSTEM_PROMPT, tabLine };
@@ -493,6 +493,26 @@ function fallbackDrafts(
  * key, and so the colour, is the lower-case name, exactly as in §7.2 (docs/DECISIONS.md,
  * M4.1).
  */
+function titleTokens(title: string): readonly string[] {
+  return foldAccents(title.toLowerCase())
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => (w.length >= 3 || /\d/.test(w)) && !STOPWORDS.has(w));
+}
+
+function sameTopicTitle(
+  leftKey: string,
+  leftTokens: readonly string[],
+  rightKey: string,
+  rightTokens: readonly string[],
+): boolean {
+  if (leftKey === rightKey) return true;
+  if (leftTokens.length === 0 || rightTokens.length === 0) return false;
+  const rightSet = new Set(rightTokens);
+  if (leftTokens.every((t) => rightSet.has(t))) return true;
+  const leftSet = new Set(leftTokens);
+  return rightTokens.every((t) => leftSet.has(t));
+}
+
 function assemble(
   drafts: readonly AiDraft[],
   ungrouped: readonly number[],
@@ -506,21 +526,32 @@ function assemble(
   const at = (id: number): number => position.get(id) ?? 0;
 
   for (const windowId of windows) {
-    // Keyed by the lower-case name, holding the first spelling of it: the group is called
-    // what the model called it, and only the case is lost on the way.
-    const byKey = new Map<string, { title: string; tabIds: number[] }>();
+    // Merge drafts that share the same lower-case name OR equivalent/subset topic tokens
+    // (e.g. AI's "Corrado Augias" + local fallback's "Augias · Corrado"), keeping the first
+    // (AI-authored) spelling.
+    const mergedGroups: {
+      key: string;
+      title: string;
+      tokens: readonly string[];
+      tabIds: number[];
+    }[] = [];
     for (const draft of drafts) {
       if (draft.windowId !== windowId) continue;
       const key = draft.title.toLowerCase();
-      const found = byKey.get(key);
-      if (found === undefined) byKey.set(key, { title: draft.title, tabIds: [...draft.tabIds] });
-      else found.tabIds.push(...draft.tabIds);
+      const tokens = titleTokens(draft.title);
+      const found = mergedGroups.find((entry) =>
+        sameTopicTitle(entry.key, entry.tokens, key, tokens),
+      );
+      if (found === undefined) {
+        mergedGroups.push({ key, title: draft.title, tokens, tabIds: [...draft.tabIds] });
+      } else {
+        found.tabIds.push(...draft.tabIds);
+      }
     }
 
-    const ordered = [...byKey]
-      .map(([key, group]) => ({
+    const ordered = mergedGroups
+      .map((group) => ({
         ...group,
-        key,
         tabIds: group.tabIds.sort((a, b) => at(a) - at(b)),
       }))
       .sort((a, b) =>

@@ -771,7 +771,7 @@ export async function organizeWindowsWithAi(
       const result = await groupBy(mapped.compact, model, {
         minSiteTabs: 2,
         minClusterTabs: 2,
-        maxBatchTabs: 60,
+        maxBatchTabs: 35,
         includePinned: false,
         includeGrouped: true,
         timeoutMs: PANEL_AI_TIMEOUT_MS,

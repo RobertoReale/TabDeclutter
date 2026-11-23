@@ -189,7 +189,7 @@ const SITE_NAMES: Readonly<Record<string, string>> = {
  * (PLAN.md §7.2.1). Only words of three characters or more are listed: shorter ones never
  * become tokens anyway (`minTokenLength`).
  */
-const STOPWORDS: ReadonlySet<string> = new Set(
+export const STOPWORDS: ReadonlySet<string> = new Set(
   // Italian
   (
     'agli alla alle allo altra altre altri altro anche ancora avere che chi cio cioe coi col ' +
@@ -257,26 +257,21 @@ function isOpaquePathToken(token: string): boolean {
 }
 
 /**
- * Ordered Italian + English derivational suffixes with their minimum remaining root length,
- * used only when vectorizing topics so inflected/derived forms (`ortogonali` /
- * `ortogonalizzazione`, `derivata` / `derivate` / `derivazione`, `cluster` / `clustering`)
- * match while displayed group titles still use the original surface words.
+ * Italian + English derivational suffix matcher (minimum 4-char remaining root) used only
+ * when vectorizing topics so inflected/derived forms (`ortogonali` / `ortogonalizzazione`,
+ * `derivata` / `derivate` / `derivazione`, `cluster` / `clustering`) match while displayed
+ * group titles still use the original surface words.
  */
-const STEM_SUFFIXES: readonly string[] =
-  'alizzazioni alizzazione izzazioni izzazione izations ization isations isation imenti imento amenti amento azioni azione ations ation ments ment mente ings ing'.split(
-    ' ',
-  );
+const STEM_SUFFIX_RE =
+  /^(.{4,}?)(?:alizzazion[ei]|izzazion[ei]|i[sz]ations?|[ia]ment[io]|azion[ei]|ations?|ment[es]?|ings?)$/;
 
 /** Conservative Italian + English light stemmer for TF-IDF vector keys. */
 function stemToken(raw: string): string {
   const word = foldAccents(raw);
   if (word.length < 5 || /\d/.test(word)) return word;
 
-  for (const suffix of STEM_SUFFIXES) {
-    if (word.endsWith(suffix) && word.length - suffix.length >= 4) {
-      return word.slice(0, -suffix.length);
-    }
-  }
+  const matched = STEM_SUFFIX_RE.exec(word);
+  if (matched !== null) return matched[1] as string;
   if (word.endsWith('ies') && word.length >= 6) return `${word.slice(0, -3)}y`;
   if (word.endsWith('ed') && word.length >= 7) return word.slice(0, -2);
   if (word.length >= 7 && /al[ei]$/.test(word)) return word.slice(0, -3);
@@ -683,24 +678,6 @@ interface Vector {
   readonly values: Float64Array;
 }
 
-/** The dot product of two normalised sparse vectors, which is their cosine similarity. */
-function cosine(a: Vector, b: Vector): number {
-  let i = 0;
-  let j = 0;
-  let sum = 0;
-  while (i < a.ids.length && j < b.ids.length) {
-    const left = a.ids[i] as number;
-    const right = b.ids[j] as number;
-    if (left === right) {
-      sum += (a.values[i] as number) * (b.values[j] as number);
-      i += 1;
-      j += 1;
-    } else if (left < right) i += 1;
-    else j += 1;
-  }
-  return sum;
-}
-
 /** Weight of URL-path tokens relative to title tokens so long URL slugs do not drown titles. */
 const PATH_TOKEN_WEIGHT = 0.7;
 
@@ -747,15 +724,11 @@ function snapTypoStems(
   documentFrequency: number[],
   counts: Map<number, number>[],
 ): void {
+  const isWord = (s: string): boolean =>
+    s.length >= 6 && !s.startsWith(DOMAIN_PREFIX) && !/\d/.test(s);
   const anchors: number[] = [];
   for (let id = 0; id < vocabulary.length; id += 1) {
-    const stem = vocabulary[id] as string;
-    if (
-      (documentFrequency[id] as number) >= 3 &&
-      stem.length >= 6 &&
-      !stem.startsWith(DOMAIN_PREFIX) &&
-      !/\d/.test(stem)
-    ) {
+    if ((documentFrequency[id] as number) >= 3 && isWord(vocabulary[id] as string)) {
       anchors.push(id);
     }
   }
@@ -764,14 +737,7 @@ function snapTypoStems(
   const remap = new Map<number, number>();
   for (let id = 0; id < vocabulary.length; id += 1) {
     const stem = vocabulary[id] as string;
-    if (
-      (documentFrequency[id] as number) !== 1 ||
-      stem.length < 6 ||
-      stem.startsWith(DOMAIN_PREFIX) ||
-      /\d/.test(stem)
-    ) {
-      continue;
-    }
+    if ((documentFrequency[id] as number) !== 1 || !isWord(stem)) continue;
     let bestId = -1;
     let bestDf = -1;
     for (const anchorId of anchors) {
@@ -1148,7 +1114,7 @@ function refineClusters(
       let ownSim = 0;
       if (!isSingleton && tabVec.ids.length > 0) {
         const own = targetByIdx.get(ownIdx) as { readonly centroid: Vector; readonly norm: number };
-        const d = cosine(tabVec, own.centroid) * own.norm;
+        const d = splitCosine(tabVec, own.centroid, isDomainId).total * own.norm;
         const remSq = own.norm * own.norm - 2 * d + 1;
         ownSim = remSq > 1e-18 ? (d - 1) / Math.sqrt(remSq) : 0;
       }
@@ -1184,7 +1150,71 @@ function refineClusters(
     current = [...grouped.values()].sort((a, b) => (a[0] as number) - (b[0] as number));
   }
 
-  return current;
+  return mergeSubtopicClusters(current, vectors, isDomainId);
+}
+
+/**
+ * Merges small sub-topic clusters (e.g. a 2-tab "Lectio Magistralis" or "Breviario" pair)
+ * into a larger parent cluster (>= 4 tabs, at least 2x as large) when every tab of the smaller
+ * cluster contains the parent cluster's single heaviest content token (present in >= 75% of the
+ * parent). Counters IDF dilution when one dominant entity appears in half of all open tabs.
+ */
+function mergeSubtopicClusters(
+  clusters: readonly number[][],
+  vectors: readonly Vector[],
+  isDomainId: Uint8Array,
+): readonly number[][] {
+  const parents: { readonly idx: number; readonly size: number; readonly coreId: number }[] = [];
+  for (let c = 0; c < clusters.length; c += 1) {
+    const members = clusters[c] as number[];
+    if (members.length < 4) continue;
+    const w = new Map<number, number>();
+    const n = new Map<number, number>();
+    let bestId = -1;
+    let bestW = 0;
+    for (const tabIdx of members) {
+      const vec = vectors[tabIdx] as Vector;
+      for (let at = 0; at < vec.ids.length; at += 1) {
+        const id = vec.ids[at] as number;
+        if (isDomainId[id] === 1) continue;
+        const sum = (w.get(id) ?? 0) + (vec.values[at] as number);
+        w.set(id, sum);
+        n.set(id, (n.get(id) ?? 0) + 1);
+        if (sum > bestW) {
+          bestW = sum;
+          bestId = id;
+        }
+      }
+    }
+    if (bestId >= 0 && (n.get(bestId) ?? 0) * 4 >= members.length * 3) {
+      parents.push({ idx: c, size: members.length, coreId: bestId });
+    }
+  }
+  if (parents.length === 0) return clusters;
+  parents.sort((a, b) => b.size - a.size);
+
+  const merged = clusters.map((c) => [...c]);
+  let changed = false;
+  for (let c = 0; c < clusters.length; c += 1) {
+    const members = clusters[c] as number[];
+    const parent = parents.find(
+      (p) =>
+        p.idx !== c &&
+        p.size >= members.length * 2 &&
+        members.every((i) => (vectors[i] as Vector).ids.includes(p.coreId)),
+    );
+    if (parent !== undefined) {
+      (merged[parent.idx] as number[]).push(...members);
+      merged[c] = [];
+      changed = true;
+    }
+  }
+  return changed
+    ? merged
+        .filter((c) => c.length > 0)
+        .map((c) => c.sort((a, b) => a - b))
+        .sort((a, b) => (a[0] as number) - (b[0] as number))
+    : clusters;
 }
 
 /** A token of a cluster and what it weighs there: the ranking a title is built from. */

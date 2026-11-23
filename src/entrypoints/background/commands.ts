@@ -13,7 +13,7 @@
  */
 
 import type { GuardActions } from './guard';
-import { reportBackgroundError } from './report';
+import { backgroundError } from './report';
 
 /** "Chiudi tutti i duplicati" (PLAN.md §8.7). Works in every mode, pause included. */
 export const CLOSE_ALL_DUPLICATES = 'close-all-duplicates';
@@ -63,10 +63,7 @@ export function registerCommands(options: CommandsOptions): Commands {
   // A profile with no `commands` API keeps the rest of the extension: two shortcuts nobody
   // can press are not worth taking the background script down for.
   if (api === undefined) {
-    console.error(
-      'TabDeclutter: commands',
-      new Error('no commands API: browser.commands is undefined'),
-    );
+    console.error('TabDeclutter: commands', new Error('no commands API'));
     return { received };
   }
 
@@ -85,6 +82,4 @@ function commandsApi(): CommandsApi | undefined {
   return (browser as unknown as { commands?: CommandsApi | undefined }).commands;
 }
 
-function failed(error: unknown): void {
-  void reportBackgroundError('commands', error);
-}
+const failed = backgroundError('commands');

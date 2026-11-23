@@ -23,6 +23,7 @@
  * matching in `src/core/reconcile.ts`.
  */
 
+import { tabUrl } from '@/core/duplicates';
 import type { ReconcileTab } from '@/core/reconcile';
 import {
   bootstrapActivity,
@@ -35,17 +36,15 @@ import { unwrapSuspendedUrl } from '@/core/url';
 import type { Capabilities } from '@/platform/capabilities';
 import { caps } from '@/platform/capabilities';
 import { activityItem, foregroundItem, patchActivity, replaceActivity } from '@/platform/storage';
+import { NO_WINDOW } from '@/platform/tabs';
 
-import { reportBackgroundError } from './report';
+import { backgroundError, createSerialQueue, reportBackgroundError } from './report';
 
 /** PLAN.md §6.1 allows 1–2 s. The short end: on Chrome the flush is best effort. */
 const WRITE_DEBOUNCE_MS = 1_000;
 
 /** The key Firefox's session store keeps a tab's record under (PLAN.md §5.5). */
 const SESSION_KEY = 'td';
-
-/** `windows.WINDOW_ID_NONE`: no window has the focus. */
-const NO_WINDOW = -1;
 
 /** Firefox's per-tab session store, which survives a restart. Mocked in the tests. */
 export interface SessionTabValues {
@@ -98,13 +97,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
   let replaceAll = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** One handler at a time: they all read-modify-write the same store. */
-  let chain: Promise<unknown> = Promise.resolve();
-
-  function run<T>(action: () => Promise<T>): Promise<T> {
-    const next = chain.then(action, action);
-    chain = next.then(ignore, ignore);
-    return next;
-  }
+  const run = createSerialQueue();
 
   /** How a listener hands its work over: in order, and never unhandled. */
   function handle(action: () => Promise<void>): void {
@@ -130,7 +123,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
     dirty = true;
     timer ??= setTimeout(() => {
       timer = undefined;
-      void write().catch((error: unknown) => void report(error));
+      void write().catch(onError);
     }, debounceMs);
   }
 
@@ -304,6 +297,18 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
     });
   });
 
+  async function commitFullRebuild(
+    next: ActivityStore,
+    tabs: readonly ReconcileTab[],
+  ): Promise<void> {
+    store = next;
+    touched.clear();
+    replaceAll = true;
+    dirty = true;
+    for (const tab of tabs) mark(tab.id);
+    await writeNow();
+  }
+
   // A restart: the records are there, the tab ids are not (PLAN.md §5.5).
   browser.runtime.onStartup.addListener(() => {
     const at = now();
@@ -312,15 +317,11 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
       const saved = await activityItem.getValue();
       const fromSession =
         sessions === undefined ? undefined : await readSessionValues(sessions, tabs);
-      store = reconcileActivity(saved, tabs, { now: at, fromSession }).activity;
       await foregroundItem.setValue(null);
-      // The whole store was rebuilt, so every id in it is worth re-saving and none of the
-      // ids from the previous run are.
-      touched.clear();
-      replaceAll = true;
-      dirty = true;
-      for (const tab of tabs) mark(tab.id);
-      await writeNow();
+      await commitFullRebuild(
+        reconcileActivity(saved, tabs, { now: at, fromSession }).activity,
+        tabs,
+      );
     });
   });
 
@@ -330,12 +331,10 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
     const at = now();
     handle(async () => {
       const tabs = await currentTabs();
-      store = bootstrapActivity(await activityItem.getValue(), tabs, at).activity;
-      touched.clear();
-      replaceAll = true;
-      dirty = true;
-      for (const tab of tabs) mark(tab.id);
-      await writeNow();
+      await commitFullRebuild(
+        bootstrapActivity(await activityItem.getValue(), tabs, at).activity,
+        tabs,
+      );
     });
   });
 
@@ -344,7 +343,7 @@ export function registerTracker(options: TrackerOptions = {}): Tracker {
   // Firefox fires it from 106; on an MV3 service worker it is best effort either way,
   // which is why the debounce above is a second and not two.
   browser.runtime.onSuspend?.addListener(() => {
-    void write().catch((error: unknown) => void report(error));
+    void write().catch(onError);
   });
 
   return { flush: write };
@@ -370,8 +369,7 @@ function asReconcileTab(tab: TabLike & { id?: number }): ReconcileTab {
 
 /** A tab that is still loading has its destination in `pendingUrl` and `url: ''`. */
 function urlOf(tab: TabLike): string {
-  const url = tab.url !== undefined && tab.url !== '' ? tab.url : tab.pendingUrl;
-  return unwrapSuspendedUrl(url ?? '');
+  return tabUrl({ url: tab.url ?? '', pendingUrl: tab.pendingUrl });
 }
 
 /** Firefox restores these with the tab, so they are the first thing a restart reads. */
@@ -385,7 +383,7 @@ async function readSessionValues(
       const value = parse(await sessions.getTabValue(tab.id, SESSION_KEY));
       if (isTabActivity(value)) restored[tab.id] = value;
     } catch (error: unknown) {
-      failed(error);
+      await report(error);
     }
   }
   return restored;
@@ -411,6 +409,8 @@ async function writeStore(
   }
 }
 
+const onError = backgroundError('tracker');
+
 async function report(error: unknown): Promise<void> {
   await reportBackgroundError('tracker', error);
 }
@@ -433,7 +433,7 @@ async function saveSessionValues(
       // console of an extension that did nothing wrong must stay clean (PLAN.md §14). The
       // question goes to the tab and not to the error's message, which differs between
       // Chrome and Firefox. A write that failed with the tab still there is a real failure.
-      if ((await getTab(tabId)) !== undefined) failed(error);
+      if ((await getTab(tabId)) !== undefined) await report(error);
     }
   }
 }
@@ -476,12 +476,4 @@ async function getTab(tabId: number): Promise<TabLike | undefined> {
     // Gone between the event and here. The next event will invent the record.
     return undefined;
   }
-}
-
-function failed(error: unknown): void {
-  console.error('TabDeclutter: tracker', error);
-}
-
-function ignore(): void {
-  /* keeps the queue alive after a failed handler */
 }

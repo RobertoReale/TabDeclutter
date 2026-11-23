@@ -160,6 +160,7 @@ describe('the defaults', () => {
 
     expect(settings.staleDays).toBe(3);
     expect(settings.useOnDeviceAi).toBe(DEFAULT_SETTINGS.useOnDeviceAi);
+    expect(settings.aiRefreshEveryTab).toBe(DEFAULT_SETTINGS.aiRefreshEveryTab);
     expect(settings.guard).toEqual({ ...DEFAULT_GUARD_SETTINGS, mode: 'auto' });
     expect(settings.match).toEqual({ ...DEFAULT_MATCH_OPTIONS, ignoreCase: true });
   });

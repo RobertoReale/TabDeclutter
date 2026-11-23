@@ -3552,3 +3552,48 @@ spec. One entry per decision, newest at the bottom. Format in AGENT-RULES.md.
 - **Why:** keeps `chrome://extensions/` out of topic windows, prevents 3B greedy range
   hallucinations from stranding unrelated tabs inside dominant clusters, avoids mid-word title
   cuts, and lets the model see all related tabs across a typical 40–60 tab session in one pass.
+
+## Post-release — Optional immediate single-tab AI refresh (`Settings.aiRefreshEveryTab`)
+- **Context:** the default 4-tab / 20% auto-refresh threshold avoids frequent cold `LanguageModel.create()`
+  runs on 4 GB VRAM hardware, but users who want every newly opened semantic tab placed by Gemini
+  Nano right away asked for an opt-in switch instead of waiting for 4 tabs or clicking manually.
+- **Decision:** added `Settings.aiRefreshEveryTab` (default `false`, safely filled in by
+  `mergeSettings` without a migration), surfaced as a checkbox under on-device AI in both
+  `OrganizeView` (when Auto-organize + AI window mode is active) and `SettingsView`, and forwarded
+  as `exact` into `aiProposalFreshForAutoRefresh` in both `OrganizeView` and background `autopilot`.
+- **Why:** preserves fast, cold-start-free defaults for everyone while giving power users
+  immediate single-tab semantic re-grouping (still ignoring closed tabs and `(N)` unread badges).
+
+## Post-release — Merge sub-topic pairs into dominant entity clusters (`mergeSubtopicClusters`)
+- **Context:** when one subject (e.g. "Corrado Augias") appears in half of all open tabs, IDF
+  weights that entity low while rare co-occurring words in 2-tab sub-topics ("Breviario per un
+  confuso presente", "Lectio magistralis", "Travaglio") score ~5× higher, fragmenting one subject
+  into 4 separate windows during local TF-IDF clustering.
+- **Decision:** added a post-refinement sub-topic merge pass inside `refineClusters()` in
+  `src/core/cluster.ts` that absorbs any smaller cluster (`|P| >= 2 * |C|`) whose members all
+  contain a larger parent cluster's (`|P| >= 4`) single heaviest non-domain token (present in
+  ≥ 75% of `P`).
+- **Why:** consolidates fragmented sub-topic pairs into one coherent parent window without false
+  merges across unrelated clusters that only share a domain or a lower-IDF generic word.
+
+## Post-release — Harden AI entity outlier pruning, title-token deduplication, batch sizing, and drained-window fallback
+- **Context:** real-world Chrome testing with 53 open tabs exposed three interacting failure modes:
+  (1) sending 52 tabs in one 60-tab prompt caused Gemini Nano to dump 18 unrelated tabs (Wikipedia
+  poets, Gemini calculus chats, Hendrix, Gigi Proietti, Luigi Magni) into `"Corrado Augias (38)"`
+  and truncate mid-JSON; (2) `pruneEntityOutliers` turned off below 60% anchors (`20/38 = 52.6%`),
+  did not filter stopwords (`degli`, `della`, `come`), and pooled vocabulary across all 20 anchor
+  titles so `"live"` + `"storia"` kept unrelated videos, while truncated fallback drafts named
+  `"Augias · Corrado"` stayed separate from `"Corrado Augias"`; and (3) in `splitIntoThematicWindows`,
+  assigning a spare existing window whose tabs were moved out by an earlier bucket caused Chrome to
+  auto-close that window before the later bucket moved into it, silently stranding its tabs.
+- **Decision:** restored `maxBatchTabs: 35` so 36+ tab sessions pre-cluster via local TF-IDF before
+  prompting; tightened `SYSTEM_PROMPT` to keep groups strict; upgraded `pruneEntityOutliers` to filter
+  `STOPWORDS`, trigger down to 33% anchors when ≥ 5 anchors match, require ≥ 2 shared content words
+  with a single anchor tab on large (≥ 6 anchor) groups, and route pruned unclaimed tabs to `failed`
+  so `fallbackDrafts` regroups them cleanly; upgraded `assemble()` to merge same-window drafts with
+  equivalent/subset title tokens (`"Corrado Augias"` + `"Augias · Corrado"`) while keeping numeric
+  tokens distinct; and added a `createBucketWindow` fallback in `splitIntoThematicWindows` whenever
+  moving into an assigned existing window fails because it was drained and auto-closed mid-sweep.
+- **Why:** prevents small on-device models from collapsing mixed browsing sessions into one oversized
+  window, eliminates duplicate AI + local fallback windows, and guarantees `split-windows` never
+  silently drops a bucket when Chrome closes an emptied window mid-reorganization.

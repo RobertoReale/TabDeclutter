@@ -387,6 +387,14 @@
     "message": "Details: $1",
     "description": "Short technical reason shown under the AI fallback warning so the user or developer can see why the browser's model fell back. $1 is the reason code or error."
   },
+  "organizeAiRefreshEveryTab": {
+    "message": "Re-run AI immediately for every new tab",
+    "description": "Checkbox under on-device AI that triggers an immediate AI regrouping as soon as even a single new or navigated tab appears."
+  },
+  "organizeAiRefreshEveryTabHint": {
+    "message": "Off: waits for 4+ new tabs to avoid frequent model wake-ups. On: runs AI right away even for 1 new tab.",
+    "description": "Explains the trade-off of enabling immediate AI regrouping for every single new tab."
+  },
   "organizeAiUnavailable": {
     "message": "Chrome's on-device AI is currently unavailable, so local topic grouping will be used instead. Your setting was kept.",
     "description": "Warning shown in the Organize view when the user enabled on-device AI but the browser currently reports the model as unavailable or unsupported."

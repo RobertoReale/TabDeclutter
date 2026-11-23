@@ -88,8 +88,7 @@ function api(): TabsApi {
  */
 export function asTabInfos(browserTabs: readonly BrowserTab[]): readonly TabInfo[] {
   return browserTabs
-    .filter((tab): tab is BrowserTab & { id: number } => tab.id !== undefined)
-    .filter((tab) => tab.hidden !== true)
+    .filter((tab): tab is BrowserTab & { id: number } => tab.id !== undefined && !tab.hidden)
     .map((tab) => ({
       id: tab.id,
       windowId: tab.windowId ?? NO_WINDOW,
@@ -98,14 +97,14 @@ export function asTabInfos(browserTabs: readonly BrowserTab[]): readonly TabInfo
       pendingUrl: tab.pendingUrl,
       title: tab.title ?? '',
       favIconUrl: tab.favIconUrl,
-      pinned: tab.pinned === true,
-      audible: tab.audible === true,
-      active: tab.active === true,
-      discarded: tab.discarded === true,
+      pinned: !!tab.pinned,
+      audible: !!tab.audible,
+      active: !!tab.active,
+      discarded: !!tab.discarded,
       hidden: false,
       groupId: tab.groupId ?? NO_GROUP_ID,
       cookieStoreId: tab.cookieStoreId,
-      incognito: tab.incognito === true,
+      incognito: !!tab.incognito,
       openerTabId: tab.openerTabId,
       lastAccessed: tab.lastAccessed,
     }));
@@ -260,6 +259,20 @@ export interface CloseOptions extends ActionContext {
  * Returns the entries written, which is what an "Annulla" toast needs to hand back to
  * `restoreTabs`.
  */
+async function archiveAndStore(
+  tabs: readonly TabInfo[],
+  now: number,
+  options: CloseOptions,
+): Promise<readonly ArchivedTab[]> {
+  const entries = archiveEntries(tabs, now, {
+    ...(options.reason === undefined ? {} : { reason: options.reason }),
+    ...(options.duplicateOfUrl === undefined ? {} : { duplicateOfUrl: options.duplicateOfUrl }),
+    groupTitles: await groupTitlesOf(tabs, options),
+  });
+  await addToArchive(entries);
+  return entries;
+}
+
 export async function closeTabs(
   tabs: readonly TabInfo[],
   now: number,
@@ -267,13 +280,7 @@ export async function closeTabs(
 ): Promise<readonly ArchivedTab[]> {
   if (tabs.length === 0) return [];
   const api = options.api ?? actionsApi();
-
-  const entries = archiveEntries(tabs, now, {
-    ...(options.reason === undefined ? {} : { reason: options.reason }),
-    ...(options.duplicateOfUrl === undefined ? {} : { duplicateOfUrl: options.duplicateOfUrl }),
-    groupTitles: await groupTitlesOf(tabs, options),
-  });
-  await addToArchive(entries);
+  const entries = await archiveAndStore(tabs, now, options);
   // One call for the batch: a tab the user closed a moment ago makes the whole call fail
   // on Chrome, so the ids are tried again one by one rather than left open.
   const removed = await attempt(() => api.tabs.remove(tabs.map((tab) => tab.id)));
@@ -302,11 +309,7 @@ export async function closeWindow(
   // No tab of ours in it: a window we cannot archive is a window we do not close.
   if (inWindow.length === 0) return [];
 
-  const entries = archiveEntries(inWindow, now, {
-    reason: 'window',
-    groupTitles: await groupTitlesOf(inWindow, options),
-  });
-  await addToArchive(entries);
+  const entries = await archiveAndStore(inWindow, now, { ...options, reason: 'window' });
   await attempt(() => api.windows.remove(windowId));
   return entries;
 }
@@ -349,13 +352,16 @@ export async function restoreTabs(
   );
   const steps = planRestores(
     entries,
-    (closed.ok ? closed.value : [])
-      .map((session) => session.tab)
-      .filter((tab): tab is BrowserTab & { sessionId?: string } => tab !== undefined)
-      .map((tab) => ({
-        ...(tab.sessionId === undefined ? {} : { sessionId: tab.sessionId }),
-        ...(tab.url === undefined ? {} : { url: tab.url }),
-      })),
+    (closed.ok ? closed.value : []).flatMap((s) =>
+      s.tab === undefined
+        ? []
+        : [
+            {
+              ...(s.tab.sessionId === undefined ? {} : { sessionId: s.tab.sessionId }),
+              ...(s.tab.url === undefined ? {} : { url: s.tab.url }),
+            },
+          ],
+    ),
   );
 
   const restoredIds: number[] = [];

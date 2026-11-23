@@ -13,23 +13,9 @@ import type { MatchOptions } from './types';
 import { DEFAULT_MATCH_OPTIONS } from './types';
 
 /** Query parameters that identify the campaign, not the page (PLAN.md §6.2). */
-const TRACKING_PARAMS = new Set([
-  'fbclid',
-  'gclid',
-  'dclid',
-  'msclkid',
-  'mc_cid',
-  'mc_eid',
-  'igshid',
-  'ref_src',
-  '_ga',
-  // YouTube's share parameter.
-  'si',
-  'spm',
-]);
-
-/** Whole families of them, matched on the prefix. */
-const TRACKING_PARAM_PREFIXES = ['utm_'];
+const TRACKING_PARAMS = new Set(
+  'fbclid gclid dclid msclkid mc_cid mc_eid igshid ref_src _ga si spm'.split(' '),
+);
 
 /**
  * Whether a query parameter only says where the visit came from.
@@ -39,7 +25,7 @@ const TRACKING_PARAM_PREFIXES = ['utm_'];
  */
 export function isTrackingParam(name: string): boolean {
   const lower = name.toLowerCase();
-  return TRACKING_PARAMS.has(lower) || TRACKING_PARAM_PREFIXES.some((p) => lower.startsWith(p));
+  return TRACKING_PARAMS.has(lower) || lower.startsWith('utm_');
 }
 
 /**
@@ -49,7 +35,7 @@ export function isTrackingParam(name: string): boolean {
  * Repeated rather than single, so that normalizing an already normalized URL cannot
  * change it again (`www.www.example.com` and `www.example.com` are one key, not two).
  */
-function stripWww(hostname: string): string {
+export function stripWww(hostname: string): string {
   let host = hostname;
   while (host.startsWith('www.')) {
     const rest = host.slice('www.'.length);
@@ -110,14 +96,13 @@ function extractFromParamString(raw: string): string | null {
 export function unwrapSuspendedUrl(url: string): string {
   let current = url.trim();
   for (let depth = 0; depth < 2; depth += 1) {
-    // Fast-path normal web URLs (`http://`, `https://`, `about:`, etc.) without allocating
-    // a prefix slice or lower-casing unless the string begins with `c`/`C` or `m`/`M`.
+    // Fast-path normal web URLs (`http://`, `https://`, `about:`, etc.) without regex work
+    // unless the string begins with `c`/`C` or `m`/`M`.
     const first = current.charCodeAt(0);
-    if (first !== 99 && first !== 67 && first !== 109 && first !== 77) {
-      return depth === 0 ? url : current;
-    }
-    const head = current.slice(0, 17).toLowerCase();
-    if (!head.startsWith('chrome-extension:') && !head.startsWith('moz-extension:')) {
+    if (
+      (first !== 99 && first !== 67 && first !== 109 && first !== 77) ||
+      !/^(?:chrome|moz)-extension:/i.test(current)
+    ) {
       return depth === 0 ? url : current;
     }
     const parsed = parse(current);
@@ -233,11 +218,14 @@ export function registrableDomain(urlOrHostname: string): string | null {
  * avatar takes its letter and its colour from, so the letter always matches the domain
  * on screen (PLAN.md §5.5).
  */
-const EXTENSION_SCHEMES = new Set(['chrome-extension:', 'moz-extension:']);
-
 export function displayHost(url: string): string {
   const parsed = parse(unwrapSuspendedUrl(url).trim());
-  if (parsed === null) return '';
-  if (EXTENSION_SCHEMES.has(parsed.protocol.toLowerCase())) return '';
+  if (
+    parsed === null ||
+    parsed.protocol === 'chrome-extension:' ||
+    parsed.protocol === 'moz-extension:'
+  ) {
+    return '';
+  }
   return stripWww(parsed.hostname.toLowerCase());
 }

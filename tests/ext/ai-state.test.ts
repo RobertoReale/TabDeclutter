@@ -891,11 +891,15 @@ describe('persisting topic + AI preferences without resets or races', () => {
     expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, afterCloseAndBadge, sig)).toBe(
       true,
     );
+    expect(
+      aiProposalFreshForAutoRefresh(savedAiProposal.value, afterCloseAndBadge, sig, true),
+    ).toBe(true);
 
-    // Opening 1 new tab out of 9 (11% drift, < 4 tabs): exact coverage is false, auto-refresh stays fresh.
+    // Opening 1 new tab out of 9 (11% drift, < 4 tabs): default stays fresh, exact mode triggers refresh.
     const withOneNew = [...initial, tab(9, 'https://news.example/story', { title: 'Daily news' })];
     expect(aiProposalCoversMovable(savedAiProposal.value, withOneNew, sig)).toBe(false);
     expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, withOneNew, sig)).toBe(true);
+    expect(aiProposalFreshForAutoRefresh(savedAiProposal.value, withOneNew, sig, true)).toBe(false);
 
     // Opening 4 new tabs crosses the drift threshold and triggers an automatic AI refresh.
     const withFourNew = [

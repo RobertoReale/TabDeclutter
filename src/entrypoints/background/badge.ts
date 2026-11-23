@@ -34,7 +34,13 @@ import {
 } from '@/platform/storage';
 import { queryTabs } from '@/platform/tabs';
 
-import { reportBackgroundError } from './report';
+import {
+  backgroundError,
+  createSerialQueue,
+  ensurePeriodicAlarm,
+  focusedWindow,
+  localKeys,
+} from './report';
 
 /** PLAN.md §11 asks for a 2 s debounce on the tab events. */
 const RECOMPUTE_DEBOUNCE_MS = 2_000;
@@ -60,13 +66,13 @@ const FLASH_COLOUR = '#1a73e8';
 /** White on both of the above, which is the contrast §4.7 asks of anything readable. */
 const TEXT_COLOUR = '#ffffff';
 
-const WATCHED: readonly string[] = [
+const WATCHED = localKeys([
   activityItem,
   keepsItem,
   settingsItem,
   protectedDomainsItem,
   duplicateWhitelistItem,
-].map((item) => item.key.slice(6));
+]);
 
 export interface BadgeOptions {
   /** The clock, injected so the tests can be exact. */
@@ -101,13 +107,7 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   /** One recompute at a time, so a late score cannot overwrite a newer one. */
-  let chain: Promise<unknown> = Promise.resolve();
-
-  function run(action: () => Promise<void>): Promise<void> {
-    const next = chain.then(action, action);
-    chain = next.then(ignore, ignore);
-    return next;
-  }
+  const run = createSerialQueue();
 
   function refresh(): Promise<void> {
     return run(recompute);
@@ -118,7 +118,7 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
     // and a tab event must not cost a score for an answer nobody will see (PLAN.md §11).
     const settings = await readSettings();
     if (!settings.showBadge) {
-      await hide();
+      await api().action.setBadgeText({ text: '' });
       return;
     }
 
@@ -144,15 +144,15 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
     if (count > 0) await paint(NEUTRAL_COLOUR);
   }
 
-  async function hide(): Promise<void> {
-    await api().action.setBadgeText({ text: '' });
-  }
+  const trigger = (): void => {
+    void refresh().catch(failed);
+  };
 
   /** What every listener does: ask for a recompute, at most once per window. */
   function schedule(): void {
     timer ??= setTimeout(() => {
       timer = undefined;
-      void refresh().catch(failed);
+      trigger();
     }, debounceMs);
   }
 
@@ -164,61 +164,35 @@ export function registerBadge(options: BadgeOptions = {}): Badge {
     await paint(NEUTRAL_COLOUR);
   }
 
-  // Everything that can change which tabs are open, where they are, or what they show —
-  // the same set the panel follows, because the same rules read all of it. `onUpdated`
-  // carries the title and the URL, so it is the noisiest and the reason for the debounce.
-  browser.tabs.onCreated.addListener(schedule);
-  browser.tabs.onRemoved.addListener(schedule);
-  browser.tabs.onMoved.addListener(schedule);
+  for (const event of [
+    browser.tabs.onCreated,
+    browser.tabs.onRemoved,
+    browser.tabs.onMoved,
+    browser.tabs.onActivated,
+    browser.tabs.onAttached,
+    browser.tabs.onDetached,
+    browser.tabs.onReplaced,
+  ]) {
+    event?.addListener(schedule);
+  }
   browser.tabs.onUpdated.addListener((_tabId: number, change?: object) => {
     if (isScoringTabUpdate(change as Record<string, unknown> | undefined)) schedule();
   });
-  browser.tabs.onActivated.addListener(schedule);
-  browser.tabs.onAttached.addListener(schedule);
-  browser.tabs.onDetached.addListener(schedule);
-  // Chrome gives a discarded tab a new id; Firefox never fires this (PLAN.md §5.5).
-  browser.tabs.onReplaced?.addListener(schedule);
 
-  // The settings, the keeps, the protected sites and the activity the tracker writes: a
-  // change to any of them changes the verdict without a tab having moved. This is also
-  // what makes "Mostra badge" take effect at once. The badge writes nothing, so there is
-  // no loop to guard against.
   browser.storage.onChanged.addListener((changes: Record<string, unknown>, area: string) => {
-    if (area !== 'local') return;
-    if (WATCHED.some((key) => key in changes)) schedule();
+    if (area === 'local' && WATCHED.some((key) => key in changes)) schedule();
   });
 
-  // PLAN.md §11: age grows while nothing happens, so the count has to be revisited even in
-  // a browser nobody is touching.
   browser.alarms.onAlarm.addListener((alarm: { name: string }) => {
-    if (alarm.name === ALARM_NAME) void refresh().catch(failed);
+    if (alarm.name === ALARM_NAME) trigger();
   });
 
-  // A restart and a first run: the icon is bare and no tab event may come for a while.
-  browser.runtime.onStartup.addListener(() => {
-    void refresh().catch(failed);
-  });
-  browser.runtime.onInstalled.addListener(() => {
-    void refresh().catch(failed);
-  });
+  browser.runtime.onStartup.addListener(trigger);
+  browser.runtime.onInstalled.addListener(trigger);
 
-  void ensureAlarm().catch(failed);
+  void ensurePeriodicAlarm(ALARM_NAME, REFRESH_PERIOD_MINUTES).catch(failed);
 
   return { refresh, flash };
-}
-
-/**
- * Creates the 30-minute alarm, once.
- *
- * Guarded by a read, because `alarms.create` with a name that already exists replaces the
- * alarm and starts its countdown again: a worker that wakes every few minutes for a tab
- * event would push the next refresh forever out of reach. Alarms outlive the worker and,
- * on Chrome, the browser session, so the read is almost always the whole of the work.
- */
-async function ensureAlarm(): Promise<void> {
-  const alarms = api().alarms;
-  if ((await alarms.get(ALARM_NAME)) !== undefined) return;
-  await alarms.create(ALARM_NAME, { periodInMinutes: REFRESH_PERIOD_MINUTES });
 }
 
 /**
@@ -235,21 +209,6 @@ async function paint(colour: string): Promise<void> {
   await action.setBadgeTextColor?.({ color: TEXT_COLOUR });
 }
 
-/**
- * The window the user is looking at, for the duplicate keeper's priority (PLAN.md §8.4.3).
- *
- * `windows.getCurrent()` in a service worker answers with whatever window the event came
- * from, which is not the same question; `getLastFocused` is. A browser with no window open
- * at all — Chrome on macOS, a worker woken by an alarm — simply has no answer.
- */
-async function focusedWindow(): Promise<number | undefined> {
-  try {
-    return (await api().windows.getLastFocused()).id;
-  } catch {
-    return undefined;
-  }
-}
-
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -261,14 +220,6 @@ interface BadgeApi {
     setBadgeBackgroundColor(details: { color: string }): Promise<void>;
     /** Chrome 110 and Firefox. Absent elsewhere. */
     setBadgeTextColor?(details: { color: string }): Promise<void>;
-  };
-  readonly alarms: {
-    get(name: string): Promise<{ name: string } | undefined>;
-    /** A promise from Chrome 111 and from Firefox, nothing before that. */
-    create(name: string, info: { periodInMinutes: number }): Promise<void> | void;
-  };
-  readonly windows: {
-    getLastFocused(): Promise<{ id?: number }>;
   };
 }
 
@@ -288,10 +239,4 @@ function isScoringTabUpdate(change: Record<string, unknown> | undefined): boolea
   return keys.length === 0 || keys.some((key) => !IGNORED_TAB_UPDATE_KEYS.has(key));
 }
 
-function failed(error: unknown): void {
-  void reportBackgroundError('badge', error);
-}
-
-function ignore(): void {
-  /* keeps the queue alive after a failed recompute */
-}
+const failed = backgroundError('badge');

@@ -30,7 +30,7 @@ export function registerPanelOpening(
   if (capabilities.sidePanel) {
     api.sidePanel
       ?.setPanelBehavior({ openPanelOnActionClick: true })
-      .catch((error: unknown) => console.error('TabDeclutter: setPanelBehavior failed', error));
+      .catch((error: unknown) => console.error('TabDeclutter: panel', error));
     return;
   }
 

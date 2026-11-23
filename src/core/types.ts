@@ -186,6 +186,8 @@ export interface Settings {
   useTabGroups: boolean;
   /** Use the on-device model when the browser has one. */
   useOnDeviceAi: boolean;
+  /** Re-run on-device AI immediately on every new or navigated tab instead of batching 4+ tabs. */
+  aiRefreshEveryTab: boolean;
   /**
    * Use the bookmarks as a signal (PLAN.md §6.4: "Already bookmarked +10").
    *
@@ -210,6 +212,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoWindowMode: 'merge-windows',
   useTabGroups: false,
   useOnDeviceAi: false,
+  aiRefreshEveryTab: false,
   useBookmarks: false,
   archiveRetentionDays: 30,
   language: 'auto',

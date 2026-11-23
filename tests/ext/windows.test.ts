@@ -830,6 +830,49 @@ describe('platform/windows', () => {
     expect(new Set([augiasWin, geminiWin, githubWin, youtubeMiscWin]).size).toBe(4);
   });
 
+  it('creates a fresh window when an earlier bucket drains and auto-closes an assigned existing window', async () => {
+    const { api, tabs } = fakeApi([
+      // Window 1 holds both topics (tabs 1..2 Augias, tabs 3..4 Rust).
+      { id: 1, windowId: 1, index: 0, url: 'https://yt.example/1', title: 'Corrado Augias 1' },
+      { id: 2, windowId: 1, index: 1, url: 'https://yt.example/2', title: 'Corrado Augias 2' },
+      { id: 3, windowId: 1, index: 2, url: 'https://doc.rust-lang.org/a', title: 'Rust Async 1' },
+      { id: 4, windowId: 1, index: 3, url: 'https://doc.rust-lang.org/b', title: 'Rust Async 2' },
+      // Window 2 holds ONLY a third Augias tab: once Bucket 0 moves tab 5 into Window 1,
+      // Chrome automatically closes Window 2 before Bucket 1 (Rust) tries to move into it.
+      { id: 5, windowId: 2, index: 0, url: 'https://yt.example/3', title: 'Corrado Augias 3' },
+    ]);
+    const originalMove = api.tabs.move;
+    api.tabs.move = async (tabId, props) => {
+      if (props.windowId !== undefined && !tabs.some((t) => t.windowId === props.windowId)) {
+        throw new Error(`No window with id: ${props.windowId}`);
+      }
+      return originalMove(tabId, props);
+    };
+
+    const result = await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      proposal: {
+        mode: 'topic',
+        groups: [
+          { key: 'augias', title: 'Corrado Augias', color: 'cyan', windowId: 1, tabIds: [1, 2, 5] },
+          { key: 'rust', title: 'Rust Async', color: 'blue', windowId: 1, tabIds: [3, 4] },
+        ],
+        ungrouped: [],
+      },
+      api,
+    });
+
+    const augiasWin = tabs.find((t) => t.id === 1)?.windowId;
+    const rustWin = tabs.find((t) => t.id === 3)?.windowId;
+    expect(result.windowsCount).toBe(2);
+    expect(tabs.find((t) => t.id === 5)?.windowId).toBe(augiasWin);
+    expect(tabs.find((t) => t.id === 4)?.windowId).toBe(rustWin);
+    expect(rustWin).not.toBe(augiasWin);
+  });
+
   it('queries browser tabs only once when no tabs are grouped and skips already-positioned leading tabs', async () => {
     const { api, moves, getQueryCalls } = fakeApi([
       {

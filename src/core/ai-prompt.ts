@@ -6,7 +6,7 @@
  * model answers statically without pulling `groupByTopic`'s title/site tables into its bundle.
  */
 
-import { foldAccents, stripSiteSuffix } from './cluster';
+import { foldAccents, STOPWORDS, stripSiteSuffix } from './cluster';
 import type { TabInfo } from './types';
 import { displayHost } from './url';
 
@@ -18,10 +18,10 @@ import { displayHost } from './url';
  * (PLAN.md §7.3, "Performance"), so this belongs to its creation, in `platform/llm.ts`.
  */
 export const SYSTEM_PROMPT =
-  'You organize browser tabs into a small number of topical groups. ' +
+  'Group tabs into 3-8 focused topics with short English names (1-3 words). ' +
   "Group by the user's task or topic, not by website. " +
-  "Ignore typos; include only matching tabs and don't name groups after sites. " +
-  "Short English names (1-3 words), 3-8 groups. Tabs that fit nowhere go to 'Other'.";
+  'Be strict: never mix unrelated tabs, ignore typos, no site names. ' +
+  "Tabs that fit nowhere go to 'Other'.";
 
 /** PLAN.md §7.3: the title a tab is listed with is truncated to this many characters. */
 const MAX_INPUT_TITLE_CHARS = 80;
@@ -84,9 +84,9 @@ export function tabLine(tab: Pick<TabInfo, 'id' | 'title' | 'url'>): string {
 /** The prompt for one batch: the tab list, and what to answer with. */
 export function buildPrompt(tabs: readonly Pick<TabInfo, 'id' | 'title' | 'url'>[]): string {
   return [
-    'Group these tabs by topic. One tab per line, as id|title|host:',
-    tabs.map((tab) => tabLine(tab)).join('\n'),
-    'Answer with JSON only: {"groups":[{"name":"Topic","tabIds":[14,27]}]}. Use each listed id at most once.',
+    'Group tabs by topic (id|title|host):',
+    tabs.map(tabLine).join('\n'),
+    'JSON only: {"groups":[{"name":"Topic","tabIds":[14,27]}]}. Each id at most once.',
   ].join('\n');
 }
 
@@ -105,9 +105,7 @@ function extractRegexGroups(raw: string): { name: string; tabIds: number[] }[] {
   for (const match of normalized.matchAll(pattern)) {
     const tabIds = (match[2] as string)
       .split(',')
-      .map((p) => p.trim())
-      .filter((p) => /^-?\d+$/u.test(p))
-      .map(Number);
+      .flatMap((p) => (/^-?\d+$/u.test(p.trim()) ? [Number(p)] : []));
     groups.push({ name: match[1] as string, tabIds });
   }
   return groups;
@@ -160,12 +158,19 @@ function cleanGroupTitle(raw: string, max: number): string {
 function titleWords(text: string): string[] {
   return foldAccents(text.toLowerCase())
     .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length >= 4);
+    .filter((w) => w.length >= 4 && !STOPWORDS.has(w));
+}
+
+function sharesTwo(words: ReadonlySet<string>, ref: ReadonlySet<string>): boolean {
+  let hits = 0;
+  for (const w of words) if (ref.has(w) && ++hits >= 2) return true;
+  return false;
 }
 
 /**
- * Ejects hallucinated outliers from large entity-anchored groups (>= 5 tabs where >= 60% match a
- * word from the group title), leaving small or translated semantic groups untouched.
+ * Ejects hallucinated outliers from entity-anchored groups (>= 5 tabs where >= 50% match the
+ * title, or >= 5 anchors and >= 33% to catch small-model range dumps), leaving translated or
+ * generic semantic groups untouched.
  */
 function pruneEntityOutliers(
   title: string,
@@ -176,25 +181,30 @@ function pruneEntityOutliers(
   const needles = titleWords(title);
   if (needles.length === 0) return members;
 
-  const wordsList = members.map((id) => {
+  const sets = members.map((id) => {
     const tab = byId.get(id)!;
-    return titleWords(stripSiteSuffix(tab.title, tab.url));
+    return new Set(titleWords(stripSiteSuffix(tab.title, tab.url)));
   });
-  let anchorCount = 0;
-  const anchorVocab = new Set<string>();
-  for (const words of wordsList) {
-    if (
-      needles.some((n) =>
-        words.some((w) => w === n || (n.length >= 5 && w.startsWith(n.slice(0, 5)))),
-      )
-    ) {
-      anchorCount += 1;
-      for (const w of words) anchorVocab.add(w);
+  const anchors: ReadonlySet<string>[] = [];
+  const vocab = new Set<string>();
+  const flags = sets.map((set) => {
+    for (const w of set) {
+      if (needles.some((n) => w === n || (n.length >= 5 && w.startsWith(n.slice(0, 5))))) {
+        anchors.push(set);
+        for (const k of set) vocab.add(k);
+        return true;
+      }
     }
-  }
-  return anchorCount * 5 < members.length * 3
-    ? members
-    : members.filter((_id, idx) => wordsList[idx]!.some((w) => anchorVocab.has(w)));
+    return false;
+  });
+  const n = anchors.length;
+  if (n < 3 || (n * 2 < members.length && (n < 5 || n * 3 < members.length))) return members;
+
+  return members.filter(
+    (_, i) =>
+      flags[i] ||
+      (n >= 6 ? anchors.some((a) => sharesTwo(sets[i]!, a)) : sharesTwo(sets[i]!, vocab)),
+  );
 }
 
 export function validateAiAnswer(
@@ -212,6 +222,7 @@ export function validateAiAnswer(
   const byId = new Map(batch.map((tab) => [tab.id, tab]));
   const windowId = (batch[0] as TabInfo).windowId;
   const taken = new Set<number>();
+  const pruned = new Set<number>();
   const drafts: AiDraft[] = [];
 
   for (const rawGroup of groups) {
@@ -243,19 +254,26 @@ export function validateAiAnswer(
     }
 
     const members = pruneEntityOutliers(title, rawMembers, byId);
+    if (members.length < rawMembers.length) {
+      const kept = new Set(members);
+      for (const id of rawMembers) if (!kept.has(id)) pruned.add(id);
+    }
     if (members.length < options.minClusterTabs) continue;
     for (const id of members) taken.add(id);
     drafts.push({ title, windowId, tabIds: members });
   }
 
   if (drafts.length === 0) return { ok: false, reason: 'no-groups' };
-  // "Altro" is everything no group kept: the tabs the model forgot, and the ones it put
-  // in a group that was then dropped. When the model's output was truncated mid-JSON, tabs
-  // it never reached go to `failed` so §7.2 local clustering still groups the unreached tail.
+  // "Altro" is everything no group kept; tabs pruned as entity outliers or missed by a
+  // truncated JSON go to `failed` so §7.2 local clustering cleanly regroups them.
   const leftover = batch.filter((tab) => !taken.has(tab.id)).map((tab) => tab.id);
-  return decoded.truncated
-    ? { ok: true, drafts, ungrouped: [], failed: leftover }
-    : { ok: true, drafts, ungrouped: leftover, failed: [] };
+  if (decoded.truncated) return { ok: true, drafts, ungrouped: [], failed: leftover };
+  return {
+    ok: true,
+    drafts,
+    ungrouped: leftover.filter((id) => !pruned.has(id)),
+    failed: leftover.filter((id) => pruned.has(id)),
+  };
 }
 
 /**

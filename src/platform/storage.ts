@@ -59,16 +59,7 @@ interface VersionedOptions {
 }
 
 function defineVersioned<T>(key: StorageItemKey, fallback: T, options?: VersionedOptions) {
-  return storage.defineItem<T>(key, {
-    fallback,
-    version: options?.version ?? 1,
-    // Migrations make WXT read the item as soon as it is defined, to compare the stored
-    // version with this one. At version 1 there is nothing it could migrate from, so
-    // there are none and the panel starts without seven extra reads. WXT reads an item
-    // with no recorded version as version 1, which is the value the first migration
-    // added here will be handed.
-    migrations: options?.migrations,
-  });
+  return storage.defineItem<T>(key, { version: 1, ...options, fallback });
 }
 
 /** `Record<tabId, TabActivity>`, what the tracker remembers (PLAN.md §6.1). */
@@ -179,9 +170,19 @@ export const organizeSnoozeUntilItem = /*#__PURE__*/ defineVersioned<number>(
  */
 const queues = new Map<string, Promise<unknown>>();
 
-function webLocks(): LockManager | undefined {
+/** Narrow Web Locks signature compatible across DOM lib versions (avoids `Promise<Promise<T>>`). */
+interface WebLockManager {
+  request<T>(name: string, callback: () => Promise<T>): Promise<T>;
+  request<T>(
+    name: string,
+    options: { readonly ifAvailable: boolean },
+    callback: (lock: object | null) => Promise<T>,
+  ): Promise<T>;
+}
+
+function webLocks(): WebLockManager | undefined {
   return typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function'
-    ? navigator.locks
+    ? (navigator.locks as unknown as WebLockManager)
     : undefined;
 }
 

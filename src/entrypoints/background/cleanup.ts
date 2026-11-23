@@ -25,7 +25,7 @@
 import { pruneActivity, pruneArchive, pruneKeeps, readSettings } from '@/platform/storage';
 import { queryTabs } from '@/platform/tabs';
 
-import { reportBackgroundError } from './report';
+import { backgroundError, createSerialQueue, ensurePeriodicAlarm } from './report';
 
 /** PLAN.md §10: "cleanup through `chrome.alarms` every 6 h". */
 const CLEANUP_PERIOD_MINUTES = 6 * 60;
@@ -60,12 +60,10 @@ export function registerCleanup(options: CleanupOptions = {}): Cleanup {
   const now = options.now ?? Date.now;
 
   /** One sweep at a time, so two triggers cannot read the same store at once. */
-  let chain: Promise<unknown> = Promise.resolve();
+  const enqueue = createSerialQueue();
 
   function run(): Promise<CleanupReport> {
-    const next = chain.then(sweep, sweep);
-    chain = next.then(ignore, ignore);
-    return next;
+    return enqueue(sweep);
   }
 
   async function sweep(): Promise<CleanupReport> {
@@ -82,55 +80,21 @@ export function registerCleanup(options: CleanupOptions = {}): Cleanup {
     return { archive, keeps, activity };
   }
 
+  const trigger = (): void => {
+    void run().catch(failed);
+  };
+
   browser.alarms.onAlarm.addListener((alarm: { name: string }) => {
-    if (alarm.name === ALARM_NAME) void run().catch(failed);
+    if (alarm.name === ALARM_NAME) trigger();
   });
 
-  // A restart or an update is the other moment the clock may have moved a long way
-  // without the extension running.
-  browser.runtime.onStartup.addListener(() => {
-    void run().catch(failed);
-  });
-  browser.runtime.onInstalled.addListener(() => {
-    void run().catch(failed);
-  });
+  browser.runtime.onStartup.addListener(trigger);
+  browser.runtime.onInstalled.addListener(trigger);
 
-  void ensureAlarm().catch(failed);
-  void run().catch(failed);
+  void ensurePeriodicAlarm(ALARM_NAME, CLEANUP_PERIOD_MINUTES).catch(failed);
+  trigger();
 
   return { run };
 }
 
-/**
- * Creates the 6-hour alarm, once.
- *
- * Guarded by a read, because `alarms.create` with a name that already exists replaces the
- * alarm and starts its countdown again: a worker that wakes often would then push the
- * sweep further and further away and it would never fire.
- */
-async function ensureAlarm(): Promise<void> {
-  const alarms = api().alarms;
-  if ((await alarms.get(ALARM_NAME)) !== undefined) return;
-  await alarms.create(ALARM_NAME, { periodInMinutes: CLEANUP_PERIOD_MINUTES });
-}
-
-/** The piece of the extension API this module cannot name through WXT's types. */
-interface CleanupApi {
-  readonly alarms: {
-    get(name: string): Promise<{ name: string } | undefined>;
-    /** A promise from Chrome 111 and from Firefox, nothing before that. */
-    create(name: string, info: { periodInMinutes: number }): Promise<void> | void;
-  };
-}
-
-function api(): CleanupApi {
-  return browser as unknown as CleanupApi;
-}
-
-function failed(error: unknown): void {
-  void reportBackgroundError('cleanup', error);
-}
-
-function ignore(): void {
-  /* keeps the queue alive after a failed sweep */
-}
+const failed = backgroundError('cleanup');

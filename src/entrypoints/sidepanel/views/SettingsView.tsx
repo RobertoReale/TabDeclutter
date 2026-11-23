@@ -234,6 +234,16 @@ function MainSettings({ language }: { language: string }) {
                 if (!value) void saveAiProposalState(null, '').catch(() => undefined);
               }}
             />
+            {current.useOnDeviceAi && (
+              <CheckField
+                label="organizeAiRefreshEveryTab"
+                hint="organizeAiRefreshEveryTabHint"
+                value={current.aiRefreshEveryTab}
+                onPick={(value) => {
+                  setSetting('aiRefreshEveryTab', value);
+                }}
+              />
+            )}
             {current.useOnDeviceAi && aiState !== null && (
               <p
                 class={

@@ -64,7 +64,7 @@ import {
   restoreTabs,
 } from '@/platform/tabs';
 
-import { reportBackgroundError } from './report';
+import { alarmsApi, backgroundError, createSerialQueue, focusedWindow, localKeys } from './report';
 
 /** The alarm that ends a timed pause (PLAN.md §8.1). */
 const RESUME_ALARM = 'guard-resume';
@@ -78,18 +78,7 @@ const RESUME_ALARM = 'guard-resume';
  */
 const UNTIL_RESTART_MS = 365 * 24 * 60 * 60 * 1_000;
 
-/** `local:settings` → `settings`: the key the browser reports a change under. */
-function bareKey(key: string): string {
-  return key.slice(key.indexOf(':') + 1);
-}
-
-/**
- * The stored values the guard reads once and keeps: the settings and the whitelist, which
- * PLAN.md §8.3 compiles only on `storage.onChanged`.
- */
-const WATCHED: readonly string[] = [settingsItem, duplicateWhitelistItem].map((item) =>
-  bareKey(item.key),
-);
+const WATCHED = localKeys([settingsItem, duplicateWhitelistItem]);
 
 /** Why a tab is being looked at, which is what tells a creation from a navigation. */
 type Origin = 'created' | 'navigated' | 'moved';
@@ -294,15 +283,9 @@ export function registerGuard(options: GuardOptions = {}): Guard {
   /** `null` until this worker has indexed the tabs (PLAN.md §8.2: rebuilt on wake-up). */
   let index: GuardIndex | null = null;
   /** One event at a time. See the module comment: this is §8.2's serial queue. */
-  let chain: Promise<unknown> = Promise.resolve();
+  const run = createSerialQueue();
   /** The flash in flight, if any. Outside the queue, see `startFlash`. */
   let flashing: Promise<void> | null = null;
-
-  function run<T>(action: () => Promise<T>): Promise<T> {
-    const next = chain.then(action, action);
-    chain = next.then(ignore, ignore);
-    return next;
-  }
 
   /** How a listener hands its work over: in order, and never unhandled. */
   function handle(action: () => Promise<boolean>): void {
@@ -451,36 +434,28 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     else if (origin === 'navigated' && !arriving && moved) current.navigated.add(tab.id);
   }
 
-  /** §8.4's decision, over tabs read now and the session state read now. */
-  async function decide(
+  async function buildContext(
     current: GuardIndex,
-    tab: TabInfo,
     loaded: Loaded,
+    tabs: readonly TabInfo[],
     at: number,
-  ): Promise<DuplicateResolution | null> {
-    const candidates = await candidatesOf(current, tab);
-    if (candidates.length === 0) return null;
-
+    live: boolean,
+  ): Promise<GuardContext> {
     const [state, activity, focusedWindowId] = await Promise.all([
       readGuardState(),
       activityItem.getValue(),
       focusedWindow(),
     ]);
-
     const createdAt: Record<number, number> = {};
-    const hasActivity = Object.keys(activity).length > 0;
-    for (const known of [tab, ...candidates]) {
+    // The activity tracker debounces storage writes by 1 s, so a newly created tab is
+    // not in `local:activity` yet when the live guard runs: its creation timestamp is `at`.
+    const fillMissing = live && Object.keys(activity).length > 0;
+    for (const known of tabs) {
       const record = activity[known.id];
-      if (record !== undefined) {
-        createdAt[known.id] = record.createdAt;
-      } else if (hasActivity) {
-        // The activity tracker debounces storage writes by 1 s, so a newly created tab is
-        // not in `local:activity` yet when the guard runs: its creation timestamp is `at`.
-        createdAt[known.id] = at;
-      }
+      if (record !== undefined) createdAt[known.id] = record.createdAt;
+      else if (fillMissing) createdAt[known.id] = at;
     }
-
-    const ctx: GuardContext = {
+    return {
       now: at,
       settings: loaded.guard,
       match: loaded.match,
@@ -490,10 +465,26 @@ export function registerGuard(options: GuardOptions = {}): Guard {
       isWhitelisted: loaded.isWhitelisted,
       ownOrigin: loaded.ownOrigin,
       exemptions: state.exemptions,
-      pausedUntil: state.pausedUntil,
-      autoClosesAllowedFrom: state.graceUntil,
+      // No `pausedUntil` and no `autoClosesAllowedFrom` on manual sweep: the mode, the pause
+      // and the start-up grace do not hold back a key the user has just pressed.
+      ...(live ? { pausedUntil: state.pausedUntil, autoClosesAllowedFrom: state.graceUntil } : {}),
     };
-    return resolveDuplicate(tab, candidates, ctx);
+  }
+
+  /** §8.4's decision, over tabs read now and the session state read now. */
+  async function decide(
+    current: GuardIndex,
+    tab: TabInfo,
+    loaded: Loaded,
+    at: number,
+  ): Promise<DuplicateResolution | null> {
+    const candidates = await candidatesOf(current, tab);
+    if (candidates.length === 0) return null;
+    return resolveDuplicate(
+      tab,
+      candidates,
+      await buildContext(current, loaded, [tab, ...candidates], at, true),
+    );
   }
 
   /**
@@ -613,12 +604,12 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     await pauseGuard(until, settings.guard.mode);
     // An alarm and not a timer: 15 min of pause outlives the service worker many times
     // over (invariant 6). "Fino al riavvio" needs none, see `UNTIL_RESTART_MS`.
-    if (durationMs !== null) await api().alarms.create(RESUME_ALARM, { when: until });
+    if (durationMs !== null) await alarmsApi().create(RESUME_ALARM, { when: until });
   }
 
   async function resume(): Promise<void> {
     await resumeGuard();
-    await api().alarms.clear(RESUME_ALARM);
+    await alarmsApi().clear(RESUME_ALARM);
   }
 
   async function status(): Promise<GuardStatus> {
@@ -654,31 +645,7 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     const tabs = await queryTabs();
     const current = await indexed(loaded, tabs);
 
-    const [state, activity, focusedWindowId] = await Promise.all([
-      readGuardState(),
-      activityItem.getValue(),
-      focusedWindow(),
-    ]);
-    const createdAt: Record<number, number> = {};
-    for (const tab of tabs) {
-      const record = activity[tab.id];
-      if (record !== undefined) createdAt[tab.id] = record.createdAt;
-    }
-
-    const closes = resolveAllDuplicates(tabs, {
-      now: at,
-      settings: loaded.guard,
-      match: loaded.match,
-      createdAt,
-      navigatedTabIds: current.navigated,
-      focusedWindowId,
-      isWhitelisted: loaded.isWhitelisted,
-      ownOrigin: loaded.ownOrigin,
-      exemptions: state.exemptions,
-      // No `pausedUntil` and no `autoClosesAllowedFrom`: the mode, the pause and the
-      // start-up grace do not hold back a key the user has just pressed. See
-      // `resolveAllDuplicates`.
-    });
+    const closes = resolveAllDuplicates(tabs, await buildContext(current, loaded, tabs, at, false));
     if (closes.length === 0) return [];
 
     const byId = new Map(tabs.map((tab) => [tab.id, tab]));
@@ -740,8 +707,8 @@ export function registerGuard(options: GuardOptions = {}): Guard {
     let seen: Promise<unknown> | null = null;
     // The chain grows while it is being awaited — a close starts a flash, and the flash is
     // deliberately not part of it — so it is awaited until nothing is left moving.
-    while (seen !== chain || flashing !== null) {
-      seen = chain;
+    while (seen !== run.tail() || flashing !== null) {
+      seen = run.tail();
       await seen;
       await flashing;
     }
@@ -835,20 +802,6 @@ export function registerGuard(options: GuardOptions = {}): Guard {
   };
 }
 
-/**
- * The window the user is looking at, for the "Prefer the active window" rule (§8.4.3.5).
- *
- * `windows.getCurrent()` in a service worker answers with whatever window the event came
- * from, which is not the question. A browser with no window open at all has no answer.
- */
-async function focusedWindow(): Promise<number | undefined> {
-  try {
-    return (await api().windows.getLastFocused()).id;
-  } catch {
-    return undefined;
-  }
-}
-
 /** "Attivala" (PLAN.md §8.4.4). A tab that went while we were acting is not an error (§8.6). */
 async function activate(tab: TabInfo): Promise<void> {
   try {
@@ -858,31 +811,9 @@ async function activate(tab: TabInfo): Promise<void> {
   }
 }
 
-/** The pieces of the extension API this module cannot name through WXT's types. */
-interface GuardApi {
-  readonly alarms: {
-    /** A promise from Chrome 111 and from Firefox, nothing before that. */
-    create(name: string, info: { when: number }): Promise<void> | void;
-    clear(name: string): Promise<boolean> | void;
-  };
-  readonly windows: {
-    getLastFocused(): Promise<{ id?: number }>;
-  };
-}
-
-function api(): GuardApi {
-  return browser as unknown as GuardApi;
-}
-
 /** A guard registered without a badge: §8.5's flash is the badge's, and it may not be there. */
 function noFlash(): Promise<void> {
   return Promise.resolve();
 }
 
-function failed(error: unknown): void {
-  void reportBackgroundError('guard', error);
-}
-
-function ignore(): void {
-  /* keeps the queue alive after a failed event */
-}
+const failed = backgroundError('guard');

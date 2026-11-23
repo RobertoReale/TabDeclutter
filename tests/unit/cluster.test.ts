@@ -767,6 +767,57 @@ describe('grouping by topic (PLAN.md §7.2)', () => {
     expect(membership(proposal)).toEqual({ YouTube: [1, 2, 3] });
     expect(proposal.ungrouped).toEqual([]);
   });
+
+  it('merges 2-tab sub-topic pairs (Breviario, Lectio Magistralis, Travaglio) into a dominant entity cluster without merging unrelated groups', () => {
+    const realistic = [
+      tab(1, 'https://www.youtube.com/watch?v=1', 'Corrado Augias - I promessi sposi - YouTube'),
+      tab(
+        2,
+        'https://www.youtube.com/watch?v=2',
+        'Corrado Augias - I segreti del Vaticano - YouTube',
+      ),
+      tab(3, 'https://www.youtube.com/watch?v=3', 'Addio a Corrado Augias - YouTube'),
+      tab(4, 'https://www.youtube.com/watch?v=4', 'Corrado Augias - La torre di babele - YouTube'),
+      tab(5, 'https://www.youtube.com/watch?v=5', 'Corrado Augias e Giorgio Zanchini - YouTube'),
+      tab(6, 'https://www.youtube.com/watch?v=6', 'Corrado Augias intervista Berlusconi - YouTube'),
+      tab(
+        7,
+        'https://www.youtube.com/watch?v=7',
+        'Corrado Augias: Breviario per un confuso presente (Einaudi) - YouTube',
+      ),
+      tab(
+        8,
+        'https://www.youtube.com/watch?v=8',
+        'Corrado Augias presenta "Breviario per un confuso presente" (Einaudi) - YouTube',
+      ),
+      tab(
+        9,
+        'https://www.youtube.com/watch?v=9',
+        'Lectio magistralis sulla laicità "Stato e Chiesa cattolica" - Corrado Augias - YouTube',
+      ),
+      tab(
+        10,
+        'https://www.youtube.com/watch?v=10',
+        'Lectio magistralis. Il grande romanzo dei Vangeli. Corrado Augias - YouTube',
+      ),
+      tab(11, 'https://www.youtube.com/watch?v=11', 'Augias e Travaglio: polemista - YouTube'),
+      tab(
+        12,
+        'https://www.youtube.com/watch?v=12',
+        'Botta e risposta tra Augias e Travaglio - YouTube',
+      ),
+      tab(13, 'https://www.youtube.com/watch?v=13', 'Gigi Proietti racconta barzellette - YouTube'),
+      tab(14, 'https://www.youtube.com/watch?v=14', 'Gigi Proietti teatro omaggio - YouTube'),
+      tab(15, 'https://it.wikipedia.org/wiki/Dino_Campana', 'Dino Campana - Wikipedia'),
+      tab(16, 'https://gemini.google.com/app/campana', 'La perdita del manoscritto di Campana'),
+    ];
+    const proposal = groupByTopic(realistic);
+    const augiasGroup = proposal.groups.find((g) => g.tabIds.includes(1));
+    expect(augiasGroup?.tabIds).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    // Unrelated YouTube and Wikipedia/Gemini clusters remain separate.
+    expect(proposal.groups.some((g) => g.tabIds.includes(13) && g.tabIds.includes(14))).toBe(true);
+    expect(proposal.groups.some((g) => g.tabIds.includes(15) && g.tabIds.includes(16))).toBe(true);
+  });
 });
 
 describe('the two modes together (PLAN.md §4.4.2)', () => {

@@ -39,7 +39,7 @@ import { addDuplicateWhitelistPattern } from '@/platform/storage';
 import { keepTab, protectSite } from '@/platform/tabs';
 
 import type { GuardActions } from './guard';
-import { reportBackgroundError } from './report';
+import { backgroundError } from './report';
 
 /** The ids are ours and stable: `onClicked` reports the one that was chosen. */
 export const KEEP_ALWAYS_ID = 'keep-always';
@@ -57,10 +57,10 @@ export const PAUSE_15_MIN_MS = 15 * MINUTE;
 export const PAUSE_1_HOUR_MS = HOUR;
 
 /** The three items, in the order they are shown, each with the key of its title. */
-const ITEMS: readonly { readonly id: string; readonly titleKey: MessageKey }[] = [
-  { id: KEEP_ALWAYS_ID, titleKey: 'menuKeepAlways' },
-  { id: PROTECT_SITE_ID, titleKey: 'menuProtectSite' },
-  { id: ALLOW_DUPLICATES_ID, titleKey: 'menuAllowDuplicates' },
+const ITEMS: readonly (readonly [string, MessageKey])[] = [
+  [KEEP_ALWAYS_ID, 'menuKeepAlways'],
+  [PROTECT_SITE_ID, 'menuProtectSite'],
+  [ALLOW_DUPLICATES_ID, 'menuAllowDuplicates'],
 ];
 
 /** The context of the menu on the icon, which is where the guard's items live. */
@@ -74,17 +74,13 @@ const ACTION_CONTEXTS: readonly string[] = ['action'];
  * to `['page']`, which would file the children on the page menu instead of under their
  * parent; Chrome inherits the parent's, so saying it is right on both.
  */
-const ACTION_ITEMS: readonly {
-  readonly id: string;
-  readonly titleKey: MessageKey;
-  readonly parentId?: string;
-}[] = [
-  { id: REOPEN_DUPLICATE_ID, titleKey: 'menuReopenDuplicate' },
-  { id: REOPEN_ALLOW_SITE_ID, titleKey: 'menuReopenAllowSite' },
-  { id: PAUSE_GUARD_ID, titleKey: 'menuPauseGuard' },
-  { id: PAUSE_15_MIN_ID, titleKey: 'menuPause15Min', parentId: PAUSE_GUARD_ID },
-  { id: PAUSE_1_HOUR_ID, titleKey: 'menuPause1Hour', parentId: PAUSE_GUARD_ID },
-  { id: PAUSE_RESTART_ID, titleKey: 'menuPauseRestart', parentId: PAUSE_GUARD_ID },
+const ACTION_ITEMS: readonly (readonly [string, MessageKey, string?])[] = [
+  [REOPEN_DUPLICATE_ID, 'menuReopenDuplicate'],
+  [REOPEN_ALLOW_SITE_ID, 'menuReopenAllowSite'],
+  [PAUSE_GUARD_ID, 'menuPauseGuard'],
+  [PAUSE_15_MIN_ID, 'menuPause15Min', PAUSE_GUARD_ID],
+  [PAUSE_1_HOUR_ID, 'menuPause1Hour', PAUSE_GUARD_ID],
+  [PAUSE_RESTART_ID, 'menuPauseRestart', PAUSE_GUARD_ID],
 ];
 
 /** What one item is created with. The shape both browsers accept. */
@@ -150,16 +146,11 @@ export function registerMenus(options: MenusOptions): Menus {
     // The previous version's items, if the browser still holds them: `create` with an id
     // that already exists is an error, and an update fires `onInstalled`.
     await api.removeAll();
-    for (const item of ITEMS) api.create({ id: item.id, title: t(item.titleKey), contexts });
+    for (const [id, titleKey] of ITEMS) api.create({ id, title: t(titleKey), contexts });
     // The parent before its children: `create` with a `parentId` that does not exist yet is
     // an error, and `ACTION_ITEMS` is in that order.
-    for (const item of ACTION_ITEMS) {
-      api.create({
-        id: item.id,
-        title: t(item.titleKey),
-        contexts: ACTION_CONTEXTS,
-        parentId: item.parentId,
-      });
+    for (const [id, titleKey, parentId] of ACTION_ITEMS) {
+      api.create({ id, title: t(titleKey), contexts: ACTION_CONTEXTS, parentId });
     }
   }
 
@@ -171,33 +162,29 @@ export function registerMenus(options: MenusOptions): Menus {
    * there is no page under the menu and often no tab at all.
    */
   async function guardClicked(menuItemId: string | number): Promise<boolean> {
-    switch (menuItemId) {
-      case REOPEN_DUPLICATE_ID:
-        await guard.reopenLastDuplicate();
-        return true;
-      case REOPEN_ALLOW_SITE_ID: {
-        // The reopen first, and the whitelist from the entry it answers with: the archive
-        // holds the URL, and nothing else here knows which site it was.
-        const entry = await guard.reopenLastDuplicate();
-        if (entry === null) return true;
+    if (menuItemId === REOPEN_DUPLICATE_ID || menuItemId === REOPEN_ALLOW_SITE_ID) {
+      const entry = await guard.reopenLastDuplicate();
+      if (menuItemId === REOPEN_ALLOW_SITE_ID && entry !== null) {
         const pattern = duplicateWhitelistPattern(entry.url);
         if (pattern !== null) await addDuplicateWhitelistPattern(pattern);
-        return true;
       }
-      case PAUSE_15_MIN_ID:
-        await guard.pause(PAUSE_15_MIN_MS);
-        return true;
-      case PAUSE_1_HOUR_ID:
-        await guard.pause(PAUSE_1_HOUR_MS);
-        return true;
-      case PAUSE_RESTART_ID:
-        // `null`: until the browser restarts, which needs no alarm (see `guard.ts`).
-        await guard.pause(null);
-        return true;
-      // `PAUSE_GUARD_ID` among them: a parent opens its submenu and never reports a click.
-      default:
-        return false;
+      return true;
     }
+    if (
+      menuItemId === PAUSE_15_MIN_ID ||
+      menuItemId === PAUSE_1_HOUR_ID ||
+      menuItemId === PAUSE_RESTART_ID
+    ) {
+      await guard.pause(
+        menuItemId === PAUSE_15_MIN_ID
+          ? PAUSE_15_MIN_MS
+          : menuItemId === PAUSE_1_HOUR_ID
+            ? PAUSE_1_HOUR_MS
+            : null,
+      );
+      return true;
+    }
+    return false;
   }
 
   async function clicked(info: MenuClickInfo, tab?: ClickedTab): Promise<void> {
@@ -232,10 +219,7 @@ export function registerMenus(options: MenusOptions): Menus {
   // A profile with no menus API at all keeps the rest of the extension: three items the
   // browser will not show are not worth taking the background script down for.
   if (api === undefined) {
-    console.error(
-      'TabDeclutter: menus',
-      new Error('no menus API: neither browser.menus nor browser.contextMenus'),
-    );
+    console.error('TabDeclutter: menus', new Error('no menus API'));
     return { install, clicked };
   }
 
@@ -291,6 +275,4 @@ function menusApi(): MenusApi | undefined {
   return api.menus ?? api.contextMenus;
 }
 
-function failed(error: unknown): void {
-  void reportBackgroundError('menus', error);
-}
+const failed = backgroundError('menus');

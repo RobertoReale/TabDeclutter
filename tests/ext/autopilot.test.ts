@@ -495,8 +495,31 @@ describe('background/autopilot reliability', () => {
 
     expect(createSpy).not.toHaveBeenCalled();
 
+    // Turning on `aiRefreshEveryTab` forces an immediate AI refresh even for that 1 single new tab.
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoOrganize: true,
+      useTabGroups: false,
+      autoOrganizeMode: 'topic',
+      autoWindowMode: 'merge-windows',
+      useOnDeviceAi: true,
+      aiRefreshEveryTab: true,
+    });
+    await reloadedAutopilot.run();
+    await flushAsync();
+    expect(createSpy).toHaveBeenCalledTimes(1);
+
     // After a browser restart reusing the same tab IDs for unrelated sites, stale proposal is
-    // rejected and background AI refreshes once cleanly.
+    // rejected and background AI refreshes once cleanly even with `aiRefreshEveryTab: false`.
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      autoOrganize: true,
+      useTabGroups: false,
+      autoOrganizeMode: 'topic',
+      autoWindowMode: 'merge-windows',
+      useOnDeviceAi: true,
+      aiRefreshEveryTab: false,
+    });
     const postRestartTabs = baseTabs.map((entry) => ({
       ...entry,
       url: `https://newsite-${String(entry.id)}.example/page`,
@@ -506,7 +529,7 @@ describe('background/autopilot reliability', () => {
     await reloadedAutopilot.run();
     await flushAsync();
 
-    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(createSpy).toHaveBeenCalledTimes(2);
   });
 });
 

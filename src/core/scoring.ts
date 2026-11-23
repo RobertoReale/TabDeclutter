@@ -458,13 +458,9 @@ function transientReason(fact: TabFacts, config: ScoringConfig): Reason | undefi
     case 'browser-internal':
       // Extension document viewers (`chrome-extension://…` / `moz-extension://…`, e.g. Office
       // or PDF viewers) are not browser settings pages and should not be treated as transient.
-      if (
-        fact.url.toLowerCase().startsWith('chrome-extension:') ||
-        fact.url.toLowerCase().startsWith('moz-extension:')
-      ) {
-        return undefined;
-      }
-      return { code: 'browser-internal', points: config.transientPoints };
+      return /^(?:chrome|moz)-extension:/i.test(fact.url)
+        ? undefined
+        : { code: 'browser-internal', points: config.transientPoints };
     case 'error':
       return { code: 'error', points: config.errorPoints };
     default:
@@ -586,6 +582,15 @@ function scoreOne(fact: TabFacts, window: WindowFacts, pass: Pass): ScoredTab {
   let cachedKeepKey: string | undefined;
   const keepKeyOf = (): string => (cachedKeepKey ??= keepKey(fact.url));
 
+  const finish = (reasons: readonly Reason[], score: number, multiplier = 1): ScoredTab => ({
+    ...common,
+    score,
+    bucket: bucketOf(score, config),
+    primaryReason: primaryReasonOf(reasons),
+    reasons,
+    multiplier,
+  });
+
   // Step 1. A protected tab is not scored at all, and no reason is collected for it:
   // nothing about it is on the list to explain.
   const protectedBy = protectionOf(fact, pass, keepKeyOf);
@@ -605,31 +610,16 @@ function scoreOne(fact: TabFacts, window: WindowFacts, pass: Pass): ScoredTab {
   // a duplicate inside a group is still the same page twice.
   const keptTabId = fact.type === 'blank' ? undefined : pass.duplicateOf.get(fact.tab.id);
   if (keptTabId !== undefined) {
-    const reasons: readonly Reason[] = [
-      { code: 'duplicate', points: config.duplicatePoints, keptTabId },
-    ];
-    return {
-      ...common,
-      score: config.duplicatePoints,
-      bucket: bucketOf(config.duplicatePoints, config),
-      primaryReason: primaryReasonOf(reasons),
-      reasons,
-      multiplier: 1,
-    };
+    return finish(
+      [{ code: 'duplicate', points: config.duplicatePoints, keptTabId }],
+      config.duplicatePoints,
+    );
   }
 
   // "Empty and inactive": an empty tab the user came back to minutes ago is a tab they
   // are using, whatever its age (PLAN.md §6.4, docs/DECISIONS.md).
   if (fact.type === 'blank' && fact.idleMs > config.transientMinIdleMs) {
-    const reasons: readonly Reason[] = [{ code: 'blank', points: config.blankPoints }];
-    return {
-      ...common,
-      score: config.blankPoints,
-      bucket: bucketOf(config.blankPoints, config),
-      primaryReason: primaryReasonOf(reasons),
-      reasons,
-      multiplier: 1,
-    };
+    return finish([{ code: 'blank', points: config.blankPoints }], config.blankPoints);
   }
 
   // Step 3. Every rule that fires adds its own points, and the score is their sum, so
@@ -677,16 +667,6 @@ function scoreOne(fact: TabFacts, window: WindowFacts, pass: Pass): ScoredTab {
   }
 
   const total = reasons.reduce((sum, reason) => sum + reason.points, 0);
-  const grouped = fact.tab.groupId !== NO_GROUP_ID;
-  const multiplier = grouped ? config.groupedMultiplier : 1;
-  const score = clamp(Math.round(total * multiplier), 0, config.maxScore);
-
-  return {
-    ...common,
-    score,
-    bucket: bucketOf(score, config),
-    primaryReason: primaryReasonOf(reasons),
-    reasons,
-    multiplier,
-  };
+  const multiplier = fact.tab.groupId !== NO_GROUP_ID ? config.groupedMultiplier : 1;
+  return finish(reasons, clamp(Math.round(total * multiplier), 0, config.maxScore), multiplier);
 }

@@ -48,7 +48,15 @@ import {
   organizeWindows,
 } from '@/platform/windows';
 
-import { reportBackgroundError } from './report';
+import {
+  alarmsApi,
+  backgroundError,
+  createSerialQueue,
+  ensurePeriodicAlarm,
+  focusedWindow,
+  ignore,
+  localKeys,
+} from './report';
 
 const AUTOPILOT_DEBOUNCE_MS = 1_200;
 const AUTOPILOT_PERIOD_MINUTES = 15;
@@ -60,7 +68,7 @@ const STARTUP_ALARM_DELAY_MS = Math.max(STARTUP_GRACE_MS + 500, 30_000);
 const BG_AI_WARMUP_TIMEOUT_MS = 300_000;
 const BG_AI_TIMEOUT_MS = 90_000;
 const BG_AI_COOLDOWN_MS = 2 * MINUTE;
-const BG_AI_MAX_BATCH_TABS = 60;
+const BG_AI_MAX_BATCH_TABS = 35;
 const BG_AI_MAX_GROUPS = 8;
 const BG_AI_MAX_NAME_LENGTH = 24;
 const SW_KEEPALIVE_MS = 20_000;
@@ -104,12 +112,11 @@ function backgroundLanguageModel(): BackgroundLanguageModelApi | undefined {
     : undefined;
 }
 
-const WATCHED: readonly string[] = [
-  settingsItem,
-  keepsItem,
-  protectedDomainsItem,
-  duplicateWhitelistItem,
-].map((item) => item.key.slice(6));
+const EMPTY_AI = { proposal: null, signature: '' } as const;
+const readZero = (item: { getValue(): Promise<number> }): Promise<number> =>
+  item.getValue().catch(() => 0);
+
+const WATCHED = localKeys([settingsItem, keepsItem, protectedDomainsItem, duplicateWhitelistItem]);
 
 export interface AutopilotOptions {
   readonly now?: () => number;
@@ -135,14 +142,12 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   const flash = options.flash;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let chain: Promise<unknown> = Promise.resolve();
+  const enqueue = createSerialQueue();
   let bgAiInFlight = false;
   let lastBgAiSignature = '';
 
   function run(): Promise<AutopilotReport> {
-    const next = chain.then(sweep, sweep);
-    chain = next.then(ignore, ignore);
-    return next;
+    return enqueue(sweep);
   }
 
   function schedule(): void {
@@ -156,20 +161,20 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     await aiBgCooldownUntilItem.setValue(now() + BG_AI_COOLDOWN_MS).catch(ignore);
   }
 
-  async function refreshAiInBackground(focusedId?: number): Promise<void> {
+  async function refreshAiInBackground(focusedId?: number, refreshEveryTab = false): Promise<void> {
     if (bgAiInFlight) return;
     const modelApi = capabilities.promptApi ? backgroundLanguageModel() : undefined;
     if (modelApi === undefined) return;
 
     const [cooldownUntil, busyUntil] = await Promise.all([
-      aiBgCooldownUntilItem.getValue().catch(() => 0),
-      aiBusyUntilItem.getValue().catch(() => 0),
+      readZero(aiBgCooldownUntilItem),
+      readZero(aiBusyUntilItem),
     ]);
     if (cooldownUntil > now() || busyUntil > now()) return;
 
     const [allTabs, proposalState] = await Promise.all([
       queryTabs().catch(() => []),
-      readAiProposalState().catch(() => ({ proposal: null, signature: '' })),
+      readAiProposalState().catch(() => EMPTY_AI),
     ]);
     const movable = allTabs.filter(
       (tab) => !tab.incognito && tab.windowId !== NO_WINDOW && isMovableTab(tab),
@@ -177,7 +182,12 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     if (movable.length < 2) return;
     const signature = movableTabsSignature(movable);
     if (
-      aiProposalFreshForAutoRefresh(proposalState.proposal, movable, proposalState.signature) ||
+      aiProposalFreshForAutoRefresh(
+        proposalState.proposal,
+        movable,
+        proposalState.signature,
+        refreshEveryTab,
+      ) ||
       lastBgAiSignature === signature
     ) {
       return;
@@ -199,7 +209,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
 
       const bgController = new AbortController();
       const unsubPreempt = onBackgroundAiPreempt(() => {
-        bgController.abort(new DOMException('preempted', 'AbortError'));
+        bgController.abort(new DOMException('', 'AbortError'));
       });
 
       try {
@@ -215,7 +225,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         // Inference can take 30-90 s; re-read settings and snooze before moving any window.
         const [latest, snoozeUntil] = await Promise.all([
           readSettings(),
-          organizeSnoozeUntilItem.getValue().catch(() => 0),
+          readZero(organizeSnoozeUntilItem),
         ]);
         if (
           bgController.signal.aborted ||
@@ -326,15 +336,12 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     }
 
     if (settings.autoOrganize) {
-      const snoozeUntil = await organizeSnoozeUntilItem.getValue().catch(() => 0);
-      if (snoozeUntil > at) {
+      if ((await readZero(organizeSnoozeUntilItem)) > at) {
         return { closedTabs, closedWindows, groupedWindows };
       }
       const useAiWindows =
         !settings.useTabGroups && settings.autoOrganizeMode === 'topic' && settings.useOnDeviceAi;
-      const aiState = useAiWindows
-        ? await readAiProposalState().catch(() => ({ proposal: null, signature: '' }))
-        : { proposal: null, signature: '' };
+      const aiState = useAiWindows ? await readAiProposalState().catch(() => EMPTY_AI) : EMPTY_AI;
       const winResult = await organizeWindows({
         windowMode: settings.autoWindowMode,
         clusterMode: settings.autoOrganizeMode,
@@ -345,7 +352,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       });
       groupedWindows = winResult.windowsCount;
       if (useAiWindows) {
-        void refreshAiInBackground(focusedId).catch(ignore);
+        void refreshAiInBackground(focusedId, settings.aiRefreshEveryTab).catch(ignore);
       }
     }
 
@@ -385,8 +392,8 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
   // Use a durable alarm rather than `setTimeout` so an MV3 service worker suspended during
   // the 15 s startup grace window still runs its post-restore sweep on time (invariant 6).
   browser.runtime.onStartup.addListener(() => {
-    void api()
-      .alarms.create(STARTUP_ALARM_NAME, { when: now() + STARTUP_ALARM_DELAY_MS })
+    void alarmsApi()
+      .create(STARTUP_ALARM_NAME, { when: now() + STARTUP_ALARM_DELAY_MS })
       ?.catch(() => {
         setTimeout(() => {
           void run().catch(failed);
@@ -398,7 +405,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     void run().catch(failed);
   });
 
-  void ensureAlarm().catch(failed);
+  void ensurePeriodicAlarm(ALARM_NAME, AUTOPILOT_PERIOD_MINUTES).catch(failed);
 
   return { run };
 }
@@ -489,12 +496,17 @@ async function promptBackgroundProposal(
       answered += 1;
 
       for (const draft of verdict.drafts) {
-        if (groups.length >= BG_AI_MAX_GROUPS) break;
         const tabIds = draft.tabIds
           .map((id) => movable[id - 1]?.id)
           .filter((id): id is number => id !== undefined && !claimed.has(id));
         if (tabIds.length < 2) continue;
         for (const id of tabIds) claimed.add(id);
+        const existing = groups.find((g) => g.title.toLowerCase() === draft.title.toLowerCase());
+        if (existing !== undefined) {
+          (existing.tabIds as number[]).push(...tabIds);
+          continue;
+        }
+        if (groups.length >= BG_AI_MAX_GROUPS) break;
         groups.push({
           key: `ai:1:${groups.length}:${draft.title.toLowerCase()}`,
           title: draft.title,
@@ -562,7 +574,7 @@ async function withTimeout<T>(
   if (outerSignal.aborted) onOuterAbort();
   else outerSignal.addEventListener('abort', onOuterAbort, { once: true });
   const timer = setTimeout(() => {
-    controller.abort(new DOMException('timeout', 'TimeoutError'));
+    controller.abort(new DOMException('', 'TimeoutError'));
   }, timeoutMs);
   (timer as unknown as { unref?: () => void }).unref?.();
   try {
@@ -571,34 +583,6 @@ async function withTimeout<T>(
     clearTimeout(timer);
     outerSignal.removeEventListener('abort', onOuterAbort);
   }
-}
-
-async function ensureAlarm(): Promise<void> {
-  const alarms = api().alarms;
-  if ((await alarms.get(ALARM_NAME)) !== undefined) return;
-  await alarms.create(ALARM_NAME, { periodInMinutes: AUTOPILOT_PERIOD_MINUTES });
-}
-
-async function focusedWindow(): Promise<number | undefined> {
-  try {
-    return (await api().windows.getLastFocused()).id;
-  } catch {
-    return undefined;
-  }
-}
-
-interface AutopilotApi {
-  readonly alarms: {
-    get(name: string): Promise<{ name: string } | undefined>;
-    create(name: string, info: { periodInMinutes?: number; when?: number }): Promise<void> | void;
-  };
-  readonly windows: {
-    getLastFocused(): Promise<{ id?: number }>;
-  };
-}
-
-function api(): AutopilotApi {
-  return browser as unknown as AutopilotApi;
 }
 
 /**
@@ -656,10 +640,4 @@ function onlyAiToggleChanged(
   );
 }
 
-function failed(error: unknown): void {
-  void reportBackgroundError('autopilot', error);
-}
-
-function ignore(): void {
-  /* keeps the queue alive after a failed sweep */
-}
+const failed = backgroundError('autopilot');
