@@ -1290,6 +1290,13 @@ button {
   margin: 0;
 }
 
+.td-window-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--td-space-2);
+  margin-top: var(--td-space-2);
+}
+
 .td-window-plan-group {
   margin-top: var(--td-space-2);
   padding: var(--td-space-2);
@@ -1298,14 +1305,47 @@ button {
   border-radius: var(--td-radius);
 }
 
+.td-window-plan-row {
+  display: flex;
+  align-items: center;
+  gap: var(--td-space-2);
+}
+
 .td-window-plan-summary {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--td-space-2);
   min-height: var(--td-target);
   font-weight: 500;
+  text-align: left;
   cursor: pointer;
   user-select: none;
+}
+
+.td-window-plan-chevron {
+  flex: none;
+  width: 0.9em;
+  color: var(--td-text-muted);
+  text-align: center;
+}
+
+.td-window-plan-save,
+.td-window-plan-saved {
+  flex: none;
+  white-space: nowrap;
+}
+
+.td-window-plan-save {
+  font-size: var(--td-text-meta);
+  padding: 2px var(--td-space-2);
+}
+
+.td-window-plan-saved {
+  color: var(--td-accent-text);
+  border-color: var(--td-accent);
+  background: var(--td-accent-subtle);
 }
 
 .td-window-plan-name {

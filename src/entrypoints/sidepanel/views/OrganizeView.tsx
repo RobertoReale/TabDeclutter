@@ -17,7 +17,7 @@
  * explains is better than one that is missing.
  */
 
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { caps } from '@/platform/capabilities';
 import { t, type MessageKey } from '@/platform/i18n';
@@ -26,6 +26,7 @@ import { ungroupAllOpenTabs } from '@/platform/windows';
 import { requestYouTubePermission } from '@/platform/youtube';
 import type { ClusterMode } from '@/core/cluster';
 import { tabUrl } from '@/core/duplicates';
+import { isClusterSavedAsTabGroup } from '@/core/plan-groups';
 import {
   NO_GROUP_ID,
   type AutoWindowMode,
@@ -67,6 +68,7 @@ import {
   clearAiFallbackNotice,
   clearSavedAiProposal,
   dismissApplied,
+  dismissWindowGroupSaved,
   dismissWindowOrganized,
   dismissYouTubeSorted,
   draft,
@@ -81,6 +83,7 @@ import {
   options,
   organizeWindowsWithAi,
   plannedTabs,
+  saveWindowPlanGroups,
   savedAiProposal,
   savedAiProposalLoaded,
   savedAiProposalSignature,
@@ -93,7 +96,10 @@ import {
   startAiGrouping,
   undoApply,
   undoWindowOrganize,
+  undoWindowPlanGroups,
   undoYouTubeSort,
+  windowGroupSavedMessage,
+  windowGroupWorking,
   windowOrganized,
   windowPlan,
   windowWorking,
@@ -289,6 +295,7 @@ export function OrganizeView({ language }: { language: string }) {
               type="button"
               class="td-action"
               onClick={() => {
+                dismissWindowGroupSaved();
                 void ungroupAllOpenTabs().catch(report);
               }}
             >
@@ -420,6 +427,7 @@ export function OrganizeView({ language }: { language: string }) {
           plan={windowPlan.value}
           tabs={tabs.value}
           durations={currentSettings.sortYouTubeByDuration ? savedYouTubeDurations.value : null}
+          focusedWindowId={panelData.value?.focusedWindowId}
           language={language}
         />
       )}
@@ -491,6 +499,7 @@ export function OrganizeView({ language }: { language: string }) {
       {!currentSettings.useTabGroups && (
         <div class="td-footer">
           <YouTubeSortedToast language={language} />
+          <WindowGroupSavedToast language={language} />
           <WindowOrganizedToast language={language} />
         </div>
       )}
@@ -773,15 +782,26 @@ function WindowPlanOverview({
   plan,
   tabs: openTabs,
   durations,
+  focusedWindowId,
   language,
 }: {
   plan: WindowPlan;
   tabs: readonly TabInfo[];
   durations: YouTubeDurationCache | null;
+  focusedWindowId?: number;
   language: string;
 }) {
+  const [expanded, setExpanded] = useState<Readonly<Record<string, boolean>>>({});
+
   if (plan.groups.length === 0 && plan.ungrouped.length === 0) return null;
   const byId = new Map(openTabs.map((tab) => [tab.id, tab]));
+  const busy = windowGroupWorking.value || windowWorking.value;
+  const savedFlags = plan.groups.map((group) => isClusterSavedAsTabGroup(group.tabIds, byId));
+  const hasUnsavedGroups = savedFlags.some((saved) => !saved);
+
+  function toggleRow(key: string): void {
+    setExpanded((prev) => ({ ...prev, [key]: prev[key] !== true }));
+  }
 
   function renderTabs(tabIds: readonly number[]) {
     return (
@@ -814,6 +834,8 @@ function WindowPlanOverview({
     );
   }
 
+  const otherExpanded = expanded.__other === true;
+
   return (
     <section class="td-window-plan" aria-label={t('windowPlanHeading')}>
       <div class="td-window-plan-head">
@@ -824,32 +846,90 @@ function WindowPlanOverview({
       </div>
       <p class="td-field-hint">{t('windowPlanHint')}</p>
 
-      {plan.groups.map((group) => (
-        <details key={group.key} class="td-window-plan-group">
-          <summary class="td-window-plan-summary">
-            <span class="td-group-swatch" data-color={group.color} aria-hidden="true" />
-            <span class="td-window-plan-name">
-              {t('sectionHeading', group.title, formatCount(group.tabIds.length, language))}
-            </span>
-          </summary>
-          {renderTabs(group.tabIds)}
-        </details>
-      ))}
+      {plan.groups.length > 0 && (
+        <div class="td-window-plan-actions">
+          <button
+            type="button"
+            class="td-action"
+            disabled={busy || !hasUnsavedGroups}
+            onClick={() => {
+              void saveWindowPlanGroups(plan.groups, focusedWindowId).catch(report);
+            }}
+          >
+            {t('windowPlanSaveAll')}
+          </button>
+        </div>
+      )}
+
+      {plan.groups.map((group, index) => {
+        const isOpen = expanded[group.key] === true;
+        const isSaved = savedFlags[index] === true;
+        return (
+          <div key={group.key} class="td-window-plan-group">
+            <div class="td-window-plan-row">
+              <button
+                type="button"
+                class="td-window-plan-summary"
+                aria-expanded={isOpen}
+                onClick={() => {
+                  toggleRow(group.key);
+                }}
+              >
+                <span class="td-window-plan-chevron" aria-hidden="true">
+                  {isOpen ? '▾' : '▸'}
+                </span>
+                <span class="td-group-swatch" data-color={group.color} aria-hidden="true" />
+                <span class="td-window-plan-name">
+                  {t('sectionHeading', group.title, formatCount(group.tabIds.length, language))}
+                </span>
+              </button>
+              {isSaved ? (
+                <span class="td-chip td-window-plan-saved">{t('windowPlanGroupSaved')}</span>
+              ) : (
+                <button
+                  type="button"
+                  class="td-action td-window-plan-save"
+                  disabled={busy}
+                  aria-label={t('windowPlanSaveGroupAria', group.title)}
+                  onClick={() => {
+                    void saveWindowPlanGroups([group], focusedWindowId).catch(report);
+                  }}
+                >
+                  {t('windowPlanSaveGroup')}
+                </button>
+              )}
+            </div>
+            {isOpen && renderTabs(group.tabIds)}
+          </div>
+        );
+      })}
 
       {plan.ungrouped.length > 0 && (
-        <details class="td-window-plan-group">
-          <summary class="td-window-plan-summary">
-            <span class="td-group-swatch" data-color="grey" aria-hidden="true" />
-            <span class="td-window-plan-name">
-              {t(
-                'sectionHeading',
-                t('organizeOther'),
-                formatCount(plan.ungrouped.length, language),
-              )}
-            </span>
-          </summary>
-          {renderTabs(plan.ungrouped)}
-        </details>
+        <div class="td-window-plan-group">
+          <div class="td-window-plan-row">
+            <button
+              type="button"
+              class="td-window-plan-summary"
+              aria-expanded={otherExpanded}
+              onClick={() => {
+                toggleRow('__other');
+              }}
+            >
+              <span class="td-window-plan-chevron" aria-hidden="true">
+                {otherExpanded ? '▾' : '▸'}
+              </span>
+              <span class="td-group-swatch" data-color="grey" aria-hidden="true" />
+              <span class="td-window-plan-name">
+                {t(
+                  'sectionHeading',
+                  t('organizeOther'),
+                  formatCount(plan.ungrouped.length, language),
+                )}
+              </span>
+            </button>
+          </div>
+          {otherExpanded && renderTabs(plan.ungrouped)}
+        </div>
       )}
     </section>
   );
@@ -921,6 +1001,41 @@ function YouTubeSortedToast({ language }: { language: string }) {
             {t('actionUndo')}
           </button>
           <button type="button" class="td-action td-toast-undo" onClick={dismissYouTubeSorted}>
+            {t('organizeDismiss')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Undo toast for 1-click saving "Windows and topics" clusters as native browser tab groups.
+ */
+function WindowGroupSavedToast({ language }: { language: string }) {
+  const message = windowGroupSavedMessage.value;
+
+  return (
+    <div class="td-toast-slot" role="status" aria-live="polite">
+      {message !== null && (
+        <div class="td-toast">
+          <span class="td-toast-text">
+            {message.count === 1
+              ? t('windowPlanSavedOne', message.firstTitle)
+              : t('windowPlanSavedOther', formatCount(message.count, language))}
+            {message.skipped !== null && ` · ${pairText(message.skipped, t, language)}`}
+          </span>
+          <button
+            type="button"
+            class="td-action td-toast-undo"
+            disabled={windowGroupWorking.value}
+            onClick={() => {
+              void undoWindowPlanGroups();
+            }}
+          >
+            {t('actionUndo')}
+          </button>
+          <button type="button" class="td-action td-toast-undo" onClick={dismissWindowGroupSaved}>
             {t('organizeDismiss')}
           </button>
         </div>

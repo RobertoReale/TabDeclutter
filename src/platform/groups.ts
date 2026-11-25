@@ -27,6 +27,7 @@
 
 import type { GroupColor, GroupProposal } from '../core/cluster';
 import { GROUP_COLORS } from '../core/cluster';
+import { planNativeTabGroups, type PlanCluster } from '../core/plan-groups';
 import type { TabInfo } from '../core/types';
 import { NO_GROUP_ID } from '../core/types';
 import type { Capabilities } from './capabilities';
@@ -567,4 +568,292 @@ function snapshotOf(tab: TabInfo, groups: ReadonlyMap<number, TabGroupInfo>): Ta
 /** A colour name we do not know reads as `grey`, which is the browsers' own default. */
 function asGroupColor(color: string | undefined): GroupColor {
   return GROUP_COLORS.find((known) => known === color) ?? 'grey';
+}
+
+/**
+ * Extended browser API slice for saving "Windows and topics" clusters as native tab groups,
+ * which may move tabs into a common window before grouping and recreate emptied windows on Undo.
+ */
+export interface PlanGroupsApi {
+  tabs: {
+    query(query: Record<string, unknown>): Promise<BrowserTab[]>;
+    group(options: {
+      tabIds: readonly number[];
+      groupId?: number;
+      createProperties?: { windowId: number };
+    }): Promise<number>;
+    ungroup(tabIds: readonly number[]): Promise<unknown>;
+    move(tabId: number, properties: { windowId?: number; index: number }): Promise<unknown>;
+    update?(tabId: number, properties: { pinned?: boolean; active?: boolean }): Promise<unknown>;
+  };
+  tabGroups?: GroupsApi['tabGroups'];
+  windows?: {
+    create(properties: { tabId?: number; focused?: boolean }): Promise<{ id?: number } | undefined>;
+  };
+}
+
+function planGroupsApi(): PlanGroupsApi {
+  return browser as unknown as PlanGroupsApi;
+}
+
+export interface SavedTabSnapshot extends TabSnapshot {
+  readonly active: boolean;
+}
+
+export interface SavePlanGroupsResult {
+  readonly snapshot: readonly SavedTabSnapshot[];
+  readonly groups: readonly AppliedGroup[];
+  /** Exact tab IDs newly added to a native group, so Undo ungroups only what this action changed. */
+  readonly changedTabIds: readonly number[];
+  readonly skipped: number;
+  readonly focusedWindowId?: number;
+}
+
+export interface SavePlanGroupsOptions {
+  readonly focusedWindowId?: number;
+  readonly api?: PlanGroupsApi;
+  readonly capabilities?: Capabilities;
+}
+
+export type UndoPlanGroupsOptions = Pick<SavePlanGroupsOptions, 'api' | 'capabilities'>;
+
+const NOTHING_SAVED: SavePlanGroupsResult = {
+  snapshot: [],
+  groups: [],
+  changedTabIds: [],
+  skipped: 0,
+};
+
+async function joinGroup(
+  api: PlanGroupsApi,
+  tabIds: readonly number[],
+  groupId: number,
+): Promise<readonly number[]> {
+  const batch = await attempt(() => api.tabs.group({ tabIds, groupId }));
+  if (batch.ok) return tabIds;
+
+  const grouped: number[] = [];
+  for (const tabId of tabIds) {
+    const one = await attempt(() => api.tabs.group({ tabIds: [tabId], groupId }));
+    if (one.ok) grouped.push(tabId);
+  }
+  return grouped;
+}
+
+/**
+ * Converts one or more organized "Windows and topics" clusters into native browser tab groups
+ * (title + colour), moving tabs from other windows into each cluster's primary window first so
+ * `tabs.group` succeeds on both Chrome and Firefox. Reuses an existing native group when a saved
+ * cluster gained new tabs, and captures a complete multi-window snapshot for 1-click Undo.
+ */
+export async function savePlanAsTabGroups(
+  clusters: readonly PlanCluster[],
+  options: SavePlanGroupsOptions = {},
+): Promise<SavePlanGroupsResult> {
+  const proposed = clusters.reduce((total, cluster) => total + cluster.tabIds.length, 0);
+  if (proposed === 0) return NOTHING_SAVED;
+
+  const capabilities = options.capabilities ?? caps;
+  if (!capabilities.tabGroups) return { ...NOTHING_SAVED, skipped: proposed };
+
+  const api = options.api ?? planGroupsApi();
+  const groupsCompat = api as unknown as GroupsApi;
+  const live = await liveTabs(groupsCompat);
+  if (live === null) return { ...NOTHING_SAVED, skipped: proposed };
+
+  const existing = await liveGroups(groupsCompat);
+  const plan = planNativeTabGroups(clusters, live, options.focusedWindowId);
+  if (plan.items.length === 0) return { ...NOTHING_SAVED, skipped: plan.skipped };
+
+  const byId = new Map(live.map((tab) => [tab.id, tab]));
+  const affectedWindows = new Set<number>();
+  for (const item of plan.items) {
+    affectedWindows.add(item.targetWindowId);
+    for (const id of item.allTabIds) {
+      const win = byId.get(id)?.windowId;
+      if (win !== undefined) affectedWindows.add(win);
+    }
+  }
+  const snapshot: SavedTabSnapshot[] = live
+    .filter((tab) => affectedWindows.has(tab.windowId))
+    .map((tab) => ({ ...snapshotOf(tab, existing), active: tab.active }));
+
+  const applied: AppliedGroup[] = [];
+  const changedTabIds: number[] = [];
+  let skipped = plan.skipped;
+
+  for (const item of plan.items) {
+    const failedMoves = new Set<number>();
+    for (const tabId of item.moveTabIds) {
+      const moved = await attempt(() =>
+        api.tabs.move(tabId, { windowId: item.targetWindowId, index: -1 }),
+      );
+      if (!moved.ok) failedMoves.add(tabId);
+    }
+    skipped += failedMoves.size;
+
+    const toGroup = item.groupTabIds.filter((tabId) => !failedMoves.has(tabId));
+    if (toGroup.length === 0) continue;
+
+    if (item.reuseGroupId !== null) {
+      const joined = await joinGroup(api, toGroup, item.reuseGroupId);
+      skipped += toGroup.length - joined.length;
+      if (joined.length === 0) continue;
+
+      const prev = existing.get(item.reuseGroupId);
+      if (prev === undefined || prev.title === '') {
+        await attempt(async () =>
+          api.tabGroups?.update(item.reuseGroupId!, {
+            title: item.title,
+            color: item.color,
+          }),
+        );
+      }
+      changedTabIds.push(...joined);
+      applied.push({
+        key: item.key,
+        groupId: item.reuseGroupId,
+        windowId: item.targetWindowId,
+        title: prev !== undefined && prev.title !== '' ? prev.title : item.title,
+        tabIds: joined,
+      });
+      continue;
+    }
+
+    const created = await createGroup(groupsCompat, toGroup, item.targetWindowId);
+    skipped += toGroup.length - created.tabIds.length;
+    if (created.groupId === null) continue;
+
+    await attempt(async () =>
+      api.tabGroups?.update(created.groupId!, {
+        title: item.title,
+        color: item.color,
+        collapsed: false,
+      }),
+    );
+    changedTabIds.push(...created.tabIds);
+    applied.push({
+      key: item.key,
+      groupId: created.groupId,
+      windowId: item.targetWindowId,
+      title: item.title,
+      tabIds: created.tabIds,
+    });
+  }
+
+  return {
+    snapshot,
+    groups: applied,
+    changedTabIds,
+    skipped,
+    ...(options.focusedWindowId === undefined ? {} : { focusedWindowId: options.focusedWindowId }),
+  };
+}
+
+/**
+ * Reverts `savePlanAsTabGroups`: ungroups only tabs newly added by that action, recreates any
+ * emptied window that closed during cross-window moves, returns tabs to their original windows,
+ * restores any prior native tab groups and exact tab indices, and restores active tabs.
+ */
+export async function undoSavedPlanGroups(
+  result: SavePlanGroupsResult,
+  options: UndoPlanGroupsOptions = {},
+): Promise<void> {
+  if (result.groups.length === 0) return;
+  const capabilities = options.capabilities ?? caps;
+  if (!capabilities.tabGroups) return;
+
+  const api = options.api ?? planGroupsApi();
+  const groupsCompat = api as unknown as GroupsApi;
+
+  await ungroupAll(groupsCompat, result.changedTabIds);
+
+  let live = await liveTabs(groupsCompat);
+  if (live === null) return;
+  let byId = new Map(live.map((tab) => [tab.id, tab]));
+  const liveWindowIds = new Set(live.map((tab) => tab.windowId));
+  const here = result.snapshot.filter((entry) => byId.has(entry.tabId));
+
+  const byOrigWindow = new Map<number, SavedTabSnapshot[]>();
+  for (const entry of here) {
+    const list = byOrigWindow.get(entry.windowId);
+    if (list === undefined) byOrigWindow.set(entry.windowId, [entry]);
+    else list.push(entry);
+  }
+
+  const windowMap = new Map<number, number>();
+  let movedCrossWindow = false;
+
+  // Recreate emptied windows first so their tabs leave surviving windows before ordering.
+  for (const [origWindowId, entries] of byOrigWindow) {
+    if (liveWindowIds.has(origWindowId)) {
+      windowMap.set(origWindowId, origWindowId);
+      continue;
+    }
+    if (typeof api.windows?.create !== 'function') continue;
+    const ordered = entries.slice().sort((left, right) => left.index - right.index);
+    const [first, ...rest] = ordered;
+    if (first === undefined) continue;
+    const created = await attempt(() =>
+      api.windows!.create({
+        tabId: first.tabId,
+        focused: origWindowId === result.focusedWindowId,
+      }),
+    );
+    const newWindowId = created.ok ? created.value?.id : undefined;
+    if (newWindowId === undefined) continue;
+    windowMap.set(origWindowId, newWindowId);
+    movedCrossWindow = true;
+    for (const entry of rest) {
+      await attempt(() => api.tabs.move(entry.tabId, { windowId: newWindowId, index: -1 }));
+    }
+  }
+
+  // Return tabs that moved out of surviving windows.
+  for (const [origWindowId, entries] of byOrigWindow) {
+    if (!liveWindowIds.has(origWindowId)) continue;
+    const ordered = entries.slice().sort((left, right) => left.index - right.index);
+    for (const entry of ordered) {
+      const current = byId.get(entry.tabId);
+      if (current === undefined || current.windowId === origWindowId) continue;
+      const moved = await attempt(() =>
+        api.tabs.move(entry.tabId, { windowId: origWindowId, index: -1 }),
+      );
+      if (moved.ok) movedCrossWindow = true;
+    }
+  }
+
+  if (movedCrossWindow) {
+    const refreshed = await liveTabs(groupsCompat);
+    if (refreshed !== null) {
+      live = refreshed;
+      byId = new Map(live.map((tab) => [tab.id, tab]));
+    }
+  }
+
+  const remapped: SavedTabSnapshot[] = here.map((entry) => {
+    const mappedWindow = windowMap.get(entry.windowId) ?? entry.windowId;
+    return mappedWindow === entry.windowId
+      ? entry
+      : {
+          ...entry,
+          windowId: mappedWindow,
+          ...(entry.group === undefined
+            ? {}
+            : { group: { ...entry.group, windowId: mappedWindow } }),
+        };
+  });
+
+  if (typeof api.tabs.update === 'function') {
+    await repin(groupsCompat, remapped, byId);
+  }
+  const groupIds = await restoreGroups(groupsCompat, remapped, byId);
+  await restoreOrder(groupsCompat, remapped, groupIds);
+
+  if (movedCrossWindow && typeof api.tabs.update === 'function') {
+    for (const entry of remapped) {
+      if (!entry.active) continue;
+      await attempt(() => api.tabs.update!(entry.tabId, { active: true }));
+    }
+  }
 }

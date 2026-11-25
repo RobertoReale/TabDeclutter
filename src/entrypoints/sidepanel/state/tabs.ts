@@ -224,6 +224,23 @@ export function startPanelState(options: PanelStateOptions = {}): PanelStateHand
   browser.tabs.onDetached.addListener(schedule);
   // Chrome gives a discarded tab a new id; Firefox never fires this (PLAN.md §5.5).
   browser.tabs.onReplaced?.addListener(schedule);
+  // Native tab-group lifecycle events (creating/renaming/removing groups without moving tabs).
+  try {
+    const tabGroupsEvents = (
+      browser as unknown as {
+        tabGroups?: {
+          onCreated?: { addListener(fn: () => void): void };
+          onRemoved?: { addListener(fn: () => void): void };
+          onUpdated?: { addListener(fn: () => void): void };
+        };
+      }
+    ).tabGroups;
+    tabGroupsEvents?.onCreated?.addListener(schedule);
+    tabGroupsEvents?.onRemoved?.addListener(schedule);
+    tabGroupsEvents?.onUpdated?.addListener(schedule);
+  } catch {
+    // Some test doubles expose `tabGroups` stubs whose `on*` listeners throw "not implemented".
+  }
 
   // The background's side of PLAN.md §5.2: it writes what it observes, and the
   // panel hears about it here. `session:` holds only the guard's state, which the

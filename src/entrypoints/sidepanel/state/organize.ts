@@ -37,6 +37,7 @@ import {
   type GroupColor,
   type GroupProposal,
 } from '@/core/cluster';
+import type { PlanCluster } from '@/core/plan-groups';
 import { MINUTE } from '@/core/time';
 import { tabUrl } from '@/core/duplicates';
 import {
@@ -47,7 +48,15 @@ import {
   type YouTubeDurationOrder,
 } from '@/core/types';
 import { extractYouTubeVideoId, sortYouTubeTabIds } from '@/core/youtube';
-import { applyGroups, applyMessage, undoGroups, type ApplyResult } from '@/platform/groups';
+import {
+  applyGroups,
+  applyMessage,
+  savePlanAsTabGroups,
+  undoGroups,
+  undoSavedPlanGroups,
+  type ApplyResult,
+  type SavePlanGroupsResult,
+} from '@/platform/groups';
 import {
   aiBusyUntilItem,
   aiProposalItem,
@@ -459,6 +468,23 @@ export const windowOrganized = signal<{
 
 /** Whether a window organization or window undo is currently running. */
 export const windowWorking = signal(false);
+
+/** Whether a 1-click save-as-tab-group or its undo from "Windows and topics" is running. */
+export const windowGroupWorking = signal(false);
+
+/** Undo payload for the last 1-click native tab-group save from "Windows and topics". */
+export const windowGroupSaved = signal<SavePlanGroupsResult | null>(null);
+
+/** Summary for the "Windows and topics" tab-group toast. */
+export const windowGroupSavedMessage = computed(() => {
+  const result = windowGroupSaved.value;
+  if (result === null) return null;
+  return {
+    count: result.groups.length,
+    firstTitle: result.groups[0]?.title ?? '',
+    skipped: applyMessage(result),
+  };
+});
 
 /** Most recent on-device AI window proposal persisted in `storage.local`. */
 export const savedAiProposal = signal<GroupProposal | null>(null);
@@ -954,6 +980,62 @@ export function dismissWindowOrganized(): void {
   windowOrganized.value = null;
 }
 
+export interface SaveWindowPlanGroupsDeps {
+  readonly save?: typeof savePlanAsTabGroups;
+}
+
+/**
+ * Converts one or more clusters from "Windows and topics" into native browser tab groups
+ * (moving cross-window tabs into the cluster's primary window first), with 1-click Undo.
+ */
+export async function saveWindowPlanGroups(
+  clusters: readonly PlanCluster[],
+  focusedWindowId?: number,
+  deps: SaveWindowPlanGroupsDeps = {},
+): Promise<SavePlanGroupsResult> {
+  if (windowGroupWorking.value || clusters.length === 0) {
+    return { snapshot: [], groups: [], changedTabIds: [], skipped: 0 };
+  }
+  const save = deps.save ?? savePlanAsTabGroups;
+  windowGroupWorking.value = true;
+  try {
+    const result = await save(clusters, {
+      focusedWindowId: focusedWindowId ?? panelData.value?.focusedWindowId,
+    });
+    if (result.groups.length > 0) {
+      windowGroupSaved.value = result;
+    }
+    return result;
+  } finally {
+    windowGroupWorking.value = false;
+  }
+}
+
+/** Reverts the last 1-click native tab-group save from "Windows and topics" and briefly snoozes autopilot. */
+export async function undoWindowPlanGroups(
+  undoFn: typeof undoSavedPlanGroups = undoSavedPlanGroups,
+): Promise<void> {
+  const last = windowGroupSaved.value;
+  if (last === null || windowGroupWorking.value) return;
+  windowGroupSaved.value = null;
+  windowGroupWorking.value = true;
+  try {
+    await organizeSnoozeUntilItem
+      .setValue(Date.now() + WINDOW_UNDO_SNOOZE_MS)
+      .catch(() => undefined);
+    await undoFn(last);
+  } catch (error: unknown) {
+    console.error('TabDeclutter: undo saved tab groups', error);
+  } finally {
+    windowGroupWorking.value = false;
+  }
+}
+
+/** Dismisses the saved tab-group toast, keeping the native browser tab groups. */
+export function dismissWindowGroupSaved(): void {
+  windowGroupSaved.value = null;
+}
+
 export interface SortYouTubeDeps {
   readonly resolveDurations?: typeof resolveYouTubeDurations;
   readonly sortWindow?: typeof sortWindowYouTubeTabs;
@@ -1070,6 +1152,8 @@ export function resetAiGrouping(): void {
   aiStageDetail.value = null;
   windowWorking.value = false;
   windowOrganized.value = null;
+  windowGroupWorking.value = false;
+  windowGroupSaved.value = null;
   youTubeSortWorking.value = false;
   youTubeSortProgress.value = null;
   youTubeSortStatus.value = null;

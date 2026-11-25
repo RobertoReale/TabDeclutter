@@ -1080,8 +1080,32 @@
     "description": "Badge next to the window-organization overview heading when local clustering produced the groups."
   },
   "windowPlanHint": {
-    "message": "Come sono raggruppate adesso le tue schede aperte. Clicca una scheda per aprirla.",
+    "message": "Come sono raggruppate adesso le tue schede aperte. Clicca una scheda per aprirla o salva un raggruppamento come gruppo di schede del browser.",
     "description": "Short explanation under the window-organization overview heading."
+  },
+  "windowPlanSaveAll": {
+    "message": "Salva tutti come gruppi di schede",
+    "description": "One-click button at the top of Windows and topics to turn every cluster into a native browser tab group."
+  },
+  "windowPlanSaveGroup": {
+    "message": "Salva gruppo",
+    "description": "One-click button on each cluster row in Windows and topics to turn that cluster into a native browser tab group."
+  },
+  "windowPlanSaveGroupAria": {
+    "message": "Salva $1 come gruppo di schede del browser",
+    "description": "Accessible label for the per-cluster save-as-tab-group button. $1 is the cluster title."
+  },
+  "windowPlanGroupSaved": {
+    "message": "Nel gruppo",
+    "description": "Status chip on a cluster row in Windows and topics when all its tabs are already in one native browser tab group."
+  },
+  "windowPlanSavedOne": {
+    "message": "«$1» salvato come gruppo di schede",
+    "description": "Toast shown after saving a single cluster from Windows and topics as a native browser tab group. $1 is the group title."
+  },
+  "windowPlanSavedOther": {
+    "message": "Salvati $1 gruppi di schede",
+    "description": "Toast shown after saving multiple clusters from Windows and topics as native browser tab groups. $1 is the formatted count."
   },
   "settingsGroupYouTube": {
     "message": "Ordinamento video YouTube",

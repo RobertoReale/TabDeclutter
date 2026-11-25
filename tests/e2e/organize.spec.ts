@@ -315,4 +315,80 @@ test.describe('in English', () => {
     // it was in — including the hand-made one — and the pinned tab pinned.
     await expect.poll(async () => windowState(panel)).toEqual(before);
   });
+
+  test('saves individual and all Windows and topics clusters as native tab groups with undo and autopilot protection', async ({
+    panel,
+  }) => {
+    await openSites(panel);
+
+    // Switch to the default window-organization overview (`useTabGroups: false`, `mode: site`)
+    // where "Windows and topics" is displayed.
+    await panel.evaluate(async () => {
+      const storage = (
+        globalThis as unknown as {
+          chrome: {
+            storage: {
+              local: {
+                get(key: string): Promise<Record<string, Record<string, unknown>>>;
+                set(items: Record<string, unknown>): Promise<void>;
+              };
+            };
+          };
+        }
+      ).chrome.storage.local;
+      const current = (await storage.get('settings')).settings ?? {};
+      await storage.set({
+        settings: {
+          ...current,
+          useTabGroups: false,
+          autoOrganize: false,
+          autoOrganizeMode: 'site',
+          autoWindowMode: 'merge-windows',
+        },
+      });
+    });
+
+    await panel.getByRole('button', { name: message('en', 'navOrganize') }).click();
+    await expect(panel.locator('.td-window-plan')).toBeVisible();
+    await expect(panel.locator('.td-window-plan-save')).toHaveCount(2);
+
+    // 1. One-click save a single cluster as a native browser tab group.
+    const firstSave = panel.locator('.td-window-plan-save').first();
+    await firstSave.click();
+
+    await expect.poll(async () => (await nativeGroups(panel)).length).toBe(1);
+    await expect(panel.locator('.td-window-plan-saved')).toHaveCount(1);
+    await expect(panel.locator('.td-window-plan-save')).toHaveCount(1);
+
+    const savedSingle = await nativeGroups(panel);
+
+    // 2. Running window organization must preserve the newly saved native tab group intact.
+    await panel.getByRole('button', { name: message('en', 'windowOrganizeNow') }).click();
+    await expect.poll(async () => nativeGroups(panel)).toEqual(savedSingle);
+
+    // 3. One-click Undo removes the native tab group and restores the Save group button.
+    const groupToast = panel.locator('.td-toast').filter({ hasText: savedSingle[0]?.title ?? '' });
+    await expect(groupToast).toBeVisible();
+    await groupToast.getByRole('button', { name: message('en', 'actionUndo') }).click();
+
+    await expect.poll(async () => nativeGroups(panel)).toEqual([]);
+    await expect(panel.locator('.td-window-plan-save')).toHaveCount(2);
+
+    // 4. One-click "Save all as tab groups" converts every cluster in the overview at once.
+    const saveAllBtn = panel.getByRole('button', { name: message('en', 'windowPlanSaveAll') });
+    await saveAllBtn.click();
+
+    await expect.poll(async () => (await nativeGroups(panel)).length).toBe(2);
+    await expect(panel.locator('.td-window-plan-saved')).toHaveCount(2);
+    await expect(saveAllBtn).toBeDisabled();
+
+    const allToast = panel
+      .locator('.td-toast')
+      .filter({ hasText: message('en', 'windowPlanSavedOther').replace('$1', '2') });
+    await expect(allToast).toBeVisible();
+    await allToast.getByRole('button', { name: message('en', 'actionUndo') }).click();
+
+    await expect.poll(async () => nativeGroups(panel)).toEqual([]);
+    await expect(saveAllBtn).toBeEnabled();
+  });
 });

@@ -915,6 +915,159 @@ describe('platform/windows', () => {
     expect(moves).toEqual([{ tabId: 3, windowId: 1, index: 2 }]);
     expect(result.movedTabs).toBe(1);
   });
+
+  it('preserves existing native tab groups untouched in merge-windows mode while sorting ungrouped tabs', async () => {
+    const { api, moves, ungrouped, tabs } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://arxiv.org/abs/1',
+        title: 'Algebra 1',
+        groupId: 77,
+      },
+      {
+        id: 2,
+        windowId: 1,
+        index: 1,
+        url: 'https://arxiv.org/abs/2',
+        title: 'Algebra 2',
+        groupId: 77,
+      },
+      {
+        id: 3,
+        windowId: 1,
+        index: 2,
+        url: 'https://youtube.com/watch?v=1',
+        title: 'Video 1',
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 4,
+        windowId: 1,
+        index: 3,
+        url: 'https://github.com/a',
+        title: 'Repo A',
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 5,
+        windowId: 2,
+        index: 0,
+        url: 'https://github.com/b',
+        title: 'Repo B',
+        groupId: NO_GROUP_ID,
+      },
+    ]);
+
+    const result = await organizeWindows({
+      windowMode: 'merge-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    // Native tab group 77 is never dissolved and its tabs are never moved.
+    expect(ungrouped).toEqual([]);
+    expect(moves.some((m) => m.tabId === 1 || m.tabId === 2)).toBe(false);
+    expect(tabs.find((t) => t.id === 1)?.groupId).toBe(77);
+    expect(tabs.find((t) => t.id === 2)?.groupId).toBe(77);
+    // Ungrouped tabs are moved into window 1 at index -1 so they never cross group boundaries.
+    expect(result.movedTabs).toBe(3);
+    expect(moves.every((m) => m.windowId === 1 && m.index === -1)).toBe(true);
+    expect(tabs.find((t) => t.id === 5)?.windowId).toBe(1);
+  });
+
+  it('preserves native tab groups and their windows untouched in split-windows mode', async () => {
+    const { api, moves, ungrouped, tabs } = fakeApi([
+      {
+        id: 1,
+        windowId: 1,
+        index: 0,
+        url: 'https://arxiv.org/abs/1',
+        title: 'Algebra 1',
+        groupId: 88,
+      },
+      {
+        id: 2,
+        windowId: 1,
+        index: 1,
+        url: 'https://arxiv.org/abs/2',
+        title: 'Algebra 2',
+        groupId: 88,
+      },
+      {
+        id: 3,
+        windowId: 1,
+        index: 2,
+        url: 'https://github.com/a',
+        title: 'Repo A',
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 4,
+        windowId: 2,
+        index: 0,
+        url: 'https://github.com/b',
+        title: 'Repo B',
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 5,
+        windowId: 2,
+        index: 1,
+        url: 'https://youtube.com/watch?v=1',
+        title: 'Video 1',
+        groupId: NO_GROUP_ID,
+      },
+      {
+        id: 6,
+        windowId: 2,
+        index: 2,
+        url: 'https://youtube.com/watch?v=2',
+        title: 'Video 2',
+        groupId: NO_GROUP_ID,
+      },
+    ]);
+
+    await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    // Native group 88 stays untouched in window 1, and neither GitHub nor YouTube hijacks window 1.
+    expect(ungrouped).toEqual([]);
+    expect(moves.some((m) => m.tabId === 1 || m.tabId === 2)).toBe(false);
+    expect(tabs.find((t) => t.id === 1)).toMatchObject({ windowId: 1, groupId: 88 });
+    expect(tabs.find((t) => t.id === 2)).toMatchObject({ windowId: 1, groupId: 88 });
+    expect(tabs.find((t) => t.id === 3)?.windowId).toBe(tabs.find((t) => t.id === 4)?.windowId);
+    expect(tabs.find((t) => t.id === 3)?.windowId).not.toBe(1);
+    expect(tabs.find((t) => t.id === 5)?.windowId).toBe(tabs.find((t) => t.id === 6)?.windowId);
+    expect(tabs.find((t) => t.id === 5)?.windowId).not.toBe(1);
+  });
+
+  it('does nothing when every open tab is already inside a native tab group', async () => {
+    const { api, moves, ungrouped } = fakeApi([
+      { id: 1, windowId: 1, index: 0, url: 'https://github.com/a', title: 'A', groupId: 5 },
+      { id: 2, windowId: 1, index: 1, url: 'https://github.com/b', title: 'B', groupId: 5 },
+    ]);
+
+    const result = await organizeWindows({
+      windowMode: 'split-windows',
+      clusterMode: 'site',
+      useTabGroups: false,
+      focusedWindowId: 1,
+      api,
+    });
+
+    expect(result).toEqual({ movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 });
+    expect(moves).toEqual([]);
+    expect(ungrouped).toEqual([]);
+  });
 });
 
 function makeTab(overrides: Partial<TabInfo> = {}): TabInfo {

@@ -1080,8 +1080,32 @@
     "description": "Badge next to the window-organization overview heading when local clustering produced the groups."
   },
   "windowPlanHint": {
-    "message": "How your open tabs are grouped right now. Click any tab to jump to it.",
+    "message": "How your open tabs are grouped right now. Click any tab to jump to it, or save a topic as a browser tab group.",
     "description": "Short explanation under the window-organization overview heading."
+  },
+  "windowPlanSaveAll": {
+    "message": "Save all as tab groups",
+    "description": "One-click button at the top of Windows and topics to turn every cluster into a native browser tab group."
+  },
+  "windowPlanSaveGroup": {
+    "message": "Save group",
+    "description": "One-click button on each cluster row in Windows and topics to turn that cluster into a native browser tab group."
+  },
+  "windowPlanSaveGroupAria": {
+    "message": "Save $1 as a browser tab group",
+    "description": "Accessible label for the per-cluster save-as-tab-group button. $1 is the cluster title."
+  },
+  "windowPlanGroupSaved": {
+    "message": "Grouped",
+    "description": "Status chip on a cluster row in Windows and topics when all its tabs are already in one native browser tab group."
+  },
+  "windowPlanSavedOne": {
+    "message": "Saved \"$1\" as a tab group",
+    "description": "Toast shown after saving a single cluster from Windows and topics as a native browser tab group. $1 is the group title."
+  },
+  "windowPlanSavedOther": {
+    "message": "Saved $1 tab groups",
+    "description": "Toast shown after saving multiple clusters from Windows and topics as native browser tab groups. $1 is the formatted count."
   },
   "settingsGroupYouTube": {
     "message": "YouTube video sorting",

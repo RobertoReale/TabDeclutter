@@ -4,15 +4,16 @@
  * Two clear modes the user can switch between:
  *
  * 1. `'merge-windows'` ("Unica finestra ordinata"):
- *    - Dissolves any existing coloured tab groups so the tab strip stays clean.
- *    - Moves tabs from scattered background windows into the primary window, leaving
- *      pinned and audible tabs where they are.
- *    - Sorts the tabs in the window by site or by topic so related pages sit side by side.
+ *    - Leaves existing native tab groups intact so user-created and one-click saved groups
+ *      are never dissolved by Autopilot.
+ *    - Moves ungrouped tabs from scattered background windows into the primary window, leaving
+ *      pinned, grouped, and protected tabs where they are.
+ *    - Sorts ungrouped tabs in the window by site or by topic so related pages sit side by side.
  *
  * 2. `'split-windows'` ("Una finestra per argomento / sito"):
- *    - Dissolves any existing coloured tab groups.
- *    - Clusters all open tabs across windows by site or by topic (`proposeGroups`), and
- *      places each cluster into its own dedicated browser window so every window has a
+ *    - Leaves existing native tab groups and their windows intact.
+ *    - Clusters remaining ungrouped tabs across windows by site or by topic (`proposeGroups`),
+ *      and places each cluster into its own dedicated browser window so every window has a
  *      single coherent theme, consolidating stray single-tab windows.
  */
 
@@ -277,37 +278,35 @@ export async function ungroupAllOpenTabs(api: WindowsOrganizeApi = defaultApi())
   return ungroupIds(api, groupedIds);
 }
 
+/** Whether `tab` is eligible for window-level moves: movable and not inside a native tab group. */
+function isUngroupedMovable(tab: TabInfo): boolean {
+  return tab.groupId === NO_GROUP_ID && isMovableTab(tab);
+}
+
 /**
  * Organizes browser windows and tabs according to `options.windowMode`:
  * either consolidating scattered windows into one sorted window (`'merge-windows'`)
  * or separating each topic/site cluster into its own clean window (`'split-windows'`).
+ *
+ * Existing native browser tab groups are always preserved intact; explicit ungrouping only
+ * happens through `ungroupAllOpenTabs()`.
  */
 export async function organizeWindows(
   options: OrganizeWindowsOptions,
 ): Promise<OrganizeWindowsResult> {
   const api = options.api ?? defaultApi();
-  let ungroupedTabs = 0;
+  const ungroupedTabs = 0;
 
-  const readTabs = async (): Promise<readonly TabInfo[] | null> => {
-    const queried = await attempt(() => api.tabs.query({}));
-    return queried.ok ? asTabInfos(queried.value) : null;
-  };
-  let rawTabs = await readTabs();
-  if (rawTabs === null) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
+  const queried = await attempt(() => api.tabs.query({}));
+  if (!queried.ok) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
 
-  if (!options.useTabGroups && typeof api.tabs.ungroup === 'function') {
-    const groupedIds = rawTabs.filter((tab) => tab.groupId !== NO_GROUP_ID).map((tab) => tab.id);
-    if (groupedIds.length > 0) {
-      ungroupedTabs = await ungroupIds(api, groupedIds);
-      rawTabs = await readTabs();
-      if (rawTabs === null) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
-    }
-  }
-
-  const allTabs = rawTabs.filter((tab) => !tab.incognito && tab.windowId !== NO_WINDOW);
+  const allTabs = asTabInfos(queried.value).filter(
+    (tab) => !tab.incognito && tab.windowId !== NO_WINDOW,
+  );
   if (allTabs.length === 0) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
 
-  const movable = allTabs.filter(isMovableTab);
+  const movable = allTabs.filter(isUngroupedMovable);
+  if (movable.length === 0) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
   const snapshot: OrganizeWindowsSnapshot = {
     tabs: [...movable]
       .sort((a, b) => a.windowId - b.windowId || a.index - b.index)
@@ -546,15 +545,16 @@ function isWindowOrdered(
   desired: readonly number[],
 ): boolean {
   const current = allTabs
-    .filter((tab) => tab.windowId === windowId && isMovableTab(tab))
+    .filter((tab) => tab.windowId === windowId && isUngroupedMovable(tab))
     .sort((a, b) => a.index - b.index)
     .map((tab) => tab.id);
   return current.length === desired.length && current.every((id, i) => id === desired[i]);
 }
 
 /**
- * Mode 1: Consolidates movable tabs from secondary windows into the primary window and
- * sorts them by site or topic so tabs of the same site/topic sit next to each other.
+ * Mode 1: Consolidates ungrouped movable tabs from secondary windows into the primary window and
+ * sorts them by site or topic so tabs of the same site/topic sit next to each other, leaving
+ * native tab groups untouched.
  */
 async function mergeAndSortIntoOneWindow(
   allTabs: readonly TabInfo[],
@@ -565,14 +565,18 @@ async function mergeAndSortIntoOneWindow(
   youTubeSort: YouTubeSortOptions | undefined,
   api: WindowsOrganizeApi,
 ): Promise<number> {
+  const movable = allTabs.filter(isUngroupedMovable);
+  if (movable.length === 0) return 0;
+
   const windowCounts = new Map<number, number>();
   for (const tab of allTabs) {
+    if (tab.groupId !== NO_GROUP_ID) continue;
     windowCounts.set(tab.windowId, (windowCounts.get(tab.windowId) ?? 0) + 1);
   }
 
-  // Always merge into the primary window (the one with the most tabs, breaking ties in
-  // favour of `focusedWindowId`), so opening a small 1-tab window never pulls 20 tabs out
-  // of the main window into the small one.
+  // Always merge into the primary window (the one with the most ungrouped tabs, breaking ties in
+  // favour of `focusedWindowId`), so opening a small 1-tab window never pulls 20 tabs out of the
+  // main window and dedicated grouped-tab windows are not hijacked.
   let targetWindowId: number | undefined;
   let bestCount = -1;
   for (const [id, count] of windowCounts) {
@@ -588,9 +592,10 @@ async function mergeAndSortIntoOneWindow(
   }
   if (targetWindowId === undefined) return 0;
 
-  const movable = allTabs.filter(isMovableTab);
-  if (movable.length === 0) return 0;
   const pinnedInTarget = countPinned(allTabs, targetWindowId);
+  const targetHasGroups = allTabs.some(
+    (tab) => tab.windowId === targetWindowId && tab.groupId !== NO_GROUP_ID,
+  );
 
   const sortedIds = orderedTabIds(
     movable,
@@ -606,7 +611,17 @@ async function mergeAndSortIntoOneWindow(
   }
 
   const byId = new Map(movable.map((tab) => [tab.id, tab]));
-  const moved = await moveSequence(api, sortedIds, targetWindowId, pinnedInTarget, byId);
+  // When `targetWindowId` contains native tab groups, append sorted ungrouped tabs to the end
+  // (`index: -1`) in order so no ungrouped tab ever crosses a native group boundary on Chrome or Firefox.
+  let moved = 0;
+  if (targetHasGroups) {
+    for (const tabId of sortedIds) {
+      const ok = await attempt(() => api.tabs.move(tabId, { windowId: targetWindowId, index: -1 }));
+      if (ok.ok) moved += 1;
+    }
+  } else {
+    moved = await moveSequence(api, sortedIds, targetWindowId, pinnedInTarget, byId);
+  }
 
   // If the user was looking at an active tab in a secondary window that just got merged into
   // `targetWindowId`, keep that tab active in `targetWindowId` so their current page stays on screen.
@@ -683,7 +698,7 @@ async function splitIntoThematicWindows(
   youTubeSort: YouTubeSortOptions | undefined,
   api: WindowsOrganizeApi,
 ): Promise<{ readonly movedTabs: number; readonly windowsCount: number }> {
-  const movable = allTabs.filter(isMovableTab);
+  const movable = allTabs.filter(isUngroupedMovable);
   if (movable.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
   const proposal = resolveWindowProposal(movable, clusterMode, 1, precomputed, proposalSignature);
@@ -714,20 +729,26 @@ async function splitIntoThematicWindows(
         );
   if (buckets.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
-  // Only reuse existing windows that already hold movable tabs, so browser-internal or OAuth
-  // popup windows (`chrome://extensions`, `chrome://newtab`, sign-in windows) are never hijacked.
-  const existingWindows = [...new Set(movable.map((tab) => tab.windowId))];
-  const usedWindows = new Set<number>();
+  // Never hijack windows holding native tab groups, browser-internal pages, or OAuth popups.
+  const groupedWindows = new Set(
+    allTabs.filter((tab) => tab.groupId !== NO_GROUP_ID).map((tab) => tab.windowId),
+  );
+  const existingWindows = [...new Set(movable.map((tab) => tab.windowId))].filter(
+    (windowId) => !groupedWindows.has(windowId),
+  );
+  const usedWindows = new Set<number>(groupedWindows);
 
   const focusedActiveId =
     focusedWindowId === undefined
       ? undefined
       : movable.find((tab) => tab.active && tab.windowId === focusedWindowId)?.id;
 
-  // Reserve `focusedWindowId` first for whichever bucket holds the active tab of the focused window,
-  // so the topic/site cluster the user is currently working on stays in their active window.
+  // Reserve `focusedWindowId` first for whichever bucket holds the active tab of the focused
+  // window (when that window is not reserved by a native tab group), so the user's current
+  // cluster stays in their active window.
   const focusedBucketIndex =
-    focusedActiveId === undefined
+    focusedActiveId === undefined ||
+    (focusedWindowId !== undefined && groupedWindows.has(focusedWindowId))
       ? -1
       : buckets.findIndex((tabIds) => tabIds.includes(focusedActiveId));
   if (focusedBucketIndex >= 0 && focusedWindowId !== undefined) {
