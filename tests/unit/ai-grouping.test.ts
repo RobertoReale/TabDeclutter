@@ -22,6 +22,7 @@ import {
   SYSTEM_PROMPT,
   tabLine,
 } from '../../src/core/ai-grouping';
+import { applyIncrementalAiAnswer, buildIncrementalPrompt } from '../../src/core/ai-prompt';
 import type { GroupProposal } from '../../src/core/cluster';
 import { colorFor, groupByTopic } from '../../src/core/cluster';
 import type { TabInfo } from '../../src/core/types';
@@ -1017,5 +1018,224 @@ describe('more than one batch of tabs', () => {
     expect(errored.fallbackReason).toBe('error');
     expect(errored.fallbackDetail).toContain('backend crashed');
     expect(errored.fallbackDetail).toContain('stage=clone');
+  });
+
+  it('never collapses single-word batch labels like History or Philosophy into Philosophy & History while still merging multi-word variants', async () => {
+    const tabs: TabInfo[] = [
+      ...topic(1, 3, 'history.example', 'storia romana'),
+      ...topic(4, 3, 'philosophy.example', 'filosofia kant'),
+      ...topic(7, 3, 'vatican.example', 'corrado augias'),
+      ...topic(10, 3, 'lecture.example', 'corrado augias'),
+    ];
+    const llm = fakeLlm((input) => {
+      const ids = idsOf(input);
+      const first = ids[0];
+      const name =
+        first === 1
+          ? 'Philosophy & History'
+          : first === 4
+            ? 'History'
+            : first === 7
+              ? 'Corrado Augias'
+              : 'Corrado Augias Lectures';
+      return answerWith({ name, tabIds: ids });
+    });
+    const result = await groupByAi(tabs, llm, at(0, { maxBatchTabs: 3 }));
+
+    // "History" (1 token) stays separate from "Philosophy & History" (2 tokens), while
+    // "Corrado Augias" (2 tokens) still merges cleanly with "Corrado Augias Lectures".
+    expect(membership(result.proposal)).toEqual({
+      'Corrado Augias': [7, 8, 9, 10, 11, 12],
+      'Philosophy & History': [1, 2, 3],
+      History: [4, 5, 6],
+    });
+  });
+
+  it('catches incoherent umbrella mega-dumps across mixed hosts/topics and recovers clean local clusters', async () => {
+    const mixedBatch: TabInfo[] = [
+      tab(1, 'https://www.youtube.com/watch?v=a1', 'Corrado Augias - I promessi sposi - YouTube'),
+      tab(2, 'https://www.youtube.com/watch?v=a2', 'Corrado Augias - Segreti Vaticano - YouTube'),
+      tab(3, 'https://www.youtube.com/watch?v=a3', 'Corrado Augias - Lectio magistralis - YouTube'),
+      tab(
+        4,
+        'https://www.youtube.com/watch?v=a4',
+        'Corrado Augias - Addio telespettatori - YouTube',
+      ),
+      tab(
+        5,
+        'https://gemini.google.com/app/1',
+        'Prodotto scalare standard o generico? - Google Gemini',
+      ),
+      tab(6, 'https://gemini.google.com/app/2', 'Prodotto scalare esercizi svolti - Google Gemini'),
+      tab(
+        7,
+        'https://gemini.google.com/app/3',
+        'Calcolo derivata seconda funzione - Google Gemini',
+      ),
+      tab(
+        8,
+        'https://gemini.google.com/app/4',
+        'Calcolo derivata asintoto obliquo - Google Gemini',
+      ),
+      tab(9, 'https://webeep.polimi.it/course/1', '082740 Analisi matematica appunti - WeBeep'),
+      tab(
+        10,
+        'https://webeep.polimi.it/course/2',
+        '082740 Analisi matematica prove esame - WeBeep',
+      ),
+      tab(
+        11,
+        'https://webeep.polimi.it/course/3',
+        '082740 Analisi matematica fogli esercizi - WeBeep',
+      ),
+      tab(12, 'https://it.wikipedia.org/wiki/Trilussa', 'Trilussa poeta romanesco - Wikipedia'),
+      tab(
+        13,
+        'https://it.wikipedia.org/wiki/Pascarella',
+        'Cesare Pascarella poeta romanesco - Wikipedia',
+      ),
+      tab(14, 'https://www.youtube.com/watch?v=g1', 'Fender Stratocaster blues riff - YouTube'),
+      tab(15, 'https://www.youtube.com/watch?v=g2', 'Fender Stratocaster vintage tone - YouTube'),
+      tab(16, 'https://www.youtube.com/watch?v=x1', 'Unrelated clip - YouTube'),
+    ];
+    // Model hallucinates a 15-tab "Philosophy & History" mega-dump swallowing 93% of the mixed batch.
+    const megaDumpLlm = fakeLlm(() =>
+      answerWith({
+        name: 'Philosophy & History',
+        tabIds: mixedBatch.slice(0, 15).map((t) => t.id),
+      }),
+    );
+    const result = await groupByAi(mixedBatch, megaDumpLlm, at(0, { minClusterTabs: 2 }));
+
+    // The incoherent umbrella group is rejected and local TF-IDF separates the real sub-topics.
+    expect(result.proposal.groups.map((g) => g.title)).not.toContain('Philosophy & History');
+    expect(Math.max(...result.proposal.groups.map((g) => g.tabIds.length))).toBeLessThanOrEqual(5);
+    expect(covered(result.proposal)).toEqual(mixedBatch.map((t) => t.id));
+
+    // Contrast: a genuinely homogeneous 15-tab cluster under a translated umbrella title is kept.
+    const homogeneous = Array.from({ length: 15 }, (_, idx) =>
+      tab(
+        idx + 1,
+        `https://www.youtube.com/watch?v=h${String(idx)}`,
+        `Corrado Augias puntata ${String(idx)} - YouTube`,
+      ),
+    );
+    const homogeneousLlm = fakeLlm(() =>
+      answerWith({
+        name: 'Philosophy & History',
+        tabIds: homogeneous.map((t) => t.id),
+      }),
+    );
+    const kept = await groupByAi(homogeneous, homogeneousLlm, at(0, { minClusterTabs: 2 }));
+    expect(membership(kept.proposal)).toEqual({
+      'Philosophy & History': homogeneous.map((t) => t.id),
+    });
+  });
+
+  it('pre-clusters beyond 8 topics when batching large sessions and honours perBatchTimeoutMs with batch stages', async () => {
+    // 10 distinct 2-tab topics (20 tabs total) with maxBatchTabs = 6: every pair stays intact.
+    const tenTopics: TabInfo[] = Array.from({ length: 10 }, (_, idx) =>
+      topic(idx * 2 + 1, 2, `site${String(idx)}.example`, `argomento${String(idx)} corso`),
+    ).flat();
+    const stages: string[] = [];
+    const llm = fakeLlm((input, call) => {
+      return answerWith({ name: `Topic ${String(call)}`, tabIds: idsOf(input) });
+    });
+    const result = await groupByAi(
+      tenTopics,
+      llm,
+      at(0, {
+        maxBatchTabs: 6,
+        maxGroups: 10,
+        minClusterTabs: 2,
+        perBatchTimeoutMs: 5_000,
+        timeoutMs: 30_000,
+        onStage: (stage) => stages.push(stage),
+      }),
+    );
+
+    expect(result.source).toBe('ai');
+    // Every 2-tab topic (including #9 and #10!) kept both its tabs in the same batch.
+    for (const call of llm.calls) {
+      const ids = idsOf(call.input);
+      for (const id of ids) {
+        const partner = id % 2 === 1 ? id + 1 : id - 1;
+        expect(ids).toContain(partner);
+      }
+    }
+    expect(stages.some((s) => s.startsWith('batch 1/'))).toBe(true);
+    expect(stages.some((s) => s.startsWith('batch 2/'))).toBe(true);
+  });
+
+  it('assigns newly arrived tabs incrementally to existing topics or new groups without re-grouping everything', () => {
+    const existing = [
+      {
+        key: 'mathematics',
+        title: 'Mathematics',
+        color: 'cyan' as const,
+        windowId: 1,
+        tabIds: [101, 102],
+      },
+      {
+        key: 'corrado augias',
+        title: 'Corrado Augias',
+        color: 'blue' as const,
+        windowId: 1,
+        tabIds: [103, 104],
+      },
+    ];
+    const newTabs: TabInfo[] = [
+      tab(1, 'https://youtube.com/watch?v=int', 'Calcolo integrali doppi'),
+      tab(2, 'https://cooking.example/a', 'Pasta alla carbonara'),
+      tab(3, 'https://cooking.example/b', 'Pasta alla gricia'),
+      tab(4, 'https://random.example/x', 'Random page'),
+    ];
+    const realIds = [201, 202, 203, 204];
+
+    const prompt = buildIncrementalPrompt(['Mathematics', 'Corrado Augias'], newTabs);
+    expect(prompt).toContain('Existing topics: Mathematics, Corrado Augias');
+    expect(prompt).toContain('1|Calcolo integrali doppi|youtube.com');
+
+    const ok = applyIncrementalAiAnswer(
+      JSON.stringify({
+        groups: [
+          '{"name":"Mathematics","tabIds":[1]}',
+          { name: 'Italian Cooking', tabIds: [2, 3, 999, 1, 'bad'] },
+          { name: 'Other', tabIds: [4] },
+          { name: 'TooSmallNew', tabIds: [4] },
+          null,
+          'not-json',
+          { name: 123, tabIds: [] },
+        ],
+      }),
+      existing,
+      newTabs,
+      realIds,
+      { maxNameLength: 24, minClusterTabs: 2, maxGroups: 10 },
+      colorFor,
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.groups.map((g) => ({ title: g.title, tabIds: g.tabIds }))).toEqual([
+        { title: 'Mathematics', tabIds: [101, 102, 201] },
+        { title: 'Corrado Augias', tabIds: [103, 104] },
+        { title: 'Italian Cooking', tabIds: [202, 203] },
+      ]);
+      expect(ok.ungrouped).toEqual([204]);
+    }
+
+    const bad = applyIncrementalAiAnswer('not json at all', existing, newTabs, realIds, {
+      maxNameLength: 24,
+      minClusterTabs: 2,
+      maxGroups: 10,
+    });
+    expect(bad.ok).toBe(false);
+
+    const wrongShape = applyIncrementalAiAnswer('{"groups":"oops"}', existing, newTabs, realIds, {
+      maxNameLength: 24,
+      minClusterTabs: 2,
+      maxGroups: 10,
+    });
+    expect(wrongShape.ok).toBe(false);
   });
 });

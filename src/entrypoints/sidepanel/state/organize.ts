@@ -29,6 +29,7 @@
 import { computed, signal } from '@preact/signals';
 
 import type { AiFallbackReason, Llm, groupByAi as GroupByAi } from '@/core/ai-grouping';
+import { applyIncrementalAiAnswer, buildIncrementalPrompt } from '@/core/ai-prompt';
 import {
   colorFor,
   proposeGroups,
@@ -73,6 +74,7 @@ import { NO_WINDOW } from '@/platform/tabs';
 import {
   aiProposalCoversMovable,
   aiProposalFreshForAutoRefresh,
+  extractLiveProposal,
   isMovableTab,
   movableTabsSignature,
   organizeWindows,
@@ -716,6 +718,11 @@ export interface OrganizeWindowsWithAiOptions {
   };
 }
 
+/** Optimal batch size for small on-device models (Gemini Nano ~3B) to avoid mega-dumps. */
+const WINDOW_AI_MAX_BATCH_TABS = 20;
+/** Maximum newly arrived tabs handled via a fast single incremental AI prompt instead of re-grouping all tabs. */
+const INCREMENTAL_AI_MAX_NEW_TABS = 8;
+
 /**
  * Organizes browser windows, using Chrome's on-device AI across all movable open tabs when
  * `clusterMode === 'topic'`, `useAi === true`, and native tab groups are off.
@@ -800,13 +807,17 @@ export async function organizeWindowsWithAi(
   }));
   const mapped = withCompactTabIds(unified);
 
+  const maxGroups = movable.length >= 50 ? 10 : 8;
+  const estBatches = Math.max(1, Math.ceil(mapped.compact.length / WINDOW_AI_MAX_BATCH_TABS));
+  const totalPromptBudgetMs = PANEL_AI_TIMEOUT_MS * Math.min(estBatches, 6);
+
   // Supersede any previous in-flight AI grouping run so rapid clicks always win cleanly.
   running?.abort();
   const controller = new AbortController();
   running = controller;
   aiWorking.value = true;
   void aiBusyUntilItem
-    .setValue(Date.now() + PANEL_AI_WARMUP_TIMEOUT_MS + PANEL_AI_TIMEOUT_MS)
+    .setValue(Date.now() + PANEL_AI_WARMUP_TIMEOUT_MS + totalPromptBudgetMs)
     .catch(() => undefined);
   clearAiFallbackNotice();
   let proposal: GroupProposal | undefined;
@@ -846,19 +857,99 @@ export async function organizeWindowsWithAi(
         return;
       }
       const warmupMs = Date.now() - warmupStartedAt;
+
+      // Fast incremental path for automatic refreshes: when a valid cached AI proposal already
+      // covers >= 80% of live tabs and only 1..8 new tabs arrived, classify only those new tabs
+      // against the existing topics in one compact prompt instead of re-grouping 100+ tabs.
+      if (request.automatic === true && request.deps?.groupBy === undefined) {
+        const liveExisting = extractLiveProposal(
+          movable,
+          savedAiProposal.value,
+          savedAiProposalSignature.value,
+        );
+        if (
+          liveExisting !== null &&
+          liveExisting.newTabs.length >= 1 &&
+          liveExisting.newTabs.length <= INCREMENTAL_AI_MAX_NEW_TABS &&
+          (movable.length - liveExisting.newTabs.length) * 5 >= movable.length * 4
+        ) {
+          const compactNew = liveExisting.newTabs.map((tab, idx) => ({ ...tab, id: idx + 1 }));
+          const realNewIds = liveExisting.newTabs.map((tab) => tab.id);
+          const incTicker = startStageTicker(
+            `incremental (${compactNew.length} new tabs, warm=${formatSeconds(warmupMs)})`,
+            PANEL_AI_TIMEOUT_MS,
+          );
+          ticker = incTicker;
+          try {
+            const raw = await model.prompt(
+              buildIncrementalPrompt(
+                liveExisting.groups.map((g) => g.title),
+                compactNew,
+              ),
+              {
+                signal: controller.signal,
+                onStage: (stage) => {
+                  incTicker.setLabel(`${stage} (${compactNew.length} new tabs)`);
+                },
+              },
+            );
+            incTicker.stop();
+            ticker = undefined;
+            if (running !== controller || controller.signal.aborted) {
+              cancelled = true;
+              return;
+            }
+            const mergedInc = applyIncrementalAiAnswer(
+              raw,
+              liveExisting.groups,
+              compactNew,
+              realNewIds,
+              { maxNameLength: 24, minClusterTabs: 2, maxGroups },
+              colorFor,
+            );
+            if (mergedInc.ok) {
+              const placedIds = new Set(mergedInc.groups.flatMap((g) => g.tabIds));
+              const updated: GroupProposal = {
+                mode: 'topic',
+                groups: mergedInc.groups,
+                ungrouped: movable.filter((tab) => !placedIds.has(tab.id)).map((tab) => tab.id),
+              };
+              proposal = updated;
+              clearAiAutoCooldown();
+              clearAiFallbackNotice();
+              savedAiProposal.value = updated;
+              savedAiProposalSignature.value = currentSignature;
+              savedAiProposalLoaded.value = true;
+              void saveAiProposalState(updated, currentSignature).catch(() => undefined);
+              return;
+            }
+          } catch {
+            incTicker.stop();
+            ticker = undefined;
+            if (running !== controller || controller.signal.aborted) {
+              cancelled = true;
+              return;
+            }
+            // Fall through cleanly to the full batched AI run below.
+          }
+        }
+      }
+
       const promptStartedAt = Date.now();
       const promptTicker = startStageTicker(
         `prompt (${mapped.compact.length} tabs, warm=${formatSeconds(warmupMs)})`,
-        PANEL_AI_TIMEOUT_MS,
+        totalPromptBudgetMs,
       );
       ticker = promptTicker;
       const result = await groupBy(mapped.compact, model, {
         minSiteTabs: 2,
         minClusterTabs: 2,
-        maxBatchTabs: 35,
+        maxBatchTabs: WINDOW_AI_MAX_BATCH_TABS,
+        maxGroups,
         includePinned: false,
         includeGrouped: true,
-        timeoutMs: PANEL_AI_TIMEOUT_MS,
+        timeoutMs: totalPromptBudgetMs,
+        perBatchTimeoutMs: PANEL_AI_TIMEOUT_MS,
         signal: controller.signal,
         onStage: (stage) => {
           promptTicker.setLabel(`${stage} (${mapped.compact.length} tabs)`);

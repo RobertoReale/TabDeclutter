@@ -118,7 +118,8 @@ export function filterProposalBySignature(
   };
 }
 
-function extractLiveProposal(
+/** Extracts the surviving live groups (`>= 2` tabs) and newly arrived tabs from a cached AI proposal. */
+export function extractLiveProposal(
   movable: readonly TabInfo[],
   proposal: GroupProposal | null | undefined,
   savedSignature = '',
@@ -920,7 +921,7 @@ export function reconcileAiProposal(
     }
     if (remainingNew.length >= 2) {
       for (const extraGroup of clusterExtras(remainingNew)) {
-        if (groups.length >= 8) break;
+        if (groups.length >= MAX_SPLIT_WINDOWS) break;
         groups.push({
           ...extraGroup,
           key: `new:${extraGroup.key}`,

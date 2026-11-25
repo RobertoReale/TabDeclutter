@@ -13,6 +13,7 @@ All notable changes to TabDeclutter are listed here. The format follows
 
 ### Fixed
 
+- Hardened on-device AI grouping for large (100+ tab) sessions: prevented single generic words (`"History"`, `"Philosophy"`) from chain-merging into compound mega-groups (`"Philosophy & History"`), reduced AI batch size from 35 to 20 tabs without truncating pre-clusters #9+, added a word-cohesion guardrail that splits hallucinated multi-host umbrella dumps via local TF-IDF, switched side-panel multi-batch runs to per-batch timeout budgets with live `batch i/N` progress, and added fast single-prompt incremental AI classification for 1–8 newly arrived tabs.
 - Kept `autoDeclutter` and `autoOrganize` disabled until onboarding completes (including ignoring `runtime.onInstalled` `'install'` events) and updated store/privacy documentation to match.
 - Unified AI batch packing (`packClusterBatches`) and proposal assembly (`assembleAiProposal`) between the background service worker and side panel so background refreshes pre-cluster via TF-IDF, split on `QuotaExceededError`, merge equivalent topic names, and preserve overflow tabs in `ungrouped`.
 - Serialized post-AI background window organization inside the autopilot queue (`enqueue`), re-checking live guard/snooze/focus state and passing `proposalSignature` so `resolveWindowProposal` does not fall back unexpectedly.

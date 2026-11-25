@@ -11,7 +11,9 @@
 
 import {
   type AiDraft,
+  applyIncrementalAiAnswer,
   assembleAiProposal,
+  buildIncrementalPrompt,
   buildPrompt,
   errorName,
   extractCompleteGroupsJson,
@@ -47,6 +49,7 @@ import {
 import { activateTab, closeTabs, closeWindow, NO_WINDOW, queryTabs } from '@/platform/tabs';
 import {
   aiProposalFreshForAutoRefresh,
+  extractLiveProposal,
   isMovableTab,
   movableTabsSignature,
   ORGANIZE_CLUSTER_OPTIONS,
@@ -76,8 +79,9 @@ const STARTUP_ALARM_DELAY_MS = Math.max(STARTUP_GRACE_MS + 500, 30_000);
 const BG_AI_WARMUP_TIMEOUT_MS = 300_000;
 const BG_AI_TIMEOUT_MS = 90_000;
 const BG_AI_COOLDOWN_MS = 2 * MINUTE;
-const BG_AI_MAX_BATCH_TABS = 35;
-const BG_AI_MAX_GROUPS = 8;
+const BG_AI_MAX_BATCH_TABS = 20;
+const BG_AI_MAX_GROUPS = 10;
+const BG_AI_INCREMENTAL_MAX_NEW = 8;
 const BG_AI_MAX_NAME_LENGTH = 24;
 const SW_KEEPALIVE_MS = 20_000;
 
@@ -254,7 +258,12 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       });
 
       try {
-        const result = await promptBackgroundProposal(modelApi, movable, bgController.signal);
+        const result = await promptBackgroundProposal(
+          modelApi,
+          movable,
+          bgController.signal,
+          proposalState,
+        );
         if (bgController.signal.aborted) return;
         if (result === null || result.groups.length === 0) {
           await setBgCooldown();
@@ -457,6 +466,7 @@ async function promptBackgroundProposal(
   modelApi: BackgroundLanguageModelApi,
   movable: readonly TabInfo[],
   preemptSignal: AbortSignal,
+  cachedState: { readonly proposal: GroupProposal | null; readonly signature: string } = EMPTY_AI,
 ): Promise<GroupProposal | null> {
   if (preemptSignal.aborted) return null;
   const availability = await modelApi.availability(EXPECTED_TEXT_OPTIONS);
@@ -485,13 +495,67 @@ async function promptBackgroundProposal(
   const destroySession = onceDestroy(session);
   preemptSignal.addEventListener('abort', destroySession, { once: true });
 
+  const canClone = typeof session.clone === 'function';
+  const runOnSession = (input: string, clone: boolean): Promise<string> =>
+    withTimeout(BG_AI_TIMEOUT_MS, preemptSignal, async (s) => {
+      const cloned = clone && canClone ? await session.clone!({ signal: s }) : undefined;
+      const stop = cloned === undefined ? destroySession : onceDestroy(cloned);
+      if (cloned !== undefined) s.addEventListener('abort', stop, { once: true });
+      try {
+        return await runBgPrompt(cloned ?? session, input, s, stop);
+      } finally {
+        if (cloned !== undefined) {
+          s.removeEventListener('abort', stop);
+          stop();
+        }
+      }
+    });
+
   try {
+    // Incremental fast path: when a valid cached proposal covers >= 80% of live tabs and only
+    // 1..8 new tabs arrived, classify only the new tabs in one compact prompt.
+    const liveExisting = extractLiveProposal(movable, cachedState.proposal, cachedState.signature);
+    if (
+      liveExisting !== null &&
+      liveExisting.newTabs.length >= 1 &&
+      liveExisting.newTabs.length <= BG_AI_INCREMENTAL_MAX_NEW &&
+      (movable.length - liveExisting.newTabs.length) * 5 >= movable.length * 4
+    ) {
+      const compactNew = liveExisting.newTabs.map((tab, idx) => ({ ...tab, id: idx + 1 }));
+      const realNewIds = liveExisting.newTabs.map((tab) => tab.id);
+      const incInput = `${SYSTEM_PROMPT}\n\n${buildIncrementalPrompt(
+        liveExisting.groups.map((g) => g.title),
+        compactNew,
+      )}`;
+      try {
+        const raw = await runOnSession(incInput, true);
+        if (preemptSignal.aborted) return null;
+        const inc = applyIncrementalAiAnswer(raw, liveExisting.groups, compactNew, realNewIds, {
+          maxNameLength: BG_AI_MAX_NAME_LENGTH,
+          minClusterTabs: 2,
+          maxGroups: BG_AI_MAX_GROUPS,
+        });
+        if (inc.ok) {
+          const placedIds = new Set(inc.groups.flatMap((g) => g.tabIds));
+          return {
+            mode: 'topic',
+            groups: inc.groups,
+            ungrouped: movable.filter((tab) => !placedIds.has(tab.id)).map((tab) => tab.id),
+          };
+        }
+        // Without session cloning the ephemeral session was already consumed; avoid reusing it.
+        if (!canClone) return null;
+      } catch {
+        if (preemptSignal.aborted || !canClone) return null;
+      }
+    }
+
     const localClusters =
       compact.length > BG_AI_MAX_BATCH_TABS
-        ? clusterTabIds(compact, 'topic', ORGANIZE_CLUSTER_OPTIONS).groups
+        ? clusterTabIds(compact, 'topic', { ...ORGANIZE_CLUSTER_OPTIONS, maxGroups: 64 }).groups
         : [];
     const batches = packClusterBatches(compact, localClusters, BG_AI_MAX_BATCH_TABS);
-    const useClone = batches.length > 1 && typeof session.clone === 'function';
+    const useClone = batches.length > 1;
     const drafts: AiDraft[] = [];
     const claimed = new Set<number>();
     let answered = 0;
@@ -501,19 +565,7 @@ async function promptBackgroundProposal(
       const promptInput = `${SYSTEM_PROMPT}\n\n${buildPrompt(batch)}`;
       let raw: string;
       try {
-        raw = await withTimeout(BG_AI_TIMEOUT_MS, preemptSignal, async (s) => {
-          const cloned = useClone ? await session.clone!({ signal: s }) : undefined;
-          const stop = cloned === undefined ? destroySession : onceDestroy(cloned);
-          if (cloned !== undefined) s.addEventListener('abort', stop, { once: true });
-          try {
-            return await runBgPrompt(cloned ?? session, promptInput, s, stop);
-          } finally {
-            if (cloned !== undefined) {
-              s.removeEventListener('abort', stop);
-              stop();
-            }
-          }
-        });
+        raw = await runOnSession(promptInput, useClone);
       } catch (error: unknown) {
         if (
           !preemptSignal.aborted &&

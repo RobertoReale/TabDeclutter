@@ -31,9 +31,9 @@ export function errorName(error: unknown): string {
  * (PLAN.md §7.3, "Performance"), so this belongs to its creation, in `platform/llm.ts`.
  */
 export const SYSTEM_PROMPT =
-  'Group tabs into 3-8 focused topics with short English names (1-3 words). ' +
+  'Group tabs into focused topics with specific short names (1-3 words, e.g. person, course, subject). ' +
   "Group by the user's task or topic, not by website. " +
-  'Be strict: never mix unrelated tabs, ignore typos, no site names. ' +
+  'Be strict: never mix unrelated tabs or use vague umbrella names like "Philosophy & History" or "Culture & Society"; ignore typos, no site names. ' +
   "Tabs that fit nowhere go to 'Other'.";
 
 /** PLAN.md §7.3: the title a tab is listed with is truncated to this many characters. */
@@ -180,6 +180,76 @@ function sharesTwo(words: ReadonlySet<string>, ref: ReadonlySet<string>): boolea
   return false;
 }
 
+/** Broad umbrella words that signal a catch-all mega-dump when paired with low tab cohesion. */
+const UMBRELLA_WORDS: ReadonlySet<string> = new Set(
+  'general topics mixed various culture society knowledge media videos articles reading study resources learning entertainment information misc'.split(
+    ' ',
+  ),
+);
+
+function sharesWord(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  for (const w of left) {
+    if (right.has(w)) return true;
+    if (w.length >= 5) {
+      const prefix = w.slice(0, 5);
+      for (const r of right) if (r.length >= 5 && r.startsWith(prefix)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Catches small-model mega-dumps where Gemini Nano dumps almost an entire mixed batch (or 14+
+ * tabs under a vague umbrella label like "Philosophy & History") across unrelated hosts and
+ * lexically disconnected sub-topics, routing those tabs to `failed` so local TF-IDF separates
+ * them cleanly. Leaves homogeneous clusters (e.g. 18 Corrado Augias tabs) and focused groups
+ * untouched.
+ */
+function isIncoherentMegaDump(
+  title: string,
+  members: readonly number[],
+  batchSize: number,
+  byId: ReadonlyMap<number, TabInfo>,
+): boolean {
+  if (members.length < 10) return false;
+  const swallowedBatch = batchSize >= 12 && members.length * 5 >= batchSize * 4;
+  const umbrellaTitle =
+    /\s(?:&|and|e)\s/iu.test(title) || wordTokens(title, 3).some((w) => UMBRELLA_WORDS.has(w));
+  if (!swallowedBatch && !(members.length >= 14 && umbrellaTitle)) return false;
+
+  const sets = members.map((id) => {
+    const tab = byId.get(id)!;
+    return new Set(wordTokens(stripSiteSuffix(tab.title, tab.url)));
+  });
+  const hosts = new Set(members.map((id) => displayHost(byId.get(id)!.url)).filter(Boolean));
+
+  const visited = new Uint8Array(members.length);
+  let largest = 0;
+  let multiTabComponents = 0;
+  for (let start = 0; start < members.length; start += 1) {
+    if (visited[start] === 1) continue;
+    visited[start] = 1;
+    const queue = [start];
+    for (let head = 0; head < queue.length; head += 1) {
+      const i = queue[head]!;
+      for (let j = 0; j < members.length; j += 1) {
+        if (visited[j] === 1) continue;
+        if (sharesWord(sets[i]!, sets[j]!)) {
+          visited[j] = 1;
+          queue.push(j);
+        }
+      }
+    }
+    if (queue.length > largest) largest = queue.length;
+    if (queue.length >= 2) multiTabComponents += 1;
+  }
+
+  return (
+    largest * 100 < members.length * 45 &&
+    ((multiTabComponents >= 2 && hosts.size >= 2) || multiTabComponents >= 3)
+  );
+}
+
 /**
  * Ejects hallucinated outliers from entity-anchored groups (>= 5 tabs where >= 50% match the
  * title, or >= 5 anchors and >= 33% to catch small-model range dumps), leaving translated or
@@ -270,6 +340,10 @@ export function validateAiAnswer(
     if (members.length < rawMembers.length) {
       const kept = new Set(members);
       for (const id of rawMembers) if (!kept.has(id)) pruned.add(id);
+    }
+    if (isIncoherentMegaDump(title, members, batch.length, byId)) {
+      for (const id of members) pruned.add(id);
+      continue;
     }
     if (members.length < options.minClusterTabs) continue;
     for (const id of members) taken.add(id);
@@ -378,13 +452,126 @@ function sameTopicTitle(
   rightKey: string,
   rightTokens: readonly string[],
 ): boolean {
-  return (
-    leftKey === rightKey ||
-    (leftTokens.length > 0 &&
-      rightTokens.length > 0 &&
-      (leftTokens.every((t) => rightTokens.includes(t)) ||
-        rightTokens.every((t) => leftTokens.includes(t))))
-  );
+  if (leftKey === rightKey) return true;
+  if (leftTokens.length === 0 || rightTokens.length === 0) return false;
+  const shorter = leftTokens.length <= rightTokens.length ? leftTokens : rightTokens;
+  const longer = leftTokens.length <= rightTokens.length ? rightTokens : leftTokens;
+  // Never merge a generic 1-word label (e.g. "History" or "Philosophy") into a compound
+  // umbrella (e.g. "Philosophy & History") across batches; require either identical token
+  // sets or a specific multi-word entity/topic (>= 2 tokens) contained in the longer title.
+  if (shorter.length === 1 && longer.length > 1) return false;
+  return shorter.every((token) => longer.includes(token));
+}
+
+/**
+ * Compact prompt asking the model to assign only a handful of newly opened tabs to existing
+ * topic names (or a new 2+ tab topic, or Other) instead of re-grouping a 100-tab session.
+ */
+export function buildIncrementalPrompt(
+  existingTitles: readonly string[],
+  newTabs: readonly Pick<TabInfo, 'id' | 'title' | 'url'>[],
+): string {
+  return [
+    `Existing topics: ${existingTitles.join(', ')}`,
+    'Assign each new tab to a matching existing topic (exact name), a new short topic (2+ tabs), or Other (id|title|host):',
+    newTabs.map(tabLine).join('\n'),
+    'JSON only: {"groups":[{"name":"Topic","tabIds":[1]}]}. Each id at most once.',
+  ].join('\n');
+}
+
+export interface IncrementalAiResult {
+  readonly ok: true;
+  readonly groups: readonly ProposedGroup[];
+  readonly ungrouped: readonly number[];
+}
+
+/**
+ * Applies a validated incremental micro-prompt answer onto `existingGroups` (which already carry
+ * live real tab IDs) and `newTabs` (with compact 1..K IDs mapped via `realNewIds`). Matching an
+ * existing topic accepts even 1 tab; brand-new topics require `minClusterTabs` tabs.
+ */
+export function applyIncrementalAiAnswer(
+  answer: string,
+  existingGroups: readonly ProposedGroup[],
+  newTabs: readonly TabInfo[],
+  realNewIds: readonly number[],
+  options: ValidateAiOptions & { readonly maxGroups: number },
+  colorOf: (key: string) => GroupColor = () => 'grey',
+): IncrementalAiResult | { readonly ok: false } {
+  const decoded = parseModelJson(answer);
+  if (!decoded.ok || decoded.value === null || typeof decoded.value !== 'object') {
+    return { ok: false };
+  }
+  const rawGroups = (decoded.value as { groups?: unknown }).groups;
+  if (!Array.isArray(rawGroups)) return { ok: false };
+
+  const validCompact = new Map<number, number>();
+  newTabs.forEach((tab, index) => {
+    const realId = realNewIds[index];
+    if (realId !== undefined) validCompact.set(tab.id, realId);
+  });
+
+  const merged = existingGroups.map((group) => ({
+    key: group.key,
+    title: group.title,
+    color: group.color,
+    windowId: group.windowId,
+    tokens: wordTokens(group.title, 3, true),
+    tabIds: [...group.tabIds],
+  }));
+  const taken = new Set<number>();
+
+  for (const rawGroup of rawGroups) {
+    let group: unknown = rawGroup;
+    if (typeof rawGroup === 'string') {
+      const inner = parseModelJson(rawGroup);
+      if (!inner.ok) continue;
+      group = inner.value;
+    }
+    if (group === null || typeof group !== 'object') continue;
+    const { name, tabIds } = group as { name?: unknown; tabIds?: unknown };
+    if (typeof name !== 'string' || !Array.isArray(tabIds)) continue;
+
+    const title = cleanGroupTitle(name, options.maxNameLength);
+    if (title === '' || OTHER_NAMES.has(title.toLowerCase())) continue;
+
+    const realIds: number[] = [];
+    for (const id of tabIds) {
+      if (typeof id !== 'number' || !Number.isInteger(id)) continue;
+      const realId = validCompact.get(id);
+      if (realId === undefined || taken.has(realId)) continue;
+      realIds.push(realId);
+    }
+    if (realIds.length === 0) continue;
+
+    const key = title.toLowerCase();
+    const tokens = wordTokens(title, 3, true);
+    const match = merged.find((entry) => sameTopicTitle(entry.key, entry.tokens, key, tokens));
+    if (match !== undefined) {
+      for (const realId of realIds) {
+        taken.add(realId);
+        match.tabIds.push(realId);
+      }
+      continue;
+    }
+    if (realIds.length < options.minClusterTabs || merged.length >= options.maxGroups) continue;
+    for (const realId of realIds) taken.add(realId);
+    merged.push({
+      key,
+      title,
+      color: colorOf(key),
+      windowId: existingGroups[0]?.windowId ?? 1,
+      tokens,
+      tabIds: realIds,
+    });
+  }
+
+  const placedExisting = new Set(existingGroups.flatMap((g) => g.tabIds));
+  const groups: ProposedGroup[] = merged
+    .sort((a, b) => b.tabIds.length - a.tabIds.length)
+    .map(({ key, title, color, windowId, tabIds }) => ({ key, title, color, windowId, tabIds }));
+  const ungrouped = realNewIds.filter((id) => !taken.has(id) && !placedExisting.has(id));
+  return { ok: true, groups, ungrouped };
 }
 
 /**

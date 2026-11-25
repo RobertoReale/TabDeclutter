@@ -30,7 +30,7 @@ import {
 } from './ai-prompt';
 import type { AiDraft } from './ai-prompt';
 import type { ClusterOptions, GroupProposal } from './cluster';
-import { colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic } from './cluster';
+import { clusterTabIds, colorFor, DEFAULT_CLUSTER_OPTIONS, groupByTopic } from './cluster';
 import type { TabInfo } from './types';
 
 export { buildPrompt, SYSTEM_PROMPT, tabLine };
@@ -83,6 +83,8 @@ export interface AiGroupingOptions extends ClusterOptions {
   readonly maxNameLength?: number;
   /** PLAN.md §7.3: the whole run has this long, then §7.2 answers instead. */
   readonly timeoutMs?: number;
+  /** Optional per-batch timeout cap (bounded by `timeoutMs`) for large multi-batch sessions. */
+  readonly perBatchTimeoutMs?: number;
   /** "Annulla" in the spinner (PLAN.md §7.3). */
   readonly signal?: AbortSignal;
   /** Optional live sub-stage diagnostic callback forwarded to `llm.prompt`. */
@@ -169,6 +171,8 @@ interface Settings {
   readonly now: () => number;
   /** ms epoch at which §7.2 takes over, whatever the model is doing (PLAN.md §7.3). */
   readonly deadline: number;
+  /** Optional per-batch duration budget so one slow batch cannot starve the remaining batches. */
+  readonly perBatchTimeoutMs: number | undefined;
   readonly constraint: unknown;
 }
 
@@ -186,6 +190,7 @@ function resolve(options: AiGroupingOptions): Settings {
     onStage: options.onStage,
     now,
     deadline: now() + (options.timeoutMs ?? DEFAULT_AI_GROUPING_OPTIONS.timeoutMs),
+    perBatchTimeoutMs: options.perBatchTimeoutMs,
     constraint: responseConstraintFor(maxGroups, maxNameLength),
   };
 }
@@ -268,6 +273,11 @@ async function promptWithin(llm: Llm, input: string, settings: Settings): Promis
   const onAbort = (): void => controller.abort();
   settings.signal?.addEventListener('abort', onAbort, { once: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const remaining = settings.deadline - settings.now();
+  const waitMs =
+    settings.perBatchTimeoutMs === undefined
+      ? remaining
+      : Math.min(remaining, settings.perBatchTimeoutMs);
   try {
     return await new Promise<string>((keep, reject) => {
       timer = setTimeout(
@@ -275,7 +285,7 @@ async function promptWithin(llm: Llm, input: string, settings: Settings): Promis
           controller.abort();
           reject(new PromptTimeout('the model did not answer in time'));
         },
-        Math.max(0, settings.deadline - settings.now()),
+        Math.max(0, waitMs),
       );
       llm
         .prompt(input, {
@@ -409,14 +419,17 @@ function byWindow(tabs: readonly TabInfo[]): readonly { windowId: number; tabs: 
 
 function planBatches(
   eligible: readonly TabInfo[],
-  fallback: GroupProposal,
+  options: ClusterOptions,
   settings: Settings,
 ): readonly (readonly TabInfo[])[] {
   const batches: (readonly TabInfo[])[] = [];
-  for (const { windowId, tabs: own } of byWindow(eligible)) {
-    const windowGroups = fallback.groups
-      .filter((group) => group.windowId === windowId)
-      .map((group) => group.tabIds);
+  for (const { tabs: own } of byWindow(eligible)) {
+    // Pre-cluster without the final `maxGroups` ceiling when splitting a large window into
+    // batches so clusters ranked 9+ stay together inside their own batch instead of scattering.
+    const windowGroups =
+      own.length > settings.maxBatchTabs
+        ? clusterTabIds(own, 'topic', { ...options, maxGroups: 64 }).groups
+        : [];
     batches.push(...packClusterBatches(own, windowGroups, settings.maxBatchTabs));
   }
   return batches;
@@ -480,8 +493,19 @@ export async function groupByAi(
     reason: undefined,
     detail: undefined,
   };
-  for (const batch of planBatches(eligible, fallback, settings)) {
-    outcome = merged(outcome, await askBatch(llm, batch, settings));
+  const batches = planBatches(eligible, options, settings);
+  for (let i = 0; i < batches.length; i += 1) {
+    const batch = batches[i]!;
+    const batchSettings: Settings =
+      batches.length > 1 && settings.onStage !== undefined
+        ? {
+            ...settings,
+            onStage: (stage) => {
+              settings.onStage!(`batch ${String(i + 1)}/${String(batches.length)} · ${stage}`);
+            },
+          }
+        : settings;
+    outcome = merged(outcome, await askBatch(llm, batch, batchSettings));
   }
 
   if (outcome.answered === 0) {

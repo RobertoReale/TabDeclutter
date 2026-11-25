@@ -831,6 +831,81 @@ describe('persisting topic + AI preferences without resets or races', () => {
     warn.mockRestore();
   });
 
+  it('uses a single incremental micro-prompt on automatic refreshes when a cached AI proposal covers >= 80% of live tabs', async () => {
+    const initialTabs: TabInfo[] = [
+      tab(10, 'https://gemini.google.com/app/1', { title: 'Prodotto scalare' }),
+      tab(11, 'https://gemini.google.com/app/2', { title: 'Derivate funzioni' }),
+      tab(12, 'https://youtube.com/watch?v=1', { title: 'Corrado Augias 1' }),
+      tab(13, 'https://youtube.com/watch?v=2', { title: 'Corrado Augias 2' }),
+      tab(14, 'https://youtube.com/watch?v=3', { title: 'Corrado Augias 3' }),
+      tab(15, 'https://youtube.com/watch?v=4', { title: 'Corrado Augias 4' }),
+    ];
+    const cachedProposal: GroupProposal = {
+      mode: 'topic',
+      groups: [
+        { key: 'math', title: 'Mathematics', color: 'cyan', windowId: 1, tabIds: [10, 11] },
+        {
+          key: 'augias',
+          title: 'Corrado Augias',
+          color: 'blue',
+          windowId: 1,
+          tabIds: [12, 13, 14, 15],
+        },
+      ],
+      ungrouped: [],
+    };
+    const sig = movableTabsSignature(initialTabs);
+    await saveAiProposalState(cachedProposal, sig);
+    await loadSavedAiProposal();
+
+    // User opens 1 new math tab (6/7 = 85.7% covered -> incremental micro-prompt eligible).
+    const withOneNew: TabInfo[] = [
+      ...initialTabs,
+      tab(16, 'https://youtube.com/watch?v=int', { title: 'Integrali doppi spiegazione' }),
+    ];
+    panelData.value = {
+      ...data(withOneNew),
+      settings: { ...DEFAULT_SETTINGS, autoOrganizeMode: 'topic', useOnDeviceAi: true },
+    };
+    await checkAi({ capabilities: CHROME, llm });
+
+    const promptsSeen: string[] = [];
+    const incrementalModel: Llm = {
+      prompt: async (input) => {
+        promptsSeen.push(input);
+        return JSON.stringify({ groups: [{ name: 'Mathematics', tabIds: [1] }] });
+      },
+    };
+    const organized: OrganizeWindowsOptions[] = [];
+
+    await organizeWindowsWithAi({
+      windowMode: 'split-windows',
+      clusterMode: 'topic',
+      useTabGroups: false,
+      useAi: true,
+      automatic: true,
+      deps: {
+        model: incrementalModel,
+        organize: async (opts) => {
+          organized.push(opts);
+          return { movedTabs: 1, ungroupedTabs: 0, windowsCount: 2 };
+        },
+      },
+    });
+
+    // Only the 1 new tab was sent to the model, and it joined Mathematics without disturbing Augias.
+    expect(promptsSeen).toHaveLength(1);
+    expect(promptsSeen[0]).toContain('Existing topics: Mathematics, Corrado Augias');
+    expect(promptsSeen[0]).toContain('1|Integrali doppi spiegazione|youtube.com');
+    expect(promptsSeen[0]).not.toContain('Corrado Augias 1');
+    expect(
+      organized[0]?.proposal?.groups.map((g) => ({ title: g.title, tabIds: g.tabIds })),
+    ).toEqual([
+      { title: 'Corrado Augias', tabIds: [12, 13, 14, 15] },
+      { title: 'Mathematics', tabIds: [10, 11, 16] },
+    ]);
+  });
+
   it('keeps checkAi() read-only without eagerly invoking panelSession().open()', async () => {
     let opened = 0;
     const probingLlm: LlmModule = {
