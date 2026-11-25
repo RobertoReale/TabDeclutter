@@ -5,8 +5,10 @@ paste into the store forms. `tests/unit/store-docs.test.ts` compares the first c
 below with `build/manifest.ts`, and the `permissions docs` gate (`tools/check-permissions.mjs`) with the built
 `.output/*/manifest.json`, so the lists cannot drift apart: an added or removed permission fails the test until this file says so.
 
-Common to both browsers: **no `host_permissions`, no content scripts, no `<all_urls>`**, the default
-extension CSP, no remote code, `incognito: not_allowed`.
+Common to both browsers: **no required `host_permissions`, no content scripts, no `<all_urls>`**,
+the default extension CSP, no remote code, `incognito: not_allowed`. The only optional host
+permission is `https://www.youtube.com/*`, requested solely if the user enables YouTube video
+duration sorting in Settings and revoked immediately when disabled.
 
 Firefox warning texts are the ones in Firefox's own source
 ([extensionPermissions.ftl](https://github.com/mozilla/gecko-dev/blob/master/toolkit/locales/en-US/toolkit/global/extensionPermissions.ftl),
@@ -35,6 +37,12 @@ an install prompt. "None" means the browser shows no warning of its own for it.
 | ----------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bookmarks` | "Read and change your bookmarks"                    | Requested only when the user turns on the "already bookmarked" signal, which makes a bookmarked tab easier to suggest for closing, since it can be found again. Only checks whether an address is bookmarked; never writes. |
 
+## Chrome (optional hosts)
+
+| Permission                  | Warning shown                                    | Justification                                                                                                                                                                                                                       |
+| --------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `https://www.youtube.com/*` | "Read and change your data on www.youtube.com"   | Requested only when the user enables "Sort YouTube tabs by video duration" in Settings. Used solely to read each open or suspended YouTube video's duration directly from its watch page without waking suspended tabs, and cached locally. Never injects scripts or modifies pages; revoked when turned off. |
+
 ## Firefox (required)
 
 | Permission    | Warning shown                                               | Justification                                                                                                                                                                            |
@@ -57,7 +65,13 @@ the tab already carries it as embedded data), so no icon is ever downloaded. The
 | ----------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bookmarks` | "Read and modify bookmarks"                    | Requested only when the user turns on the "already bookmarked" signal. Only checks whether an address is bookmarked; never writes.                    |
 
+## Firefox (optional hosts)
+
+| Permission                  | Warning shown                                        | Justification                                                                                                                                                                                                                       |
+| --------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `https://www.youtube.com/*` | "Access your data for www.youtube.com"               | Requested only when the user enables "Sort YouTube tabs by video duration" in Settings. Used solely to read each open or suspended YouTube video's duration directly from its watch page without waking suspended tabs, and cached locally. Never injects scripts or modifies pages; revoked when turned off. |
+
 ## Not requested, on purpose
 
-`host_permissions`, `<all_urls>`, `webNavigation`, `history`, `unlimitedStorage`, `scripting`,
+Required `host_permissions`, `<all_urls>`, `webNavigation`, `history`, `unlimitedStorage`, `scripting`,
 `activeTab`, `notifications`, `downloads`. Duplicate protection needs nothing beyond `tabs`.

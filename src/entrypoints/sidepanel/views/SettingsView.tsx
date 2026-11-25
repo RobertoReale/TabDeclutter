@@ -16,7 +16,7 @@ import { useSignal } from '@preact/signals';
 import { useEffect } from 'preact/hooks';
 
 import { caps } from '@/platform/capabilities';
-import type { LanguageSetting } from '@/core/types';
+import type { LanguageSetting, YouTubeDurationOrder } from '@/core/types';
 import { t, type MessageKey } from '@/platform/i18n';
 import { saveAiProposalState } from '@/platform/storage';
 import {
@@ -29,6 +29,7 @@ import {
   parseDomains,
   RETENTION_DAYS,
   STALE_DAYS,
+  YOUTUBE_ORDER_CHOICES,
   aiStateKey,
   type DurationChoice,
 } from '../settings-fields';
@@ -40,11 +41,15 @@ import {
   bookmarksDenied,
   bookmarksGranted,
   checkBookmarksPermission,
+  checkYouTubePermission,
   protectedSites,
   saveProtectedSites,
   setSetting,
+  setSortYouTubeByDuration,
   setUseBookmarks,
   settings,
+  youTubeDenied,
+  youTubeGranted,
 } from '../state/settings';
 import { settingsPage } from '../state/view';
 import { DuplicateSettingsView } from './DuplicateSettingsView';
@@ -77,11 +82,12 @@ function MainSettings({ language }: { language: string }) {
   const guardModeLabel =
     MODE_CHOICES.find((choice) => choice.value === guard.mode)?.label ?? 'guardModeWarn';
 
-  // The bookmarks question is asked when the page opens; the AI availability is only probed
+  // The optional permissions are checked when the page opens; the AI availability is only probed
   // once `useOnDeviceAi` is on, so Chrome does not log an extension warning when its built-in AI
   // is disabled in chrome://settings/ai.
   useEffect(() => {
     checkBookmarksPermission();
+    checkYouTubePermission();
   }, []);
 
   useEffect(() => {
@@ -110,6 +116,29 @@ function MainSettings({ language }: { language: string }) {
             setSetting('autoOrganize', value);
           }}
         />
+      </div>
+
+      <div class="td-settings-card">
+        <h3 class="td-settings-group">{t('settingsGroupYouTube')}</h3>
+        <CheckField
+          label="settingsYouTubeSort"
+          hint="settingsYouTubeSortHint"
+          value={current.sortYouTubeByDuration && youTubeGranted.value}
+          onPick={setSortYouTubeByDuration}
+        />
+        {current.sortYouTubeByDuration && youTubeGranted.value && (
+          <ChoiceField
+            label="settingsYouTubeOrder"
+            choices={YOUTUBE_ORDER_CHOICES}
+            value={current.youTubeDurationOrder}
+            onPick={(value: YouTubeDurationOrder) => {
+              setSetting('youTubeDurationOrder', value);
+            }}
+          />
+        )}
+        <div class="td-warnings" role="status" aria-live="polite">
+          {youTubeDenied.value && <p class="td-warning">{t('settingsYouTubeDenied')}</p>}
+        </div>
       </div>
 
       <div class="td-settings-card">

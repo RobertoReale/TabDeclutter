@@ -25,7 +25,12 @@ import {
   requestBookmarksPermission,
 } from '@/platform/bookmarks';
 import { panelLanguage, requestedLocale, t, useLocale } from '@/platform/i18n';
-import { protectedDomainsItem, updateSettings } from '@/platform/storage';
+import { clearYouTubeDurations, protectedDomainsItem, updateSettings } from '@/platform/storage';
+import {
+  hasYouTubePermission,
+  removeYouTubePermission,
+  requestYouTubePermission,
+} from '@/platform/youtube';
 import { clearModeOverrideIf } from './organize-request';
 import { applyLocalSettings, panelData } from './tabs';
 
@@ -42,6 +47,12 @@ export const bookmarksGranted = signal(false);
 
 /** Whether the last request was refused, which is what the page has to explain. */
 export const bookmarksDenied = signal(false);
+
+/** Whether the browser has granted optional host permission for `https://www.youtube.com/*`. */
+export const youTubeGranted = signal(false);
+
+/** Whether the last YouTube permission request was refused. */
+export const youTubeDenied = signal(false);
 
 /**
  * The language the panel is actually speaking, as a `lang` tag.
@@ -101,6 +112,42 @@ export function checkBookmarksPermission(): void {
   run(
     hasBookmarksPermission().then((granted) => {
       bookmarksGranted.value = granted;
+    }),
+  );
+}
+
+/**
+ * The YouTube duration sorting toggle: requests optional `https://www.youtube.com/*` host
+ * permission synchronously inside the user gesture (like `setUseBookmarks`), revokes it and
+ * clears cached durations when turned off.
+ */
+export function setSortYouTubeByDuration(next: boolean): void {
+  if (!next) {
+    youTubeDenied.value = false;
+    youTubeGranted.value = false;
+    run(
+      update((current) => ({ ...current, sortYouTubeByDuration: false }))
+        .then(() => removeYouTubePermission())
+        .then(() => clearYouTubeDurations()),
+    );
+    return;
+  }
+
+  const answer = requestYouTubePermission();
+  run(
+    answer.then(async (granted) => {
+      youTubeGranted.value = granted;
+      youTubeDenied.value = !granted;
+      if (granted) await update((current) => ({ ...current, sortYouTubeByDuration: true }));
+    }),
+  );
+}
+
+/** Checks whether the optional YouTube host permission is currently granted. */
+export function checkYouTubePermission(): void {
+  run(
+    hasYouTubePermission().then((granted) => {
+      youTubeGranted.value = granted;
     }),
   );
 }

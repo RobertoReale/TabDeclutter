@@ -36,15 +36,16 @@ screenshots too, which the build does not read.
 TabDeclutter suggests which tabs to close, organizes the rest into native tab groups and blocks duplicate tabs in real time. Everything stays on the device.
 
 Permissions:
-- tabs: reads the URL, title and last-used time of the open tabs. It is the whole input of the extension. Nothing is read from page content: there are no content scripts and no host permissions.
+- tabs: reads the URL, title and last-used time of the open tabs. It is the whole input of the extension. There are no content scripts and no required host permissions.
 - tabGroups: creates and names native tab groups.
-- storage: settings, the tab activity map, the archive of closed tabs and the whitelist, in local storage only.
+- storage: settings, the tab activity map, the archive of closed tabs, the optional local YouTube duration cache, and the whitelist, in local storage only.
 - alarms: periodic cleanup of the archive, badge refresh, end of a pause of the duplicate protection.
 - sessions: restores a closed tab with its history on "Undo".
 - menus: right-click menu items.
 - bookmarks (optional): requested only if the user turns on the "already bookmarked" signal; read-only.
+- https://www.youtube.com/* (optional host permission): requested only if the user turns on "Sort YouTube tabs by video duration" in Settings; used solely to read video duration metadata directly from youtube.com (including for suspended tabs without waking them) and revoked when turned off.
 
-No network requests of any kind, no analytics, no remote code, no eval or new Function. data_collection_permissions is "none". Incognito is not allowed.
+No network requests by default, no analytics, no third-party servers, no remote code, no eval or new Function. data_collection_permissions is "none". Incognito is not allowed.
 
 How to test: install, then open the sidebar from the toolbar button or Alt+Shift+D. "Riordina" (Declutter) lists tabs with the reason each is suggested. "Organizza" groups the open tabs by site. In the settings, "Protezione duplicati" (Duplicate protection) set to close automatically: open the same page twice and the newer tab is closed and the older one is activated; "Annulla" (Undo) reopens it. The language follows the browser (Italian or English) and can be changed in the settings.
 

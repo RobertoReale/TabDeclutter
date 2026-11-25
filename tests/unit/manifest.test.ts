@@ -43,6 +43,7 @@ describe('the Chrome manifest', () => {
         'contextMenus',
       ],
       optional_permissions: ['bookmarks'],
+      optional_host_permissions: ['https://www.youtube.com/*'],
       incognito: 'not_allowed',
       action: { default_title: '__MSG_actionTitle__', default_icon: ICONS },
       icons: ICONS,
@@ -77,6 +78,7 @@ describe('the Firefox manifest', () => {
       },
       permissions: ['tabs', 'tabGroups', 'storage', 'alarms', 'sessions', 'menus'],
       optional_permissions: ['bookmarks'],
+      optional_host_permissions: ['https://www.youtube.com/*'],
       incognito: 'not_allowed',
       action: { default_title: '__MSG_actionTitle__', default_icon: ICONS },
       icons: ICONS,
@@ -103,10 +105,10 @@ describe('the Firefox manifest', () => {
 describe('both manifests', () => {
   const browsers = ['chrome', 'firefox'] as const;
 
-  it.each(browsers)('%s: asks for no host permission and injects no script', (browser) => {
+  it.each(browsers)('%s: asks for no required host permission and injects no script', (browser) => {
     const manifest = buildManifest(browser);
     expect(manifest.host_permissions).toBeUndefined();
-    expect(manifest.optional_host_permissions).toBeUndefined();
+    expect(manifest.optional_host_permissions).toEqual(['https://www.youtube.com/*']);
     expect(manifest.content_scripts).toBeUndefined();
     expect(manifest.permissions).not.toContain('<all_urls>');
     expect(manifest.permissions).not.toContain('webNavigation');

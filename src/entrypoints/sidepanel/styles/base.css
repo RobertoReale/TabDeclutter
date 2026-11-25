@@ -1354,3 +1354,34 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.td-window-plan-tab-duration {
+  flex: none;
+  padding: 1px var(--td-space-1);
+  border-radius: var(--td-radius-sm);
+  background: var(--td-surface);
+  border: 1px solid var(--td-border);
+  color: var(--td-text-muted);
+  font-size: var(--td-text-meta);
+  white-space: nowrap;
+}
+
+.td-youtube-card {
+  margin-top: var(--td-space-3);
+  padding: var(--td-space-3);
+  background: var(--td-raised);
+  border: 1px solid var(--td-border);
+  border-radius: var(--td-radius);
+}
+
+.td-youtube-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--td-space-2);
+  margin-bottom: var(--td-space-1);
+}
+
+.td-youtube-card-head .td-settings-group {
+  margin: 0;
+}

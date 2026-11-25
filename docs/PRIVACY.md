@@ -1,6 +1,6 @@
 # TabDeclutter — Privacy policy
 
-_Last updated: 2026-11-23 (version 0.1.0)._
+_Last updated: 2026-11-25 (version 0.1.0)._
 
 **TabDeclutter does not collect, transmit or share any data.** Everything it knows stays in your
 browser, on your device.
@@ -23,21 +23,32 @@ that is dropped when the browser restarts):
   days set in the settings (30 by default) and at most 1000 entries;
 - your settings and your duplicate whitelist;
 - the optional cached on-device topic proposal and its tab signature (local only, used to avoid re-running Gemini Nano unnecessarily);
+- the optional local cache of YouTube video durations (`videoId` → duration in seconds, kept at most 30 days and capped at 500 entries; only populated when YouTube duration sorting is enabled and cleared immediately when disabled);
 - the short-lived state of the duplicate protection (a pause, tabs the extension itself reopened) and temporary AI/organization cooldown timers (`storage.session`).
 
 Nothing else is kept. Uninstalling the extension removes all of it.
 
 ## What the extension never does
 
-- It makes **no network requests**: no servers of ours, no analytics, no telemetry, no crash
-  reports, no advertising, no remote configuration.
+- It makes **no network requests by default**: no servers of ours, no analytics, no telemetry, no
+  crash reports, no advertising, no remote configuration. The only optional network fetch the
+  extension can ever perform is directly to `https://www.youtube.com/watch?v=<id>` when you
+  explicitly enable "Sort YouTube tabs by video duration" and grant the optional `www.youtube.com`
+  host permission.
 - It loads and runs **no remote code**.
 - It does not sell, share or transfer data to anyone, because it has none to give.
-- It does not read page content: it has no content scripts and no host permissions.
+- It injects no content scripts and requests no required host permissions.
 - It does not work in private (incognito) windows.
 - Tab titles are treated as untrusted text and are never interpreted as markup.
 
 ## Optional features
+
+- **YouTube video duration sorting (optional host permission).** Off by default. If you enable
+  "Sort YouTube tabs by video duration" in Settings, the browser asks for optional host permission
+  strictly for `https://www.youtube.com/*`. The extension reads video duration metadata directly
+  from `www.youtube.com` (so even suspended/discarded YouTube tabs can be sorted without reloading
+  them) and caches durations locally to avoid repeat requests. No data is sent to any third-party
+  server. Turning the feature off revokes the permission and clears the duration cache.
 
 - **On-device AI (Chrome only, optional).** If your Chrome offers its built-in model (Gemini
   Nano, through the Prompt API), TabDeclutter can use it to suggest names for groups of tabs. The
@@ -76,15 +87,20 @@ resta nel tuo browser, sul tuo dispositivo.
 - **Cosa salva:** solo nell'archiviazione locale dell'estensione: l'ultima attività delle schede,
   le schede da mantenere e i siti protetti, l'archivio delle schede chiuse (per i giorni impostati,
   30 di default, al massimo 1000), le impostazioni, la lista di eccezioni dei duplicati, la proposta
-  opzionale di raggruppamento AI in cache e lo stato temporaneo della protezione duplicati e dei
+  opzionale di raggruppamento AI in cache, la cache locale opzionale delle durate video YouTube
+  (svuotata appena disattivi la funzione) e lo stato temporaneo della protezione duplicati e dei
   timer locali. Disinstallando l'estensione tutto viene cancellato.
-- **Cosa non fa mai:** nessuna richiesta di rete, nessuna analisi d'uso o telemetria, nessuna
-  pubblicità, nessun codice remoto, nessuna lettura del contenuto delle pagine, nessun
-  funzionamento nelle finestre in incognito.
-- **Funzioni facoltative:** l'IA sul dispositivo (solo Chrome) usa il modello integrato in Chrome
-  per proporre nomi di gruppo; il modello gira in locale e il suo download parte solo dopo un tuo
-  clic. Il permesso facoltativo `bookmarks` viene chiesto solo se attivi il segnale "già nei
-  segnalibri"; l'estensione controlla soltanto se un indirizzo è nei segnalibri e non li modifica.
+- **Cosa non fa mai:** nessuna richiesta di rete di default (nessun nostro server, nessuna analisi
+  d'uso o telemetria, nessuna pubblicità, nessun codice remoto), nessun content script, nessun
+  permesso host obbligatorio, nessun funzionamento nelle finestre in incognito.
+- **Funzioni facoltative:** l'ordinamento dei video YouTube per durata (spento di default) chiede
+  il permesso host opzionale solo per `https://www.youtube.com/*`, legge la durata direttamente da
+  YouTube (anche per le schede sospese senza ricaricarle) salvandola in cache locale e revoca il
+  permesso svuotando la cache quando lo disattivi. L'IA sul dispositivo (solo Chrome) usa il modello
+  integrato in Chrome per proporre nomi di gruppo; il modello gira in locale e il suo download parte
+  solo dopo un tuo clic. Il permesso facoltativo `bookmarks` viene chiesto solo se attivi il segnale
+  "già nei segnalibri"; l'estensione controlla soltanto se un indirizzo è nei segnalibri e non li
+  modifica.
 - **Il tuo controllo:** nessuna azione automatica parte prima che tu completi la schermata iniziale;
   dopo la configurazione, la pulizia automatica e la chiusura dei duplicati agiscono solo secondo le
   impostazioni e le protezioni attive (mai su schede attive, fissate, audio, login, file locali,

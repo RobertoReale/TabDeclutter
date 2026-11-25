@@ -50,6 +50,14 @@ now"**). In the **Organize** tab you can switch at any time between two clear mo
   Great / Marvellous Suspender, Tab Suspender). TabDeclutter transparently unwraps suspended tab URLs
   for site/topic organization, duplicate detection, site protection, favicons, activity tracking, and
   Archive restores, while leaving genuine extension pages (such as PDF or Office viewers) untouched.
+- **YouTube video duration sorting** _(opt-in in Settings, off by default)_: sorts YouTube video tabs
+  (regular videos, Shorts, `youtu.be`, `m.youtube.com`, `music.youtube.com`, and ended live VODs —
+  **including suspended/discarded tabs without waking or reloading them**) from shortest to longest
+  or longest to shortest. Works both on demand in the current window (swapping only YouTube video
+  slots in place with 1-click Undo, leaving non-YouTube tabs and pinned tabs untouched) and
+  automatically inside window organization / Autopilot. Requests an optional host permission strictly
+  for `https://www.youtube.com/*` only when enabled, caches durations locally, and revokes the
+  permission + clears the cache when disabled.
 - **Experimental on-device AI** _(Chrome-only, off by default)_: local organization already runs
   instantly and offline without AI; if you want to use Chrome's built-in Gemini Nano model
   (`LanguageModel`) for semantic cross-site topic grouping, you can opt in under **Settings →

@@ -23,13 +23,23 @@ import { caps } from '@/platform/capabilities';
 import { t, type MessageKey } from '@/platform/i18n';
 import { activateTab } from '@/platform/tabs';
 import { ungroupAllOpenTabs } from '@/platform/windows';
+import { requestYouTubePermission } from '@/platform/youtube';
 import type { ClusterMode } from '@/core/cluster';
-import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '@/core/types';
+import { tabUrl } from '@/core/duplicates';
+import {
+  NO_GROUP_ID,
+  type AutoWindowMode,
+  type TabInfo,
+  type YouTubeDurationCache,
+  type YouTubeDurationOrder,
+} from '@/core/types';
 import { displayHost } from '@/core/url';
+import { extractYouTubeVideoId, formatVideoDuration } from '@/core/youtube';
 import { EmptyState } from '../components/EmptyState';
 import { GroupPreview } from '../components/GroupPreview';
 import { appliedGroupsText, formatCount, formatPercent, pairText } from '../format';
 import type { OrganizeOptions, OrganizeScope } from '../organize';
+import { YOUTUBE_ORDER_CHOICES } from '../settings-fields';
 import {
   aiActive,
   aiOffered,
@@ -52,15 +62,19 @@ import {
   applyDraft,
   brought,
   cancelAiGrouping,
+  cancelYouTubeSort,
   clearAiAutoCooldown,
   clearAiFallbackNotice,
   clearSavedAiProposal,
   dismissApplied,
   dismissWindowOrganized,
+  dismissYouTubeSorted,
   draft,
+  focusedWindowYouTubeTabs,
   isAiAutoCoolingDown,
   lastAutoWindowAiSignature,
   loadSavedAiProposal,
+  loadSavedYouTubeDurations,
   mode,
   movableTabSignature,
   movableTabs,
@@ -70,20 +84,33 @@ import {
   savedAiProposal,
   savedAiProposalLoaded,
   savedAiProposalSignature,
+  savedYouTubeDurations,
   scope,
   setMode,
   setOptions,
   setScope,
+  sortCurrentWindowYouTube,
   startAiGrouping,
   undoApply,
   undoWindowOrganize,
+  undoYouTubeSort,
   windowOrganized,
   windowPlan,
   windowWorking,
   working,
+  youTubeSortProgress,
+  youTubeSortStatus,
+  youTubeSortWorking,
+  youTubeSorted,
   type WindowPlan,
 } from '../state/organize';
-import { setSetting, settings } from '../state/settings';
+import {
+  checkYouTubePermission,
+  setSetting,
+  settings,
+  youTubeDenied,
+  youTubeGranted,
+} from '../state/settings';
 import { loaded, panelData, tabs } from '../state/tabs';
 
 /** §4.4.1's scope, without "Selezione", which only exists once something was brought in. */
@@ -191,6 +218,13 @@ export function OrganizeView({ language }: { language: string }) {
     if (!ready || currentSettings.useTabGroups) return;
     void loadSavedAiProposal();
   }, [ready, currentSettings.useTabGroups]);
+
+  // Hydrate cached YouTube video durations and verify optional host permission when enabled.
+  useEffect(() => {
+    if (!ready || !currentSettings.sortYouTubeByDuration) return;
+    checkYouTubePermission();
+    void loadSavedYouTubeDurations();
+  }, [ready, currentSettings.sortYouTubeByDuration]);
 
   // When autoOrganize and useTabGroups are enabled, apply any proposed groups automatically.
   const lastAutoApplied = useRef<string>('');
@@ -373,8 +407,21 @@ export function OrganizeView({ language }: { language: string }) {
         />
       )}
 
+      {currentSettings.sortYouTubeByDuration && (
+        <YouTubeSortCard
+          order={currentSettings.youTubeDurationOrder}
+          language={language}
+          focusedWindowId={panelData.value?.focusedWindowId}
+        />
+      )}
+
       {!currentSettings.useTabGroups && (
-        <WindowPlanOverview plan={windowPlan.value} tabs={tabs.value} language={language} />
+        <WindowPlanOverview
+          plan={windowPlan.value}
+          tabs={tabs.value}
+          durations={currentSettings.sortYouTubeByDuration ? savedYouTubeDurations.value : null}
+          language={language}
+        />
       )}
 
       {currentSettings.useTabGroups && (
@@ -419,6 +466,7 @@ export function OrganizeView({ language }: { language: string }) {
           )}
 
           <div class="td-footer">
+            <YouTubeSortedToast language={language} />
             <AppliedToast language={language} />
             {current.groups.length > 0 && (
               <div
@@ -442,6 +490,7 @@ export function OrganizeView({ language }: { language: string }) {
 
       {!currentSettings.useTabGroups && (
         <div class="td-footer">
+          <YouTubeSortedToast language={language} />
           <WindowOrganizedToast language={language} />
         </div>
       )}
@@ -615,14 +664,120 @@ function AiPanel({
   );
 }
 
+/**
+ * Optional YouTube duration sorting card in Organize: sorts only YouTube video tabs in the
+ * current window in place (including suspended tabs without waking them), with direction toggle,
+ * live progress, and 1-click Undo.
+ */
+function YouTubeSortCard({
+  order,
+  language,
+  focusedWindowId,
+}: {
+  order: YouTubeDurationOrder;
+  language: string;
+  focusedWindowId?: number;
+}) {
+  const videoCount = focusedWindowYouTubeTabs.value.length;
+  const progress = youTubeSortProgress.value;
+  const status = youTubeSortStatus.value;
+  const busy = youTubeSortWorking.value || windowWorking.value;
+
+  function triggerSort(nextOrder: YouTubeDurationOrder): void {
+    if (!youTubeGranted.value) {
+      // Request synchronously inside the click handler if permission was revoked externally.
+      void requestYouTubePermission()
+        .then((granted) => {
+          youTubeGranted.value = granted;
+          youTubeDenied.value = !granted;
+          if (granted) {
+            return sortCurrentWindowYouTube(nextOrder, focusedWindowId);
+          }
+          return undefined;
+        })
+        .catch(report);
+      return;
+    }
+    void sortCurrentWindowYouTube(nextOrder, focusedWindowId).catch(report);
+  }
+
+  return (
+    <section class="td-youtube-card" aria-label={t('youtubeSortHeading')}>
+      <div class="td-youtube-card-head">
+        <h3 class="td-settings-group">{t('youtubeSortHeading')}</h3>
+        <span class="td-chip td-settings-status">{formatCount(videoCount, language)}</span>
+      </div>
+      <p class="td-field-hint">{t('youtubeSortHint')}</p>
+
+      <label class="td-field">
+        <span class="td-field-label">{t('settingsYouTubeOrder')}</span>
+        <select
+          class="td-filter"
+          value={order}
+          onChange={(event) => {
+            const nextOrder = event.currentTarget.value as YouTubeDurationOrder;
+            setSetting('youTubeDurationOrder', nextOrder);
+          }}
+        >
+          {YOUTUBE_ORDER_CHOICES.map((choice) => (
+            <option key={choice.value} value={choice.value}>
+              {t(choice.label)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div class="td-pattern-actions">
+        <button
+          type="button"
+          class="td-action td-action-primary"
+          disabled={busy || videoCount < 2}
+          onClick={() => {
+            triggerSort(order);
+          }}
+        >
+          {t('youtubeSortNow')}
+        </button>
+      </div>
+
+      {videoCount < 2 && !busy && <p class="td-field-hint">{t('youtubeSortNeedTwo')}</p>}
+
+      {youTubeSortWorking.value && progress !== null && (
+        <p class="td-ai-working" role="status" aria-live="polite">
+          <span>
+            {t(
+              'youtubeSortReading',
+              formatCount(progress.done, language),
+              formatCount(progress.total, language),
+            )}
+          </span>
+          <button type="button" class="td-action" onClick={cancelYouTubeSort}>
+            {t('organizeAiCancel')}
+          </button>
+        </p>
+      )}
+
+      <div class="td-warnings" role="status" aria-live="polite">
+        {youTubeDenied.value && <p class="td-warning">{t('settingsYouTubeDenied')}</p>}
+        {status === 'already-ordered' && (
+          <p class="td-field-hint">{t('youtubeSortAlreadyOrdered')}</p>
+        )}
+        {status === 'unavailable' && <p class="td-warning">{t('youtubeSortUnavailable')}</p>}
+      </div>
+    </section>
+  );
+}
+
 /** Compact collapsible overview of how open tabs are grouped across windows when tab groups are off. */
 function WindowPlanOverview({
   plan,
   tabs: openTabs,
+  durations,
   language,
 }: {
   plan: WindowPlan;
   tabs: readonly TabInfo[];
+  durations: YouTubeDurationCache | null;
   language: string;
 }) {
   if (plan.groups.length === 0 && plan.ungrouped.length === 0) return null;
@@ -635,6 +790,8 @@ function WindowPlanOverview({
           const tab = byId.get(tabId);
           if (tab === undefined) return null;
           const host = displayHost(tab.url);
+          const videoId = durations === null ? null : extractYouTubeVideoId(tabUrl(tab));
+          const seconds = videoId === null ? null : (durations?.[videoId]?.seconds ?? null);
           return (
             <li key={tabId}>
               <button
@@ -645,6 +802,9 @@ function WindowPlanOverview({
                 }}
               >
                 <span class="td-window-plan-tab-title">{tab.title || host}</span>
+                {seconds !== null && seconds > 0 && (
+                  <span class="td-window-plan-tab-duration">{formatVideoDuration(seconds)}</span>
+                )}
                 {host !== '' && <span class="td-window-plan-tab-host">{host}</span>}
               </button>
             </li>
@@ -724,6 +884,43 @@ function AppliedToast({ language }: { language: string }) {
             {t('actionUndo')}
           </button>
           <button type="button" class="td-action td-toast-undo" onClick={dismissApplied}>
+            {t('organizeDismiss')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Undo toast for YouTube duration sorting: lets the user restore the window's YouTube tabs
+ * back to their original slots in one click.
+ */
+function YouTubeSortedToast({ language }: { language: string }) {
+  const result = youTubeSorted.value;
+  const sortedCount = result === null ? '' : formatCount(result.sortedCount, language);
+  const unknownCount = result === null ? '' : formatCount(result.unknownCount, language);
+
+  return (
+    <div class="td-toast-slot" role="status" aria-live="polite">
+      {result !== null && (
+        <div class="td-toast">
+          <span class="td-toast-text">
+            {result.unknownCount > 0
+              ? t('youtubeSortDoneWithUnknown', sortedCount, unknownCount)
+              : t('youtubeSortDone', sortedCount)}
+          </span>
+          <button
+            type="button"
+            class="td-action td-toast-undo"
+            disabled={youTubeSortWorking.value}
+            onClick={() => {
+              void undoYouTubeSort();
+            }}
+          >
+            {t('actionUndo')}
+          </button>
+          <button type="button" class="td-action td-toast-undo" onClick={dismissYouTubeSorted}>
             {t('organizeDismiss')}
           </button>
         </div>

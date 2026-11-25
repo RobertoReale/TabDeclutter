@@ -1082,5 +1082,69 @@
   "windowPlanHint": {
     "message": "Come sono raggruppate adesso le tue schede aperte. Clicca una scheda per aprirla.",
     "description": "Short explanation under the window-organization overview heading."
+  },
+  "settingsGroupYouTube": {
+    "message": "Ordinamento video YouTube",
+    "description": "Heading of the Settings card for optional YouTube duration sorting."
+  },
+  "settingsYouTubeSort": {
+    "message": "Ordina le schede YouTube per durata del video",
+    "description": "Settings checkbox to enable sorting YouTube video tabs by duration."
+  },
+  "settingsYouTubeSortHint": {
+    "message": "Funziona anche con le schede sospese senza ricaricarle. Chiede un permesso opzionale solo per youtube.com e salva le durate in cache locale.",
+    "description": "Explanation under the YouTube duration sorting checkbox."
+  },
+  "settingsYouTubeOrder": {
+    "message": "Ordine di durata dei video",
+    "description": "Settings dropdown label choosing shortest-first or longest-first for YouTube sorting."
+  },
+  "settingsYouTubeOrderAsc": {
+    "message": "Dal più breve al più lungo",
+    "description": "YouTube duration sort order: shortest videos first."
+  },
+  "settingsYouTubeOrderDesc": {
+    "message": "Dal più lungo al più breve",
+    "description": "YouTube duration sort order: longest videos first."
+  },
+  "settingsYouTubeDenied": {
+    "message": "Senza il permesso di accedere a youtube.com non è possibile leggere la durata dei video. Puoi riattivarlo quando vuoi.",
+    "description": "Warning shown when the user refuses the optional youtube.com host permission."
+  },
+  "youtubeSortHeading": {
+    "message": "Video YouTube in questa finestra",
+    "description": "Heading of the YouTube duration sorting card in the Organize view."
+  },
+  "youtubeSortHint": {
+    "message": "Ordina sul posto solo i video YouTube (anche se sospesi), lasciando le altre schede dove sono.",
+    "description": "Short explanation under the YouTube duration sorting card in the Organize view."
+  },
+  "youtubeSortNow": {
+    "message": "Ordina schede YouTube adesso",
+    "description": "Action button that sorts YouTube video tabs in the current window by duration."
+  },
+  "youtubeSortNeedTwo": {
+    "message": "Apri almeno 2 video YouTube in questa finestra per ordinarli.",
+    "description": "Hint shown when fewer than two movable YouTube videos exist in the current window."
+  },
+  "youtubeSortReading": {
+    "message": "Lettura durata video ($1 / $2)…",
+    "description": "Live progress status while fetching uncached YouTube video durations. $1 is completed count, $2 is total count."
+  },
+  "youtubeSortAlreadyOrdered": {
+    "message": "I video YouTube in questa finestra sono già in ordine.",
+    "description": "Status shown when sorting finds all YouTube videos already in the requested duration order."
+  },
+  "youtubeSortUnavailable": {
+    "message": "Impossibile leggere la durata dei video. Controlla la connessione o apri YouTube una volta.",
+    "description": "Warning shown when none of the YouTube videos' durations could be retrieved."
+  },
+  "youtubeSortDone": {
+    "message": "Ordinati $1 video YouTube per durata",
+    "description": "Undo toast text after sorting YouTube video tabs in the current window. $1 is the formatted number of sorted videos."
+  },
+  "youtubeSortDoneWithUnknown": {
+    "message": "Ordinati $1 video YouTube ($2 dirette o sconosciuti in coda)",
+    "description": "Undo toast text when some YouTube tabs were live streams or had unknown duration. $1 is sorted count, $2 is unknown/live count."
   }
 }

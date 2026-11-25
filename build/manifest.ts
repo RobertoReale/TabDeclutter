@@ -78,6 +78,9 @@ function commonKeys(): TabDeclutterManifest {
     // PLAN.md §5.4: requested only if the user turns on the "already
     // bookmarked" signal, so it must not be in `permissions`.
     optional_permissions: ['bookmarks'],
+    // Requested only if the user enables YouTube video duration sorting in Settings,
+    // so video lengths can be read for open and suspended YouTube tabs without reloading them.
+    optional_host_permissions: ['https://www.youtube.com/*'],
     // The archive and the activity map would leak between the two sessions.
     incognito: 'not_allowed',
     action: { default_title: MSG.actionTitle, default_icon: ICONS },

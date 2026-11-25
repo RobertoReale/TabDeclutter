@@ -6,6 +6,10 @@ All notable changes to TabDeclutter are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Optional **YouTube video duration sorting** (off by default in **Settings → YouTube video sorting**, behind `optional_host_permissions: ["https://www.youtube.com/*"]`): sorts open and suspended/discarded YouTube video tabs (standard videos, Shorts, `youtu.be`, `m.youtube.com`, `music.youtube.com`, and ended live VODs) shortest-to-longest or longest-to-shortest without waking suspended tabs, caching durations locally in `local:ytDurations`. Available both as a 1-click in-place sorter for the current window (with live progress and Undo) and automatically integrated into window organization and background Autopilot.
+
 ### Fixed
 
 - Kept `autoDeclutter` and `autoOrganize` disabled until onboarding completes (including ignoring `runtime.onInstalled` `'install'` events) and updated store/privacy documentation to match.

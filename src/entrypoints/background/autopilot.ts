@@ -51,7 +51,9 @@ import {
   movableTabsSignature,
   ORGANIZE_CLUSTER_OPTIONS,
   organizeWindows,
+  type YouTubeSortOptions,
 } from '@/platform/windows';
+import { resolveYouTubeDurations } from '@/platform/youtube';
 
 import {
   alarmsApi,
@@ -130,20 +132,33 @@ const isBlocked = (
 ): boolean => (state.graceUntil ?? 0) > at || (state.pausedUntil ?? 0) > at;
 const isTopicAiWindows = (s: Settings): boolean =>
   !s.useTabGroups && s.autoOrganizeMode === 'topic' && s.useOnDeviceAi;
-const runOrganize = (
+const runOrganize = async (
   s: Settings,
   focusedWindowId: number | undefined,
+  at: number,
   proposal?: GroupProposal,
   proposalSignature?: string,
-) =>
-  organizeWindows({
+) => {
+  let youTubeSort: YouTubeSortOptions | undefined;
+  if (s.sortYouTubeByDuration) {
+    const open = await queryTabs().catch(() => []);
+    const durations = await resolveYouTubeDurations(open, { now: at }).catch(
+      () => new Map<string, number | null>(),
+    );
+    if (durations.size > 0) {
+      youTubeSort = { durations, order: s.youTubeDurationOrder };
+    }
+  }
+  return organizeWindows({
     windowMode: s.autoWindowMode,
     clusterMode: s.autoOrganizeMode,
     useTabGroups: s.useTabGroups,
     focusedWindowId,
     proposal,
     proposalSignature,
+    youTubeSort,
   });
+};
 
 const WATCHED_ITEMS = [settingsItem, keepsItem, protectedDomainsItem, duplicateWhitelistItem];
 
@@ -280,7 +295,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       ) {
         return;
       }
-      await runOrganize(latest, liveFocusedId ?? focusedId, proposal, signature);
+      await runOrganize(latest, liveFocusedId ?? focusedId, now(), proposal, signature);
     });
   }
 
@@ -364,6 +379,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       const winResult = await runOrganize(
         settings,
         focusedId,
+        at,
         aiState.proposal ?? undefined,
         aiState.signature,
       );

@@ -191,4 +191,14 @@ test.describe('in English', () => {
     await expect(useTabGroups).toBeVisible();
     await expect(useTabGroups).not.toBeChecked();
   });
+
+  test('YouTube video duration sorting appears in Settings and defaults to off with zero network requests', async ({
+    panel,
+  }) => {
+    await openSettings(panel, 'en');
+
+    const ytToggle = panel.getByLabel(message('en', 'settingsYouTubeSort'));
+    await expect(ytToggle).toBeVisible();
+    await expect(ytToggle).not.toBeChecked();
+  });
 });

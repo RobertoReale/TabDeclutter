@@ -38,7 +38,15 @@ import {
   type GroupProposal,
 } from '@/core/cluster';
 import { MINUTE } from '@/core/time';
-import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '@/core/types';
+import { tabUrl } from '@/core/duplicates';
+import {
+  NO_GROUP_ID,
+  type AutoWindowMode,
+  type TabInfo,
+  type YouTubeDurationCache,
+  type YouTubeDurationOrder,
+} from '@/core/types';
+import { extractYouTubeVideoId, sortYouTubeTabIds } from '@/core/youtube';
 import { applyGroups, applyMessage, undoGroups, type ApplyResult } from '@/platform/groups';
 import {
   aiBusyUntilItem,
@@ -47,8 +55,10 @@ import {
   organizeSnoozeUntilItem,
   preemptBackgroundAi,
   readAiProposalState,
+  readYouTubeDurations,
   saveAiProposalState,
   withAiLock,
+  ytDurationsItem,
 } from '@/platform/storage';
 import { NO_WINDOW } from '@/platform/tabs';
 import {
@@ -59,10 +69,14 @@ import {
   organizeWindows,
   partitionUngroupedBySite,
   reconcileAiProposal,
+  sortWindowYouTubeTabs,
   undoOrganizeWindows,
   type OrganizeWindowsResult,
   type OrganizeWindowsSnapshot,
+  type SortWindowYouTubeResult,
+  type YouTubeSortOptions,
 } from '@/platform/windows';
+import { resolveYouTubeDurations } from '@/platform/youtube';
 import {
   aiActive,
   aiModel,
@@ -458,6 +472,66 @@ export const savedAiProposalLoaded = signal(false);
 /** Movable-tab signature for which automatic AI window organization already ran this session. */
 export const lastAutoWindowAiSignature = signal<string | null>(null);
 
+/** Cached YouTube video durations hydrated from `local:ytDurations` for live preview badges. */
+export const savedYouTubeDurations = signal<YouTubeDurationCache>({});
+
+/** Whether an on-demand YouTube duration sort is currently fetching or moving tabs. */
+export const youTubeSortWorking = signal(false);
+
+/** Live fetch progress while reading uncached YouTube durations. */
+export const youTubeSortProgress = signal<{ readonly done: number; readonly total: number } | null>(
+  null,
+);
+
+/** Non-toast status outcome of the last manual YouTube sort. */
+export const youTubeSortStatus = signal<'already-ordered' | 'unavailable' | null>(null);
+
+/** Undo payload for the last manual YouTube duration sort that moved at least one tab. */
+export const youTubeSorted = signal<{
+  readonly sortedCount: number;
+  readonly unknownCount: number;
+  readonly undo: OrganizeWindowsSnapshot;
+} | null>(null);
+
+let youTubeSortController: AbortController | null = null;
+let watchingYouTubeDurations = false;
+
+/** Hydrates and watches `local:ytDurations` so cached durations stay live in the Organize view. */
+export async function loadSavedYouTubeDurations(): Promise<void> {
+  if (!watchingYouTubeDurations) {
+    watchingYouTubeDurations = true;
+    try {
+      ytDurationsItem.watch((next) => {
+        savedYouTubeDurations.value = next;
+      });
+    } catch {
+      // Fallback in lightweight unit/extension test stubs without storage watchers.
+    }
+  }
+  savedYouTubeDurations.value = await readYouTubeDurations().catch(() => ({}));
+}
+
+/** Movable YouTube video tabs open in the focused window (including suspended/discarded tabs). */
+export const focusedWindowYouTubeTabs = computed<readonly TabInfo[]>(() => {
+  const data = panelData.value;
+  if (data === null) return [];
+  const all = data.tabs.filter((tab) => !tab.incognito && tab.windowId !== NO_WINDOW);
+  const windowId = data.focusedWindowId ?? (all.find((tab) => tab.active) ?? all[0])?.windowId;
+  if (windowId === undefined) return [];
+  return all.filter(
+    (tab) =>
+      tab.windowId === windowId && isMovableTab(tab) && extractYouTubeVideoId(tabUrl(tab)) !== null,
+  );
+});
+
+function durationMapFromCache(cache: YouTubeDurationCache): Map<string, number | null> {
+  const map = new Map<string, number | null>();
+  for (const [id, entry] of Object.entries(cache)) {
+    map.set(id, entry.seconds);
+  }
+  return map;
+}
+
 /** Hydrates `savedAiProposal` from `storage.local` so the overview reflects persisted & background state. */
 let watchingAiProposalStorage = false;
 export async function loadSavedAiProposal(): Promise<void> {
@@ -524,26 +598,40 @@ export const windowPlan = computed<WindowPlan>(() => {
   const byId = new Map(movable.map((tab) => [tab.id, tab]));
   const splitSites =
     panelData.value?.settings.autoWindowMode === 'split-windows' && mode.value === 'topic';
+  const ytEnabled = panelData.value?.settings.sortYouTubeByDuration === true;
+  const ytOrder = panelData.value?.settings.youTubeDurationOrder ?? 'asc';
+  const ytDurations = ytEnabled ? durationMapFromCache(savedYouTubeDurations.value) : null;
+  const applyYt = (ids: readonly number[]): readonly number[] =>
+    ytDurations !== null && ytDurations.size > 0
+      ? sortYouTubeTabIds(ids, byId, ytDurations, ytOrder)
+      : ids;
 
   const finalize = (
     source: 'ai' | 'local',
     groups: WindowPlanGroup[],
     ungrouped: readonly number[],
   ): WindowPlan => {
-    if (!splitSites || ungrouped.length === 0) return { source, groups, ungrouped };
-    const { siteBuckets, remaining } = partitionUngroupedBySite(ungrouped, byId, groups.length);
+    const orderedGroups = groups.map((group) => ({ ...group, tabIds: applyYt(group.tabIds) }));
+    if (!splitSites || ungrouped.length === 0) {
+      return { source, groups: orderedGroups, ungrouped: applyYt(ungrouped) };
+    }
+    const { siteBuckets, remaining } = partitionUngroupedBySite(
+      ungrouped,
+      byId,
+      orderedGroups.length,
+    );
     return {
       source,
       groups: [
-        ...groups,
+        ...orderedGroups,
         ...siteBuckets.map((bucket) => ({
           key: `site:${bucket.siteKey}`,
           title: siteName(bucket.siteKey),
           color: colorFor(bucket.siteKey),
-          tabIds: bucket.tabIds,
+          tabIds: applyYt(bucket.tabIds),
         })),
       ],
-      ungrouped: remaining,
+      ungrouped: applyYt(remaining),
     };
   };
 
@@ -627,12 +715,23 @@ export async function organizeWindowsWithAi(
   const finish = async (proposal?: GroupProposal): Promise<OrganizeWindowsResult> => {
     windowWorking.value = true;
     try {
+      let youTubeSort: YouTubeSortOptions | undefined;
+      const currentSettings = panelData.value?.settings;
+      if (currentSettings?.sortYouTubeByDuration === true) {
+        const durations = await resolveYouTubeDurations(panelData.value?.tabs ?? []).catch(
+          () => new Map<string, number | null>(),
+        );
+        if (durations.size > 0) {
+          youTubeSort = { durations, order: currentSettings.youTubeDurationOrder };
+        }
+      }
       const outcome = await organize({
         windowMode: request.windowMode,
         clusterMode: request.clusterMode,
         useTabGroups: request.useTabGroups,
         focusedWindowId: request.focusedWindowId,
         proposal,
+        youTubeSort,
       });
       if (outcome.undo !== undefined) {
         windowOrganized.value = {
@@ -855,6 +954,107 @@ export function dismissWindowOrganized(): void {
   windowOrganized.value = null;
 }
 
+export interface SortYouTubeDeps {
+  readonly resolveDurations?: typeof resolveYouTubeDurations;
+  readonly sortWindow?: typeof sortWindowYouTubeTabs;
+}
+
+/**
+ * Resolves durations for YouTube video tabs in the focused window (including suspended tabs
+ * without reloading them) and sorts them in place by duration, leaving all other tabs untouched.
+ */
+export async function sortCurrentWindowYouTube(
+  order: YouTubeDurationOrder,
+  focusedWindowId?: number,
+  deps: SortYouTubeDeps = {},
+): Promise<SortWindowYouTubeResult> {
+  youTubeSortController?.abort();
+  const controller = new AbortController();
+  youTubeSortController = controller;
+  youTubeSortWorking.value = true;
+  youTubeSortStatus.value = null;
+  youTubeSortProgress.value = null;
+  // Clear any prior autopilot snooze when the user explicitly sorts.
+  void organizeSnoozeUntilItem.setValue(0).catch(() => undefined);
+
+  const resolve = deps.resolveDurations ?? resolveYouTubeDurations;
+  const sortWindow = deps.sortWindow ?? sortWindowYouTubeTabs;
+
+  try {
+    const windowTabs = focusedWindowYouTubeTabs.value;
+    if (windowTabs.length < 2) {
+      return { movedTabs: 0, videoCount: windowTabs.length, knownCount: 0 };
+    }
+    const durations = await resolve(windowTabs, {
+      signal: controller.signal,
+      onProgress: (done, total) => {
+        if (youTubeSortController === controller) {
+          youTubeSortProgress.value = { done, total };
+        }
+      },
+    });
+    if (youTubeSortController !== controller || controller.signal.aborted) {
+      return { movedTabs: 0, videoCount: windowTabs.length, knownCount: 0 };
+    }
+
+    const result = await sortWindow({
+      windowId: focusedWindowId ?? panelData.value?.focusedWindowId,
+      order,
+      durations,
+    });
+
+    if (result.undo !== undefined) {
+      youTubeSorted.value = {
+        sortedCount: result.knownCount,
+        unknownCount: Math.max(0, result.videoCount - result.knownCount),
+        undo: result.undo,
+      };
+      youTubeSortStatus.value = null;
+    } else if (result.knownCount === 0) {
+      youTubeSortStatus.value = 'unavailable';
+    } else {
+      youTubeSortStatus.value = 'already-ordered';
+    }
+    return result;
+  } finally {
+    if (youTubeSortController === controller) {
+      youTubeSortController = null;
+      youTubeSortWorking.value = false;
+      youTubeSortProgress.value = null;
+    }
+  }
+}
+
+/** Cancels an in-flight YouTube duration fetch. */
+export function cancelYouTubeSort(): void {
+  youTubeSortController?.abort();
+}
+
+/** Undoes the last manual YouTube duration sort and snoozes autopilot briefly. */
+export async function undoYouTubeSort(
+  undoFn: typeof undoOrganizeWindows = undoOrganizeWindows,
+): Promise<void> {
+  const last = youTubeSorted.value;
+  if (last === null || youTubeSortWorking.value) return;
+  youTubeSorted.value = null;
+  youTubeSortWorking.value = true;
+  try {
+    await organizeSnoozeUntilItem
+      .setValue(Date.now() + WINDOW_UNDO_SNOOZE_MS)
+      .catch(() => undefined);
+    await undoFn(last.undo);
+  } catch (error: unknown) {
+    console.error('TabDeclutter: undo YouTube sort', error);
+  } finally {
+    youTubeSortWorking.value = false;
+  }
+}
+
+/** Dismisses the YouTube duration sort toast. */
+export function dismissYouTubeSorted(): void {
+  youTubeSorted.value = null;
+}
+
 /** "Annulla" in the spinner (§7.3): the run stops and §7.2's proposal stays on screen. */
 export function cancelAiGrouping(): void {
   running?.abort();
@@ -864,10 +1064,17 @@ export function cancelAiGrouping(): void {
 export function resetAiGrouping(): void {
   running?.abort();
   running = null;
+  youTubeSortController?.abort();
+  youTubeSortController = null;
   aiWorking.value = false;
   aiStageDetail.value = null;
   windowWorking.value = false;
   windowOrganized.value = null;
+  youTubeSortWorking.value = false;
+  youTubeSortProgress.value = null;
+  youTubeSortStatus.value = null;
+  youTubeSorted.value = null;
+  savedYouTubeDurations.value = {};
   savedAiProposal.value = null;
   savedAiProposalSignature.value = '';
   savedAiProposalLoaded.value = false;

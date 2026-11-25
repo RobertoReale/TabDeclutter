@@ -162,6 +162,20 @@ export type LanguageSetting = 'auto' | 'en' | 'it';
 /** How windows and tabs are organized automatically in the background. */
 export type AutoWindowMode = 'merge-windows' | 'split-windows';
 
+/** Sort direction for YouTube video tabs by duration. */
+export type YouTubeDurationOrder = 'asc' | 'desc';
+
+/** Cached YouTube video duration stored in `local:ytDurations`. */
+export interface YouTubeDurationEntry {
+  /** Duration in seconds for finite videos, or `null` for active live streams / unavailable videos. */
+  readonly seconds: number | null;
+  /** ms epoch when this entry was recorded. */
+  readonly fetchedAt: number;
+}
+
+/** `local:ytDurations`, keyed by canonical 11-character YouTube video id. */
+export type YouTubeDurationCache = Record<string, YouTubeDurationEntry>;
+
 /**
  * `local:settings` (PLAN.md §10). The protected sites, the keeps and the duplicate
  * whitelist are storage keys of their own, so they are not repeated here.
@@ -195,6 +209,15 @@ export interface Settings {
    * §5.4: a setting that is on while the permission is not would be a promise we cannot keep.
    */
   useBookmarks: boolean;
+  /**
+   * Sort YouTube video tabs by duration (including suspended/discarded tabs without reloading).
+   *
+   * Off until the user turns it on, because reading durations needs the optional host permission
+   * for `https://www.youtube.com/*`.
+   */
+  sortYouTubeByDuration: boolean;
+  /** Sort direction when `sortYouTubeByDuration` is enabled (`'asc'` shortest first, `'desc'` longest first). */
+  youTubeDurationOrder: YouTubeDurationOrder;
   archiveRetentionDays: number;
   language: LanguageSetting;
   guard: GuardSettings;
@@ -216,6 +239,8 @@ export const DEFAULT_SETTINGS: Settings = {
   useOnDeviceAi: false,
   aiRefreshEveryTab: false,
   useBookmarks: false,
+  sortYouTubeByDuration: false,
+  youTubeDurationOrder: 'asc',
   archiveRetentionDays: 30,
   language: 'auto',
   guard: DEFAULT_GUARD_SETTINGS,

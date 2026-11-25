@@ -1082,5 +1082,69 @@
   "windowPlanHint": {
     "message": "How your open tabs are grouped right now. Click any tab to jump to it.",
     "description": "Short explanation under the window-organization overview heading."
+  },
+  "settingsGroupYouTube": {
+    "message": "YouTube video sorting",
+    "description": "Heading of the Settings card for optional YouTube duration sorting."
+  },
+  "settingsYouTubeSort": {
+    "message": "Sort YouTube tabs by video duration",
+    "description": "Settings checkbox to enable sorting YouTube video tabs by duration."
+  },
+  "settingsYouTubeSortHint": {
+    "message": "Works with suspended tabs too without reloading them. Requests optional permission only for youtube.com and caches video durations locally.",
+    "description": "Explanation under the YouTube duration sorting checkbox."
+  },
+  "settingsYouTubeOrder": {
+    "message": "Video duration order",
+    "description": "Settings dropdown label choosing shortest-first or longest-first for YouTube sorting."
+  },
+  "settingsYouTubeOrderAsc": {
+    "message": "Shortest to longest",
+    "description": "YouTube duration sort order: shortest videos first."
+  },
+  "settingsYouTubeOrderDesc": {
+    "message": "Longest to shortest",
+    "description": "YouTube duration sort order: longest videos first."
+  },
+  "settingsYouTubeDenied": {
+    "message": "Without permission to access youtube.com, video durations cannot be read. You can turn this on again at any time.",
+    "description": "Warning shown when the user refuses the optional youtube.com host permission."
+  },
+  "youtubeSortHeading": {
+    "message": "YouTube videos in this window",
+    "description": "Heading of the YouTube duration sorting card in the Organize view."
+  },
+  "youtubeSortHint": {
+    "message": "Sorts only YouTube video tabs in place (including suspended tabs), leaving other tabs where they are.",
+    "description": "Short explanation under the YouTube duration sorting card in the Organize view."
+  },
+  "youtubeSortNow": {
+    "message": "Sort YouTube tabs now",
+    "description": "Action button that sorts YouTube video tabs in the current window by duration."
+  },
+  "youtubeSortNeedTwo": {
+    "message": "Open at least 2 YouTube videos in this window to sort them.",
+    "description": "Hint shown when fewer than two movable YouTube videos exist in the current window."
+  },
+  "youtubeSortReading": {
+    "message": "Reading video durations ($1 / $2)…",
+    "description": "Live progress status while fetching uncached YouTube video durations. $1 is completed count, $2 is total count."
+  },
+  "youtubeSortAlreadyOrdered": {
+    "message": "YouTube videos in this window are already in order.",
+    "description": "Status shown when sorting finds all YouTube videos already in the requested duration order."
+  },
+  "youtubeSortUnavailable": {
+    "message": "Could not read video durations. Check your connection or open YouTube once.",
+    "description": "Warning shown when none of the YouTube videos' durations could be retrieved."
+  },
+  "youtubeSortDone": {
+    "message": "Sorted $1 YouTube videos by duration",
+    "description": "Undo toast text after sorting YouTube video tabs in the current window. $1 is the formatted number of sorted videos."
+  },
+  "youtubeSortDoneWithUnknown": {
+    "message": "Sorted $1 YouTube videos ($2 live or unknown at the end)",
+    "description": "Undo toast text when some YouTube tabs were live streams or had unknown duration. $1 is sorted count, $2 is unknown/live count."
   }
 }

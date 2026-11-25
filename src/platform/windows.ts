@@ -26,7 +26,13 @@ import {
 } from '../core/cluster';
 import { tabUrl } from '../core/duplicates';
 import { INTERNAL_SCHEMES } from '../core/rules';
-import { NO_GROUP_ID, type AutoWindowMode, type TabInfo } from '../core/types';
+import {
+  NO_GROUP_ID,
+  type AutoWindowMode,
+  type TabInfo,
+  type YouTubeDurationOrder,
+} from '../core/types';
+import { planAnchorMoves, planYouTubeSlotMoves, sortYouTubeTabIds } from '../core/youtube';
 import { asTabInfos, attempt, NO_WINDOW, retryBatch, type BrowserTab } from './tabs';
 
 /** Shared clustering options used by background window/AI batching and window organization. */
@@ -199,6 +205,11 @@ function defaultApi(): WindowsOrganizeApi {
   return browser as unknown as WindowsOrganizeApi;
 }
 
+export interface YouTubeSortOptions {
+  readonly durations: ReadonlyMap<string, number | null>;
+  readonly order: YouTubeDurationOrder;
+}
+
 export interface OrganizeWindowsOptions {
   readonly windowMode: AutoWindowMode;
   readonly clusterMode: ClusterMode;
@@ -208,6 +219,8 @@ export interface OrganizeWindowsOptions {
   readonly proposal?: GroupProposal;
   /** Optional signature captured alongside `proposal`, used to reject stale/reused tab IDs. */
   readonly proposalSignature?: string;
+  /** Optional YouTube video duration sorting applied within each cluster / window bucket. */
+  readonly youTubeSort?: YouTubeSortOptions;
   readonly api?: WindowsOrganizeApi;
 }
 
@@ -221,6 +234,12 @@ export interface WindowTabSnapshot {
 export interface OrganizeWindowsSnapshot {
   readonly tabs: readonly WindowTabSnapshot[];
   readonly focusedWindowId?: number;
+  /** Exact in-place single-window restore plan so undoing YouTube sort never moves non-YT tabs. */
+  readonly inPlaceRestore?: {
+    readonly windowId: number;
+    readonly order: readonly number[];
+    readonly movingIds: readonly number[];
+  };
 }
 
 export interface OrganizeWindowsResult {
@@ -312,6 +331,7 @@ export async function organizeWindows(
             options.focusedWindowId,
             options.proposal,
             options.proposalSignature,
+            options.youTubeSort,
             api,
           ),
           windowsCount: 1,
@@ -322,6 +342,7 @@ export async function organizeWindows(
           options.focusedWindowId,
           options.proposal,
           options.proposalSignature,
+          options.youTubeSort,
           api,
         );
   const out: OrganizeWindowsResult & { undo?: OrganizeWindowsSnapshot } = {
@@ -330,6 +351,82 @@ export async function organizeWindows(
   };
   if (result.movedTabs > 0) out.undo = snapshot;
   return out;
+}
+
+export interface SortWindowYouTubeOptions {
+  readonly windowId?: number;
+  readonly order: YouTubeDurationOrder;
+  readonly durations: ReadonlyMap<string, number | null>;
+  readonly api?: WindowsOrganizeApi;
+}
+
+export interface SortWindowYouTubeResult {
+  readonly movedTabs: number;
+  readonly videoCount: number;
+  readonly knownCount: number;
+  readonly undo?: OrganizeWindowsSnapshot;
+}
+
+/**
+ * Sorts only the movable YouTube video tabs of one window by duration, swapping them in place
+ * across their own slots so non-YouTube tabs, pinned tabs, internal pages, and native tab group
+ * boundaries remain untouched. Returns an Undo snapshot whenever at least one tab moved.
+ */
+export async function sortWindowYouTubeTabs(
+  options: SortWindowYouTubeOptions,
+): Promise<SortWindowYouTubeResult> {
+  const api = options.api ?? defaultApi();
+  const queried = await attempt(() => api.tabs.query({}));
+  if (!queried.ok) return { movedTabs: 0, videoCount: 0, knownCount: 0 };
+
+  const allTabs = asTabInfos(queried.value).filter(
+    (tab) => !tab.incognito && tab.windowId !== NO_WINDOW,
+  );
+  if (allTabs.length === 0) return { movedTabs: 0, videoCount: 0, knownCount: 0 };
+
+  let targetWindowId = options.windowId;
+  if (targetWindowId === undefined && typeof api.windows.getLastFocused === 'function') {
+    const focused = await attempt(() => api.windows.getLastFocused!());
+    if (focused.ok && focused.value?.id !== undefined) targetWindowId = focused.value.id;
+  }
+  if (targetWindowId === undefined || !allTabs.some((tab) => tab.windowId === targetWindowId)) {
+    targetWindowId = (allTabs.find((tab) => tab.active) ?? allTabs[0])!.windowId;
+  }
+
+  const windowTabs = allTabs
+    .filter((tab) => tab.windowId === targetWindowId)
+    .sort((a, b) => a.index - b.index);
+  const movable = windowTabs.filter(isMovableTab);
+  const movableIds = new Set(movable.map((tab) => tab.id));
+  const plan = planYouTubeSlotMoves(windowTabs, movableIds, options.durations, options.order);
+  if (plan.moves.length === 0) {
+    return { movedTabs: 0, videoCount: plan.videoCount, knownCount: plan.knownCount };
+  }
+
+  const nonPinnedOrder = windowTabs.filter((tab) => !tab.pinned).map((tab) => tab.id);
+  const movingIds = [...new Set(plan.moves.map((move) => move.tabId))];
+  const snapshot: OrganizeWindowsSnapshot = {
+    tabs: movable.map((tab) => ({
+      tabId: tab.id,
+      windowId: tab.windowId,
+      index: tab.index,
+      active: tab.active,
+    })),
+    focusedWindowId: targetWindowId,
+    inPlaceRestore: { windowId: targetWindowId, order: nonPinnedOrder, movingIds },
+  };
+
+  let movedTabs = 0;
+  for (const move of plan.moves) {
+    const ok = await attempt(() =>
+      api.tabs.move(move.tabId, { windowId: targetWindowId, index: move.index }),
+    );
+    if (ok.ok) movedTabs += 1;
+  }
+
+  return movedTabs > 0
+    ? { movedTabs, videoCount: plan.videoCount, knownCount: plan.knownCount, undo: snapshot }
+    : { movedTabs: 0, videoCount: plan.videoCount, knownCount: plan.knownCount };
 }
 
 /**
@@ -350,6 +447,33 @@ export async function undoOrganizeWindows(
   );
   const liveById = new Map(liveTabs.map((tab) => [tab.id, tab]));
   const liveWindowIds = new Set(liveTabs.map((tab) => tab.windowId));
+
+  // Fast exact in-place restore for single-window YouTube sorting: only moves the YouTube tabs
+  // back to their original slots without touching non-YouTube or unmovable tabs.
+  const inPlace = snapshot.inPlaceRestore;
+  if (inPlace !== undefined && liveWindowIds.has(inPlace.windowId)) {
+    const winTabs = liveTabs
+      .filter((tab) => tab.windowId === inPlace.windowId)
+      .sort((a, b) => a.index - b.index);
+    const pinnedCount = winTabs.filter((tab) => tab.pinned).length;
+    const liveIds = winTabs.filter((tab) => !tab.pinned).map((tab) => tab.id);
+    const liveSet = new Set(liveIds);
+    const savedSet = new Set(inPlace.order);
+    const desiredIds = [
+      ...inPlace.order.filter((id) => liveSet.has(id)),
+      ...liveIds.filter((id) => !savedSet.has(id)),
+    ];
+    const movingSet = new Set(inPlace.movingIds.filter((id) => liveSet.has(id)));
+    const restoreMoves = planAnchorMoves(liveIds, desiredIds, movingSet, pinnedCount);
+    let restored = 0;
+    for (const move of restoreMoves) {
+      const ok = await attempt(() =>
+        api.tabs.move(move.tabId, { windowId: inPlace.windowId, index: move.index }),
+      );
+      if (ok.ok) restored += 1;
+    }
+    return restored;
+  }
 
   const byOrigWindow = new Map<number, WindowTabSnapshot[]>();
   for (const entry of snapshot.tabs) {
@@ -438,6 +562,7 @@ async function mergeAndSortIntoOneWindow(
   focusedWindowId: number | undefined,
   precomputed: GroupProposal | undefined,
   proposalSignature: string | undefined,
+  youTubeSort: YouTubeSortOptions | undefined,
   api: WindowsOrganizeApi,
 ): Promise<number> {
   const windowCounts = new Map<number, number>();
@@ -473,6 +598,7 @@ async function mergeAndSortIntoOneWindow(
     targetWindowId,
     precomputed,
     proposalSignature,
+    youTubeSort,
   );
 
   if (isWindowOrdered(allTabs, targetWindowId, sortedIds)) {
@@ -554,6 +680,7 @@ async function splitIntoThematicWindows(
   focusedWindowId: number | undefined,
   precomputed: GroupProposal | undefined,
   proposalSignature: string | undefined,
+  youTubeSort: YouTubeSortOptions | undefined,
   api: WindowsOrganizeApi,
 ): Promise<{ readonly movedTabs: number; readonly windowsCount: number }> {
   const movable = allTabs.filter(isMovableTab);
@@ -565,20 +692,26 @@ async function splitIntoThematicWindows(
 
   // Build desired window buckets: one per proposed group, then fallback site windows for any
   // ungrouped site with ≥ 2 tabs (in topic mode), plus one catch-all for remaining singletons.
-  const buckets: (readonly number[])[] = [...proposal.groups];
+  const rawBuckets: (readonly number[])[] = [...proposal.groups];
   if (proposal.ungrouped.length > 0) {
     if (clusterMode === 'topic') {
       const { siteBuckets, remaining } = partitionUngroupedBySite(
         proposal.ungrouped,
         byId,
-        buckets.length,
+        rawBuckets.length,
       );
-      for (const bucket of siteBuckets) buckets.push(bucket.tabIds);
-      if (remaining.length > 0) buckets.push(remaining);
+      for (const bucket of siteBuckets) rawBuckets.push(bucket.tabIds);
+      if (remaining.length > 0) rawBuckets.push(remaining);
     } else {
-      buckets.push(sortBySite(proposal.ungrouped, byId));
+      rawBuckets.push(sortBySite(proposal.ungrouped, byId));
     }
   }
+  const buckets: (readonly number[])[] =
+    youTubeSort === undefined
+      ? rawBuckets
+      : rawBuckets.map((ids) =>
+          sortYouTubeTabIds(ids, byId, youTubeSort.durations, youTubeSort.order),
+        );
   if (buckets.length === 0) return { movedTabs: 0, windowsCount: 1 };
 
   // Only reuse existing windows that already hold movable tabs, so browser-internal or OAuth
@@ -827,6 +960,7 @@ function orderedTabIds(
   virtualWindowId: number,
   precomputed: GroupProposal | undefined,
   proposalSignature?: string,
+  youTubeSort?: YouTubeSortOptions,
 ): readonly number[] {
   const proposal = resolveWindowProposal(
     tabs,
@@ -836,5 +970,9 @@ function orderedTabIds(
     proposalSignature,
   );
   const byId = new Map(tabs.map((tab) => [tab.id, tab]));
-  return [...proposal.groups.flat(), ...sortBySite(proposal.ungrouped, byId)];
+  const ungrouped = sortBySite(proposal.ungrouped, byId);
+  if (youTubeSort === undefined) return [...proposal.groups.flat(), ...ungrouped];
+  const orderGroup = (ids: readonly number[]) =>
+    sortYouTubeTabIds(ids, byId, youTubeSort.durations, youTubeSort.order);
+  return [...proposal.groups.flatMap(orderGroup), ...orderGroup(ungrouped)];
 }

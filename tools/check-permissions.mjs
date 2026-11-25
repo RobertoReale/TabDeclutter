@@ -36,6 +36,7 @@ for (const [name, dir] of [
   const checks = [
     [`${name} (required)`, [...(manifest.permissions ?? [])].sort()],
     [`${name} (optional)`, [...(manifest.optional_permissions ?? [])].sort()],
+    [`${name} (optional hosts)`, [...(manifest.optional_host_permissions ?? [])].sort()],
   ];
   for (const [heading, built] of checks) {
     const documented = rows(heading);

@@ -73,8 +73,18 @@ describe('docs/PERMISSIONS.md', () => {
       );
     });
 
+    it(`lists exactly the optional ${name} host permissions of the manifest`, () => {
+      expect(permissionRows(permissions, `## ${name} (optional hosts)`).sort()).toEqual(
+        [...(manifest.optional_host_permissions ?? [])].sort(),
+      );
+    });
+
     it(`gives every ${name} permission a warning and a justification`, () => {
-      for (const heading of [`## ${name} (required)`, `## ${name} (optional)`]) {
+      for (const heading of [
+        `## ${name} (required)`,
+        `## ${name} (optional)`,
+        `## ${name} (optional hosts)`,
+      ]) {
         for (const line of section(permissions, heading).split('\n')) {
           if (!/^\|\s*`/.test(line)) continue;
           const cells = line.split('|').map((cell) => cell.trim());
@@ -171,6 +181,7 @@ describe('docs/AMO_REVIEW.md', () => {
     for (const permission of [
       ...(manifest.permissions ?? []),
       ...(manifest.optional_permissions ?? []),
+      ...(manifest.optional_host_permissions ?? []),
     ]) {
       expect(notes, permission).toContain(`- ${permission}`);
     }

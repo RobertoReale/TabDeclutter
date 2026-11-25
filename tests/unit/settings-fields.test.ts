@@ -24,6 +24,7 @@ import {
   parseDomains,
   RETENTION_DAYS,
   STALE_DAYS,
+  YOUTUBE_ORDER_CHOICES,
 } from '../../src/entrypoints/sidepanel/settings-fields';
 
 describe('the values the fields offer', () => {
@@ -42,6 +43,12 @@ describe('the values the fields offer', () => {
   it('offer "automatica, IT, EN" for the language, automatic first', () => {
     expect(LANGUAGE_CHOICES.map((choice) => choice.value)).toEqual(['auto', 'en', 'it']);
     expect(LANGUAGE_CHOICES[0]?.value).toBe(DEFAULT_SETTINGS.language);
+  });
+
+  it('offer shortest-first and longest-first for YouTube duration sorting, shortest first by default', () => {
+    expect(YOUTUBE_ORDER_CHOICES.map((choice) => choice.value)).toEqual(['asc', 'desc']);
+    expect(DEFAULT_SETTINGS.sortYouTubeByDuration).toBe(false);
+    expect(YOUTUBE_ORDER_CHOICES[0]?.value).toBe(DEFAULT_SETTINGS.youTubeDurationOrder);
   });
 });
 

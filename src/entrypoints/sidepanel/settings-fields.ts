@@ -9,7 +9,7 @@
  * WXT's alias, and this module is tested there.
  */
 
-import type { GuardMode, LanguageSetting } from '../../core/types';
+import type { GuardMode, LanguageSetting, YouTubeDurationOrder } from '../../core/types';
 import type { AiAvailability } from '../../platform/llm';
 import type { MessageKey } from '../../platform/i18n';
 import { durationText } from './format';
@@ -65,6 +65,12 @@ export const LANGUAGE_CHOICES: readonly Choice<LanguageSetting>[] = [
   { value: 'auto', label: 'settingsLanguageAuto' },
   { value: 'en', label: 'settingsLanguageEn' },
   { value: 'it', label: 'settingsLanguageIt' },
+];
+
+/** Sort direction options for YouTube video duration sorting. */
+export const YOUTUBE_ORDER_CHOICES: readonly Choice<YouTubeDurationOrder>[] = [
+  { value: 'asc', label: 'settingsYouTubeOrderAsc' },
+  { value: 'desc', label: 'settingsYouTubeOrderDesc' },
 ];
 
 /** How a field's stored number becomes milliseconds: days for two of them, nothing for the grace. */

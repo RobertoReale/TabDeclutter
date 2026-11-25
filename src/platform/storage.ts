@@ -16,21 +16,23 @@
  * });
  * ```
  *
- * WXT records the stored version in the item's metadata and runs the missing migrations
- * in order when the extension updates, so a user who skips a release is migrated step by
- * step.
+ * The stored version lives in the item's metadata (`<key>$`) and missing migrations run in
+ * order when the extension updates, so a user who skips a release is migrated step by step.
+ *
+ * **Direct `browser.storage` wrapper (not `wxt/utils/storage`).** Implements the exact subset
+ * this extension uses (`getValue`, `setValue`, `watch`, batched reads/writes, and `<key>$`
+ * versioned migrations) with identical storage layout, avoiding pulling `@wxt-dev/storage` and
+ * `superlock` (~24 KB raw / ~6 KB gzip) into both the background worker and side panel.
  *
  * **The value you read is not yours to mutate.** The fallbacks are shared objects, so
  * every write goes through the helpers below, which build a new value instead of editing
  * the one they read.
  */
 
-import { storage } from 'wxt/utils/storage';
-import type { StorageItemKey } from 'wxt/utils/storage';
-
 import { pruneArchiveEntries, sweepActivity } from '../core/archive';
 import type { GroupProposal } from '../core/cluster';
 import { keepKey } from '../core/scoring';
+import { pruneYouTubeCache } from '../core/youtube';
 import type {
   ActivityStore,
   ArchivedTab,
@@ -41,6 +43,8 @@ import type {
   Keeps,
   Settings,
   TabActivity,
+  YouTubeDurationCache,
+  YouTubeDurationEntry,
 } from '../core/types';
 import {
   ARCHIVE_CAP,
@@ -52,14 +56,99 @@ import {
   EXEMPTION_TTL_MS,
 } from '../core/types';
 
+/** `<area>:<key>`, the two storage areas PLAN.md §10 uses. */
+export type StorageItemKey = `${'local' | 'session'}:${string}`;
+
 /** How an item declares a shape change. See the module comment. */
-interface VersionedOptions {
+export interface VersionedOptions {
   readonly version: number;
   readonly migrations: Record<number, (oldValue: unknown) => unknown>;
 }
 
-function defineVersioned<T>(key: StorageItemKey, fallback: T, options?: VersionedOptions) {
-  return storage.defineItem<T>(key, { version: 1, ...options, fallback });
+/** One typed storage key: its fallback-aware read/write and `onChanged` watcher. */
+export interface StorageItem<T> {
+  readonly key: StorageItemKey;
+  readonly name: string;
+  readonly fallback: T;
+  getValue(): Promise<T>;
+  setValue(value: T): Promise<void>;
+  watch(callback: (newValue: T) => void): () => void;
+}
+
+function defineVersioned<T>(
+  key: StorageItemKey,
+  fallback: T,
+  options?: VersionedOptions,
+): StorageItem<T> {
+  const colon = key.indexOf(':');
+  const areaName = key.slice(0, colon) as 'local' | 'session';
+  const name = key.slice(colon + 1);
+  const metaKey = `${name}$`;
+  const version = options?.version ?? 1;
+  const area = () => browser.storage[areaName];
+  let needsVersion = false;
+
+  const migrate = async (migrations: VersionedOptions['migrations']): Promise<void> => {
+    const stored = await area().get([name, metaKey]);
+    const value: unknown = stored[name];
+    const meta = (stored[metaKey] ?? {}) as { v?: number };
+    if (value == null) {
+      needsVersion = meta.v == null;
+      return;
+    }
+    const from = meta.v ?? 1;
+    if (from > version) throw new Error(`downgrade from v${String(from)} to v${String(version)}`);
+    let next = value;
+    for (let step = from + 1; step <= version; step += 1) next = migrations[step]?.(next) ?? next;
+    if (from < version) await area().set({ [name]: next, [metaKey]: { ...meta, v: version } });
+  };
+
+  const migrated =
+    options === undefined
+      ? Promise.resolve()
+      : migrate(options.migrations).catch((error: unknown) => {
+          console.error(`TabDeclutter: migration of ${key} failed`, error);
+        });
+
+  return {
+    key,
+    name,
+    fallback,
+    async getValue() {
+      await migrated;
+      return ((await area().get(name))[name] as T | undefined) ?? fallback;
+    },
+    async setValue(value) {
+      await migrated;
+      const write = value == null ? area().remove(name) : area().set({ [name]: value as unknown });
+      if (needsVersion) {
+        needsVersion = false;
+        await Promise.all([write, area().set({ [metaKey]: { v: version } })]);
+      } else {
+        await write;
+      }
+    },
+    watch(callback) {
+      const listener = (
+        changes: Record<string, { readonly newValue?: unknown }>,
+        changedArea: string,
+      ): void => {
+        if (changedArea !== areaName || !(name in changes)) return;
+        const next = changes[name]?.newValue;
+        callback((next === undefined ? fallback : next) as T);
+      };
+      browser.storage.onChanged.addListener(listener);
+      return () => {
+        browser.storage.onChanged.removeListener(listener);
+      };
+    },
+  };
+}
+
+/** Reads multiple `local:` items in a single `browser.storage.local.get` IPC call. */
+async function readLocalBatch(items: readonly StorageItem<unknown>[]): Promise<unknown[]> {
+  const raw = await browser.storage.local.get(items.map((item) => item.name));
+  return items.map((item) => raw[item.name] ?? item.fallback);
 }
 
 /** `Record<tabId, TabActivity>`, what the tracker remembers (PLAN.md §6.1). */
@@ -150,14 +239,22 @@ export const aiBgCooldownUntilItem = /*#__PURE__*/ defineVersioned<number>(
   0,
 );
 
-/**
- * Timestamp (ms epoch) until which background `autoOrganize` pauses after the user clicks
+/** Timestamp (ms epoch) until which background `autoOrganize` pauses after the user clicks
  * Undo on a window organization, so autopilot does not immediately re-organize the tabs
  * without touching the user's persisted `autoOrganize` setting.
  */
 export const organizeSnoozeUntilItem = /*#__PURE__*/ defineVersioned<number>(
   'session:organizeSnoozeUntil',
   0,
+);
+
+/**
+ * Local cache of YouTube video durations (`videoId` → `{ seconds, fetchedAt }`), populated
+ * only when the user opts into YouTube duration sorting so each video is fetched at most once.
+ */
+export const ytDurationsItem = /*#__PURE__*/ defineVersioned<YouTubeDurationCache>(
+  'local:ytDurations',
+  {},
 );
 
 /**
@@ -301,7 +398,7 @@ export interface ScoringStoreSnapshot {
 }
 
 export async function readScoringStore(now: number): Promise<ScoringStoreSnapshot> {
-  const items = await storage.getItems([
+  const values = await readLocalBatch([
     activityItem,
     settingsItem,
     keepsItem,
@@ -309,11 +406,11 @@ export async function readScoringStore(now: number): Promise<ScoringStoreSnapsho
     duplicateWhitelistItem,
   ]);
   return {
-    activity: (items[0]?.value ?? {}) as ActivityStore,
-    settings: mergeSettings(items[1]?.value as Partial<Settings> | undefined),
-    keeps: filterActiveKeeps((items[2]?.value ?? {}) as Keeps, now),
-    protectedSites: (items[3]?.value ?? []) as string[],
-    whitelist: (items[4]?.value ?? []) as string[],
+    activity: values[0] as ActivityStore,
+    settings: mergeSettings(values[1] as Partial<Settings> | undefined),
+    keeps: filterActiveKeeps(values[2] as Keeps, now),
+    protectedSites: values[3] as string[],
+    whitelist: values[4] as string[],
   };
 }
 
@@ -325,17 +422,17 @@ export async function readScoringStore(now: number): Promise<ScoringStoreSnapsho
 export async function readScoringInputs(
   now: number,
 ): Promise<Omit<ScoringStoreSnapshot, 'settings'>> {
-  const items = await storage.getItems([
+  const values = await readLocalBatch([
     activityItem,
     keepsItem,
     protectedDomainsItem,
     duplicateWhitelistItem,
   ]);
   return {
-    activity: (items[0]?.value ?? {}) as ActivityStore,
-    keeps: filterActiveKeeps((items[1]?.value ?? {}) as Keeps, now),
-    protectedSites: (items[2]?.value ?? []) as string[],
-    whitelist: (items[3]?.value ?? []) as string[],
+    activity: values[0] as ActivityStore,
+    keeps: filterActiveKeeps(values[1] as Keeps, now),
+    protectedSites: values[2] as string[],
+    whitelist: values[3] as string[],
   };
 }
 
@@ -344,10 +441,10 @@ export async function readSettingsAndWhitelist(): Promise<{
   readonly settings: Settings;
   readonly whitelist: readonly string[];
 }> {
-  const items = await storage.getItems([settingsItem, duplicateWhitelistItem]);
+  const values = await readLocalBatch([settingsItem, duplicateWhitelistItem]);
   return {
-    settings: mergeSettings(items[0]?.value as Partial<Settings> | undefined),
-    whitelist: (items[1]?.value ?? []) as string[],
+    settings: mergeSettings(values[0] as Partial<Settings> | undefined),
+    whitelist: values[1] as string[],
   };
 }
 
@@ -356,10 +453,10 @@ export async function readAiProposalState(): Promise<{
   readonly proposal: GroupProposal | null;
   readonly signature: string;
 }> {
-  const items = await storage.getItems([aiProposalItem, aiProposalSignatureItem]);
+  const values = await readLocalBatch([aiProposalItem, aiProposalSignatureItem]);
   return {
-    proposal: (items[0]?.value ?? null) as GroupProposal | null,
-    signature: (items[1]?.value ?? '') as string,
+    proposal: values[0] as GroupProposal | null,
+    signature: values[1] as string,
   };
 }
 
@@ -368,10 +465,35 @@ export async function saveAiProposalState(
   proposal: GroupProposal | null,
   signature: string,
 ): Promise<void> {
-  await storage.setItems([
-    { item: aiProposalItem, value: proposal },
-    { item: aiProposalSignatureItem, value: signature },
-  ]);
+  await browser.storage.local.set({
+    [aiProposalItem.name]: proposal,
+    [aiProposalSignatureItem.name]: signature,
+  });
+}
+
+/** Reads the local cache of YouTube video durations. */
+export function readYouTubeDurations(): Promise<YouTubeDurationCache> {
+  return ytDurationsItem.getValue();
+}
+
+/** Merges newly fetched YouTube durations into `local:ytDurations`, pruning expired/excess entries. */
+export function mergeYouTubeDurations(
+  updates: Readonly<Record<string, YouTubeDurationEntry>>,
+  now: number,
+): Promise<YouTubeDurationCache> {
+  return serialize(ytDurationsItem.key, async () => {
+    const stored = await ytDurationsItem.getValue();
+    const next = pruneYouTubeCache({ ...stored, ...updates }, now);
+    await ytDurationsItem.setValue(next);
+    return next;
+  });
+}
+
+/** Clears the local YouTube duration cache (e.g. when the user disables the feature). */
+export function clearYouTubeDurations(): Promise<void> {
+  return serialize(ytDurationsItem.key, async () => {
+    await ytDurationsItem.setValue({});
+  });
 }
 
 /** Stores the settings as one value, serialized so rapid updates never clobber each other. */
