@@ -204,9 +204,37 @@ describe('platform/youtube permissions and streaming fetcher', () => {
     const fetchFn = vi.fn().mockResolvedValue(mockResponse) as unknown as typeof fetch;
     const parsed = await fetchYouTubeVideoDuration('dQw4w9WgXcQ', undefined, fetchFn);
     expect(parsed).toEqual({ kind: 'duration', seconds: 425 });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      expect.objectContaining({ credentials: 'omit' }),
+    );
     expect(cancelSpy).toHaveBeenCalledTimes(1);
     // Stopped before reading the huge 3rd chunk.
     expect(chunkIndex).toBe(2);
+  });
+
+  it('retries once with credentials:include only when anonymous fetch returns unknown (e.g. consent wall)', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => '<html><body>Consent required</body></html>',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => '{"videoDetails":{"lengthSeconds":"310","isLiveContent":false}}',
+      });
+
+    const parsed = await fetchYouTubeVideoDuration(
+      'ConsentVid1',
+      undefined,
+      fetchSpy as unknown as typeof fetch,
+    );
+    expect(parsed).toEqual({ kind: 'duration', seconds: 310 });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({ credentials: 'omit' });
+    expect(fetchSpy.mock.calls[1]?.[1]).toMatchObject({ credentials: 'include' });
   });
 
   it('waits past DVR lengthSeconds chunk to detect active isLive:true in the next chunk', async () => {

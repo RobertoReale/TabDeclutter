@@ -132,40 +132,50 @@ async function readWatchHtml(response: Response): Promise<string> {
 /**
  * Fetches duration metadata for a single YouTube video id.
  *
- * Returns `null` on transport/HTTP errors (so transient offline failures are NOT cached),
- * or `ParsedYouTubeDuration` when YouTube returned a 200 HTML response.
+ * Uses an anonymous fetch (`credentials: 'omit'`) first so no Google/YouTube account cookies
+ * are sent for public videos, and retries once with `credentials: 'include'` only if the
+ * anonymous response could not yield a duration (e.g. EU consent screen or signed-in/age-gated
+ * videos). Returns `null` on transport/HTTP errors so transient offline failures are NOT cached.
  */
 export async function fetchYouTubeVideoDuration(
   videoId: string,
   signal?: AbortSignal,
   fetchFn: typeof fetch = fetch,
 ): Promise<ParsedYouTubeDuration | null> {
-  const controller = new AbortController();
-  const onAbort = (): void => {
-    controller.abort(signal?.reason);
-  };
-  if (signal?.aborted) return null;
-  signal?.addEventListener('abort', onAbort, { once: true });
-  const timer = setTimeout(() => {
-    controller.abort(new DOMException('YouTube fetch timed out', 'TimeoutError'));
-  }, FETCH_TIMEOUT_MS);
-  (timer as unknown as { unref?: () => void }).unref?.();
+  const attemptFetch = async (
+    credentials: RequestCredentials,
+  ): Promise<ParsedYouTubeDuration | null> => {
+    const controller = new AbortController();
+    const onAbort = (): void => {
+      controller.abort(signal?.reason);
+    };
+    if (signal?.aborted) return null;
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException('YouTube fetch timed out', 'TimeoutError'));
+    }, FETCH_TIMEOUT_MS);
+    (timer as unknown as { unref?: () => void }).unref?.();
 
-  try {
-    const response = await fetchFn(`https://www.youtube.com/watch?v=${videoId}`, {
-      credentials: 'include',
-      redirect: 'follow',
-      signal: controller.signal,
-    });
-    if (!response.ok) return null;
-    const html = await readWatchHtml(response);
-    return parseYouTubeDurationHtml(html);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', onAbort);
-  }
+    try {
+      const response = await fetchFn(`https://www.youtube.com/watch?v=${videoId}`, {
+        credentials,
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+      if (!response.ok) return null;
+      const html = await readWatchHtml(response);
+      return parseYouTubeDurationHtml(html);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    }
+  };
+
+  const anonymous = await attemptFetch('omit');
+  if (anonymous === null || anonymous.kind !== 'unknown' || signal?.aborted) return anonymous;
+  return attemptFetch('include');
 }
 
 /** Deduplicates concurrent fetches for the same video id within one extension context. */

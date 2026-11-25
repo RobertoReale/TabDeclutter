@@ -46,9 +46,11 @@ Nothing else is kept. Uninstalling the extension removes all of it.
 - **YouTube video duration sorting (optional host permission).** Off by default. If you enable
   "Sort YouTube tabs by video duration" in Settings, the browser asks for optional host permission
   strictly for `https://www.youtube.com/*`. The extension reads video duration metadata directly
-  from `www.youtube.com` (so even suspended/discarded YouTube tabs can be sorted without reloading
-  them) and caches durations locally to avoid repeat requests. No data is sent to any third-party
-  server. Turning the feature off revokes the permission and clears the duration cache.
+  from `www.youtube.com` using an anonymous request first (`credentials: 'omit'`, falling back to
+  your browser session only if needed for consent or signed-in videos) so even suspended/discarded
+  YouTube tabs can be sorted without reloading them, and caches durations locally to avoid repeat
+  requests. No data is sent to any third-party server. Turning the feature off revokes the
+  permission and clears the duration cache.
 
 - **On-device AI (Chrome only, optional).** If your Chrome offers its built-in model (Gemini
   Nano, through the Prompt API), TabDeclutter can use it to suggest names for groups of tabs. The
