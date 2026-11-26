@@ -1,6 +1,6 @@
 # TabDeclutter — Privacy policy
 
-_Last updated: 2026-11-25 (version 0.1.0)._
+_Last updated: 2026-11-26 (version 0.1.0)._
 
 **TabDeclutter does not collect, transmit or share any data.** Everything it knows stays in your
 browser, on your device.
@@ -31,10 +31,10 @@ Nothing else is kept. Uninstalling the extension removes all of it.
 ## What the extension never does
 
 - It makes **no network requests by default**: no servers of ours, no analytics, no telemetry, no
-  crash reports, no advertising, no remote configuration. The only optional network fetch the
-  extension can ever perform is directly to `https://www.youtube.com/watch?v=<id>` when you
-  explicitly enable "Sort YouTube tabs by video duration" and grant the optional `www.youtube.com`
-  host permission.
+  crash reports, no advertising, no remote configuration. The only optional network fetches the
+  extension can ever perform are directly to `https://www.youtube.com/` when you explicitly enable
+  an optional YouTube feature ("Sort YouTube tabs by video duration" or "Close YouTube tabs for
+  videos you already liked") and grant the optional `www.youtube.com` host permission.
 - It loads and runs **no remote code**.
 - It does not sell, share or transfer data to anyone, because it has none to give.
 - It injects no content scripts and requests no required host permissions.
@@ -43,14 +43,19 @@ Nothing else is kept. Uninstalling the extension removes all of it.
 
 ## Optional features
 
-- **YouTube video duration sorting (optional host permission).** Off by default. If you enable
-  "Sort YouTube tabs by video duration" in Settings, the browser asks for optional host permission
-  strictly for `https://www.youtube.com/*`. The extension reads video duration metadata directly
-  from `www.youtube.com` using an anonymous request first (`credentials: 'omit'`, falling back to
-  your browser session only if needed for consent or signed-in videos) so even suspended/discarded
-  YouTube tabs can be sorted without reloading them, and caches durations locally to avoid repeat
-  requests. No data is sent to any third-party server. Turning the feature off revokes the
-  permission and clears the duration cache.
+- **YouTube features (optional host permission).** Off by default. If you enable "Sort YouTube
+  tabs by video duration" or "Close YouTube tabs for videos you already liked" in Settings, the
+  browser asks for optional host permission strictly for `https://www.youtube.com/*`:
+  - **Duration sorting** reads video duration metadata directly from `www.youtube.com` using an
+    anonymous request first (`credentials: 'omit'`, falling back to your browser session only if
+    needed for consent or signed-in videos) so even suspended/discarded YouTube tabs can be sorted
+    without reloading them, and caches durations locally to avoid repeat requests.
+  - **Closing liked videos** reads your signed-in browser session directly against `www.youtube.com`
+    (`playlist?list=LL` and `watch?v=<id>`) solely to determine whether an open or suspended video
+    tab is already liked. Like status is never stored or cached — only closed tabs enter your local
+    Archive for Undo/restore.
+  No data is sent to any third-party server. Turning off duration sorting clears the local duration
+  cache, and turning off both YouTube features revokes the `www.youtube.com` permission immediately.
 
 - **On-device AI (Chrome only, optional).** If your Chrome offers its built-in model (Gemini
   Nano, through the Prompt API), TabDeclutter can use it to suggest names for groups of tabs. The
@@ -95,10 +100,13 @@ resta nel tuo browser, sul tuo dispositivo.
 - **Cosa non fa mai:** nessuna richiesta di rete di default (nessun nostro server, nessuna analisi
   d'uso o telemetria, nessuna pubblicità, nessun codice remoto), nessun content script, nessun
   permesso host obbligatorio, nessun funzionamento nelle finestre in incognito.
-- **Funzioni facoltative:** l'ordinamento dei video YouTube per durata (spento di default) chiede
-  il permesso host opzionale solo per `https://www.youtube.com/*`, legge la durata direttamente da
-  YouTube (anche per le schede sospese senza ricaricarle) salvandola in cache locale e revoca il
-  permesso svuotando la cache quando lo disattivi. L'IA sul dispositivo (solo Chrome) usa il modello
+- **Funzioni facoltative:** le opzioni YouTube (spente di default) chiedono il permesso host
+  opzionale solo per `https://www.youtube.com/*`: l'ordinamento per durata legge la durata
+  direttamente da YouTube (anche per le schede sospese senza ricaricarle) salvandola in cache
+  locale, mentre la chiusura dei video con Mi piace verifica direttamente su `www.youtube.com` con
+  la tua sessione attiva quali schede video hai già messo nei Mi piace senza salvare alcuno stato
+  di like; disattivando l'ordinamento la cache viene svuotata e disattivando entrambe le opzioni il
+  permesso viene revocato subito. L'IA sul dispositivo (solo Chrome) usa il modello
   integrato in Chrome per proporre nomi di gruppo; il modello gira in locale e il suo download parte
   solo dopo un tuo clic. Il permesso facoltativo `bookmarks` viene chiesto solo se attivi il segnale
   "già nei segnalibri"; l'estensione controlla soltanto se un indirizzo è nei segnalibri e non li

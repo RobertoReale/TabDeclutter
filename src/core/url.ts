@@ -51,9 +51,9 @@ const SUSPENDER_PAGE =
 const SUSPENDER_NEXT_PARAM =
   /&(?:ttl|title|pos|wh|fav(?:icon|IconUrl)?|scroll_[xy]|(?:tab|window)Id)=/i;
 
-function parse(url: string): URL | null {
+export function parseUrl(url: string): URL | null {
   try {
-    return new URL(url);
+    return new URL(url.trim());
   } catch {
     return null;
   }
@@ -61,7 +61,7 @@ function parse(url: string): URL | null {
 
 function asWebUrl(candidate: string): string | null {
   const trimmed = candidate.trim();
-  const parsed = parse(trimmed);
+  const parsed = parseUrl(trimmed);
   if (parsed === null) return null;
   const protocol = parsed.protocol.toLowerCase();
   if (protocol !== 'http:' && protocol !== 'https:') return null;
@@ -105,7 +105,7 @@ export function unwrapSuspendedUrl(url: string): string {
     ) {
       return depth === 0 ? url : current;
     }
-    const parsed = parse(current);
+    const parsed = parseUrl(current);
     if (parsed === null || !SUSPENDER_PAGE.test(parsed.pathname)) {
       return depth === 0 ? url : current;
     }
@@ -136,7 +136,7 @@ export function isSuspendedUrl(url: string): boolean {
  */
 export function normalizeUrl(url: string, options: MatchOptions = DEFAULT_MATCH_OPTIONS): string {
   const trimmed = unwrapSuspendedUrl(url).trim();
-  const parsed = parse(trimmed);
+  const parsed = parseUrl(trimmed);
   if (parsed === null) return options.ignoreCase ? trimmed.toLowerCase() : trimmed;
 
   // `about:blank`, `data:…`, `javascript:…`, `view-source:https://…`: there is no
@@ -219,7 +219,7 @@ export function registrableDomain(urlOrHostname: string): string | null {
  * on screen (PLAN.md §5.5).
  */
 export function displayHost(url: string): string {
-  const parsed = parse(unwrapSuspendedUrl(url).trim());
+  const parsed = parseUrl(unwrapSuspendedUrl(url).trim());
   if (
     parsed === null ||
     parsed.protocol === 'chrome-extension:' ||

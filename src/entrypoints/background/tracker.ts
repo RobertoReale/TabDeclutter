@@ -36,7 +36,7 @@ import { unwrapSuspendedUrl } from '@/core/url';
 import type { Capabilities } from '@/platform/capabilities';
 import { caps } from '@/platform/capabilities';
 import { activityItem, foregroundItem, patchActivity, replaceActivity } from '@/platform/storage';
-import { NO_WINDOW } from '@/platform/tabs';
+import { attempt, NO_WINDOW } from '@/platform/tabs';
 
 import { backgroundError, createSerialQueue, reportBackgroundError } from './report';
 
@@ -470,10 +470,6 @@ function noWindowId(): number {
 }
 
 async function getTab(tabId: number): Promise<TabLike | undefined> {
-  try {
-    return (await browser.tabs.get(tabId)) as TabLike | undefined;
-  } catch {
-    // Gone between the event and here. The next event will invent the record.
-    return undefined;
-  }
+  const found = await attempt(() => browser.tabs.get(tabId));
+  return found.ok ? (found.value as TabLike | undefined) : undefined;
 }

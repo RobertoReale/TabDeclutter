@@ -28,6 +28,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { t } from '@/platform/i18n';
 import { activateTab } from '@/platform/tabs';
+import { requestYouTubePermission } from '@/platform/youtube';
 import type { TabInfo } from '@/core/types';
 import { EmptyState } from '../components/EmptyState';
 import { HealthBar } from '../components/HealthBar';
@@ -60,8 +61,22 @@ import {
   selectTabs,
   toggleSelected,
 } from '../state/selection';
-import { setSetting, settings } from '../state/settings';
+import {
+  checkYouTubePermission,
+  setSetting,
+  settings,
+  youTubeDenied,
+  youTubeGranted,
+} from '../state/settings';
 import { declutter, scoring, tabCount } from '../state/tabs';
+import {
+  cancelLikedYouTubeClose,
+  closeLikedYouTubeNow,
+  eligibleLikedTabs,
+  likedYouTubeProgress,
+  likedYouTubeStatus,
+  likedYouTubeWorking,
+} from '../state/youtube-liked';
 
 /**
  * §4.7's "height collapse on close" plays on a row that is no longer in `declutter.value`
@@ -350,10 +365,18 @@ export function DeclutterView({ language }: { language: string }) {
     };
   }, []);
 
+  const showLikedYouTube = settings.value.closeLikedYouTube;
+  useEffect(() => {
+    if (showLikedYouTube) checkYouTubePermission();
+  }, [showLikedYouTube]);
+
   return (
     <>
       {list.total === 0 && !hasGhosts ? (
-        <EmptyState text={t('declutterEmpty')} />
+        <>
+          {showLikedYouTube && <YouTubeLikedCard language={language} />}
+          <EmptyState text={t('declutterEmpty')} />
+        </>
       ) : (
         <>
           <p class="td-view-intro">{t('declutterIntro')}</p>
@@ -381,6 +404,8 @@ export function DeclutterView({ language }: { language: string }) {
               </button>
             )}
           </div>
+
+          {showLikedYouTube && <YouTubeLikedCard language={language} />}
 
           <HealthBar review={list.total} total={tabCount.value} language={language} />
 
@@ -454,6 +479,77 @@ function WindowCard({ window, language }: { window: ForgottenWindow; language: s
         {t('windowClose')}
       </button>
     </p>
+  );
+}
+
+/**
+ * Optional 1-click card in Declutter for closing open (and suspended) YouTube video tabs that
+ * the signed-in user has already liked.
+ */
+function YouTubeLikedCard({ language }: { language: string }) {
+  const count = eligibleLikedTabs.value.length;
+  const working = likedYouTubeWorking.value;
+  const progress = likedYouTubeProgress.value;
+  const status = likedYouTubeStatus.value;
+
+  function triggerClose(): void {
+    if (!youTubeGranted.value) {
+      void requestYouTubePermission()
+        .then((granted) => {
+          youTubeGranted.value = granted;
+          youTubeDenied.value = !granted;
+          if (granted) return closeLikedYouTubeNow();
+          return undefined;
+        })
+        .catch(failed);
+      return;
+    }
+    void closeLikedYouTubeNow().catch(failed);
+  }
+
+  return (
+    <section class="td-youtube-card" aria-label={t('youtubeLikedHeading')}>
+      <div class="td-youtube-card-head">
+        <h3 class="td-settings-group">{t('youtubeLikedHeading')}</h3>
+        <span class="td-chip td-settings-status">{formatCount(count, language)}</span>
+      </div>
+      <p class="td-field-hint">{t('youtubeLikedHint')}</p>
+
+      <div class="td-pattern-actions">
+        <button
+          type="button"
+          class="td-action td-action-primary"
+          disabled={working || count === 0}
+          onClick={triggerClose}
+        >
+          {t('youtubeLikedNow')}
+        </button>
+      </div>
+
+      {count === 0 && !working && <p class="td-field-hint">{t('youtubeLikedNeedOne')}</p>}
+
+      {working && progress !== null && (
+        <p class="td-ai-working" role="status" aria-live="polite">
+          <span>
+            {t(
+              'youtubeLikedChecking',
+              formatCount(progress.done, language),
+              formatCount(progress.total, language),
+            )}
+          </span>
+          <button type="button" class="td-action" onClick={cancelLikedYouTubeClose}>
+            {t('organizeAiCancel')}
+          </button>
+        </p>
+      )}
+
+      <div class="td-warnings" role="status" aria-live="polite">
+        {youTubeDenied.value && <p class="td-warning">{t('settingsYouTubeDenied')}</p>}
+        {status === 'none' && <p class="td-field-hint">{t('youtubeLikedNone')}</p>}
+        {status === 'logged-out' && <p class="td-warning">{t('youtubeLikedLoggedOut')}</p>}
+        {status === 'unavailable' && <p class="td-warning">{t('youtubeLikedUnavailable')}</p>}
+      </div>
+    </section>
   );
 }
 

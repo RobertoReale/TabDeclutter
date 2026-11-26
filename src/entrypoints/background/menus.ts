@@ -32,6 +32,7 @@
  */
 
 import { HOUR, MINUTE } from '@/core/time';
+import { parseUrl } from '@/core/url';
 import { caps } from '@/platform/capabilities';
 import type { MessageKey } from '@/platform/i18n';
 import { addDuplicateWhitelistPattern } from '@/platform/storage';
@@ -249,15 +250,8 @@ export function registerMenus(options: MenusOptions): Menus {
  * site and leaves its siblings to another right-click (docs/DECISIONS.md, M3.4).
  */
 export function duplicateWhitelistPattern(url: string): string | null {
-  let host: string;
-  try {
-    // `host`, not `hostname`: it keeps the port, which the raw URL has too.
-    host = new URL(url.trim()).host;
-  } catch {
-    return null;
-  }
-  if (host === '') return null;
-  return `*://${host}/*`;
+  const host = parseUrl(url)?.host ?? '';
+  return host === '' ? null : `*://${host}/*`;
 }
 
 /**

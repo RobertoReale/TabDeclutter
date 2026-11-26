@@ -116,19 +116,28 @@ export function checkBookmarksPermission(): void {
   );
 }
 
+type YouTubeFeatureKey = 'sortYouTubeByDuration' | 'closeLikedYouTube';
+
 /**
- * The YouTube duration sorting toggle: requests optional `https://www.youtube.com/*` host
- * permission synchronously inside the user gesture (like `setUseBookmarks`), revokes it and
- * clears cached durations when turned off.
+ * Shared toggle for optional YouTube features behind `https://www.youtube.com/*`: requests the
+ * permission synchronously inside the user gesture when enabling, and revokes it only once BOTH
+ * YouTube features are off.
  */
-export function setSortYouTubeByDuration(next: boolean): void {
+function setYouTubeFeature(
+  key: YouTubeFeatureKey,
+  next: boolean,
+  onDisable?: () => Promise<unknown>,
+): void {
   if (!next) {
     youTubeDenied.value = false;
-    youTubeGranted.value = false;
     run(
-      update((current) => ({ ...current, sortYouTubeByDuration: false }))
-        .then(() => removeYouTubePermission())
-        .then(() => clearYouTubeDurations()),
+      update((current) => ({ ...current, [key]: false })).then(async (updated) => {
+        if (!updated.sortYouTubeByDuration && !updated.closeLikedYouTube) {
+          youTubeGranted.value = false;
+          await removeYouTubePermission();
+        }
+        if (onDisable !== undefined) await onDisable();
+      }),
     );
     return;
   }
@@ -138,9 +147,19 @@ export function setSortYouTubeByDuration(next: boolean): void {
     answer.then(async (granted) => {
       youTubeGranted.value = granted;
       youTubeDenied.value = !granted;
-      if (granted) await update((current) => ({ ...current, sortYouTubeByDuration: true }));
+      if (granted) await update((current) => ({ ...current, [key]: true }));
     }),
   );
+}
+
+/** YouTube duration sorting toggle; clears cached durations when turned off. */
+export function setSortYouTubeByDuration(next: boolean): void {
+  setYouTubeFeature('sortYouTubeByDuration', next, clearYouTubeDurations);
+}
+
+/** Liked YouTube tab closing toggle; shares the optional `https://www.youtube.com/*` permission. */
+export function setCloseLikedYouTube(next: boolean): void {
+  setYouTubeFeature('closeLikedYouTube', next);
 }
 
 /** Checks whether the optional YouTube host permission is currently granted. */
@@ -181,9 +200,10 @@ export function startLanguage(): () => void {
 }
 
 /** Serialized read-change-write: the panel never writes a settings snapshot it took earlier. */
-async function update(change: (current: Settings) => Settings): Promise<void> {
+async function update(change: (current: Settings) => Settings): Promise<Settings> {
   const next = await updateSettings(change);
   applyLocalSettings(next);
+  return next;
 }
 
 function run(work: Promise<unknown>): void {

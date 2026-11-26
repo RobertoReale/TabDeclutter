@@ -9,14 +9,16 @@
  */
 
 import { tabUrl } from './duplicates';
+import { isProtectedSite, keepKey } from './scoring';
 import { DAY, MINUTE } from './time';
 import type {
+  Keeps,
   TabInfo,
   YouTubeDurationCache,
   YouTubeDurationEntry,
   YouTubeDurationOrder,
 } from './types';
-import { unwrapSuspendedUrl } from './url';
+import { parseUrl, unwrapSuspendedUrl } from './url';
 
 /** Maximum cached video durations kept in `local:ytDurations` (most recently fetched wins). */
 export const YOUTUBE_CACHE_MAX = 500;
@@ -28,22 +30,160 @@ export const YOUTUBE_UNKNOWN_TTL_MS = 10 * MINUTE;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const PATH_VIDEO_RE = /^\/(?:shorts|live|embed|v)\/([A-Za-z0-9_-]{11})(?:\/|$)/i;
 const ISO_DURATION_RE = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i;
-
-const YOUTUBE_HOSTS = new Set([
-  'youtube.com',
-  'www.youtube.com',
-  'm.youtube.com',
-  'music.youtube.com',
-  'youtube-nocookie.com',
-  'www.youtube-nocookie.com',
-]);
-
-const SHORT_HOSTS = new Set(['youtu.be', 'www.youtu.be']);
+const YOUTUBE_HOST_RE = /^(?:(?:www|m|music)\.)?youtube\.com$|^(?:www\.)?youtube-nocookie\.com$/;
+const SHORT_HOST_RE = /^(?:www\.)?youtu\.be$/;
 
 export type ParsedYouTubeDuration =
   | { readonly kind: 'duration'; readonly seconds: number }
   | { readonly kind: 'live' }
   | { readonly kind: 'unknown' };
+
+export type ParsedYouTubeLikeStatus =
+  | { readonly kind: 'liked' }
+  | { readonly kind: 'not-liked' }
+  | { readonly kind: 'logged-out' }
+  | { readonly kind: 'unknown' };
+
+/**
+ * Extracts YouTube's `"LOGGED_IN":true|false` flag embedded near the start (~63 KB) of
+ * desktop YouTube HTML documents, or `null` when absent.
+ */
+export function parseYouTubeLoggedIn(html: string): boolean | null {
+  const m = /"LOGGED_IN"\s*:\s*(true|false)\b/.exec(html);
+  return m?.[1] === undefined ? null : m[1] === 'true';
+}
+
+/**
+ * Extracts the logged-in status and the up-to-100 most recently liked video IDs from
+ * `https://www.youtube.com/playlist?list=LL` HTML (`playlistVideoRenderer.videoId`).
+ */
+export function parseYouTubeLikedPlaylistHtml(html: string): {
+  readonly loggedIn: boolean | null;
+  readonly likedIds: ReadonlySet<string>;
+} {
+  const loggedIn = parseYouTubeLoggedIn(html);
+  const likedIds = new Set<string>();
+  if (loggedIn !== false) {
+    for (const m of html.matchAll(
+      /"playlistVideoRenderer"\s*:\s*\{\s*"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"/g,
+    )) {
+      if (m[1] !== undefined) likedIds.add(m[1]);
+    }
+  }
+  return { loggedIn, likedIds };
+}
+
+/**
+ * Decodes the URL-encoded Base64 `likeStatusEntity.key` (protobuf field 2 = `\x12\x0b<11-char-id>`)
+ * so `parseYouTubeLikeStatusHtml` can verify that a `likeStatusEntity` belongs to the target video
+ * and never to an unrelated comment or recommendation.
+ */
+export function decodeLikeEntityVideoId(encodedKey: string): string | null {
+  if (encodedKey === '') return null;
+  try {
+    const raw = decodeURIComponent(encodedKey).replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(raw.padEnd(raw.length + ((4 - (raw.length % 4)) % 4), '='));
+    // Protobuf tag 0x12 (field 2, length-delimited) followed by length 0x0b (11 bytes).
+    const idx = decoded.indexOf('\x12\x0b');
+    const id = idx >= 0 ? decoded.slice(idx + 2, idx + 13) : '';
+    return VIDEO_ID_RE.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extracts whether the signed-in user has liked the target video from `https://www.youtube.com/watch?v=<id>`
+ * HTML. Fails safe (`'unknown'`) whenever YouTube markup is unrecognised so tabs are never closed by mistake.
+ */
+export function parseYouTubeLikeStatusHtml(
+  html: string,
+  expectedVideoId?: string,
+): ParsedYouTubeLikeStatus {
+  const loggedIn = parseYouTubeLoggedIn(html);
+  if (loggedIn === false) return { kind: 'logged-out' };
+
+  for (const match of html.matchAll(/"likeStatusEntity"\s*:\s*\{([^}]*)\}/g)) {
+    const body = match[1] ?? '';
+    const status = /"likeStatus"\s*:\s*"(LIKE|INDIFFERENT|DISLIKE)"/.exec(body)?.[1];
+    if (status === undefined) continue;
+    const key = expectedVideoId === undefined ? undefined : /"key"\s*:\s*"([^"]+)"/.exec(body)?.[1];
+    const decodedId = key === undefined ? null : decodeLikeEntityVideoId(key);
+    if (decodedId !== null && decodedId !== expectedVideoId) continue;
+    return { kind: status === 'LIKE' ? 'liked' : 'not-liked' };
+  }
+
+  return { kind: 'unknown' };
+}
+
+export interface SelectLikedYouTubeOptions {
+  /** Whether to include the active tab or a tab currently playing audio (default `false`). */
+  readonly includeActiveOrAudible: boolean;
+  readonly protectedSites?: readonly string[];
+  readonly keeps?: Keeps;
+  readonly now?: number;
+  readonly excludeTabIds?: ReadonlySet<number>;
+  readonly excludeWindowIds?: ReadonlySet<number>;
+}
+
+/**
+ * Filters open (or suspended) tabs down to YouTube video tabs eligible for liked-video checks.
+ * Pinned, hidden, incognito, kept, and protected-site tabs are always excluded; active and
+ * audible tabs are excluded unless `options.includeActiveOrAudible` is `true`.
+ */
+export function eligibleLikedYouTubeTabs(
+  tabs: readonly TabInfo[],
+  options: SelectLikedYouTubeOptions,
+): TabInfo[] {
+  const {
+    includeActiveOrAudible,
+    protectedSites,
+    keeps,
+    now = 0,
+    excludeTabIds,
+    excludeWindowIds,
+  } = options;
+  return tabs.filter((tab) => {
+    if (
+      tab.incognito ||
+      tab.pinned ||
+      tab.hidden ||
+      (!includeActiveOrAudible && (tab.active || tab.audible)) ||
+      excludeWindowIds?.has(tab.windowId) ||
+      excludeTabIds?.has(tab.id)
+    ) {
+      return false;
+    }
+    const url = tabUrl(tab);
+    if (extractYouTubeVideoId(url) === null) return false;
+    if (
+      protectedSites !== undefined &&
+      protectedSites.length > 0 &&
+      isProtectedSite(url, protectedSites)
+    ) {
+      return false;
+    }
+    if (keeps !== undefined) {
+      const until = keeps[keepKey(url)];
+      if (until === null || (until !== undefined && until > now)) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Selects open (or suspended) YouTube video tabs eligible for liked-video closing whose video ID
+ * appears in `likedVideoIds`.
+ */
+export function selectLikedYouTubeTabsToClose(
+  tabs: readonly TabInfo[],
+  likedVideoIds: ReadonlySet<string>,
+  options: SelectLikedYouTubeOptions,
+): TabInfo[] {
+  return eligibleLikedYouTubeTabs(tabs, options).filter((tab) =>
+    likedVideoIds.has(extractYouTubeVideoId(tabUrl(tab))!),
+  );
+}
 
 /**
  * Extracts the canonical 11-character YouTube video id from a tab URL (including wrapped
@@ -51,23 +191,15 @@ export type ParsedYouTubeDuration =
  * search results, channels, subscriptions, playlists without a video id).
  */
 export function extractYouTubeVideoId(url: string): string | null {
-  const unwrapped = unwrapSuspendedUrl(url).trim();
-  if (unwrapped === '') return null;
-  let parsed: URL;
-  try {
-    parsed = new URL(unwrapped);
-  } catch {
-    return null;
-  }
-  const protocol = parsed.protocol.toLowerCase();
-  if (protocol !== 'http:' && protocol !== 'https:') return null;
+  const parsed = parseUrl(unwrapSuspendedUrl(url));
+  if (parsed === null || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return null;
 
   const host = parsed.hostname.toLowerCase();
-  if (SHORT_HOSTS.has(host)) {
+  if (SHORT_HOST_RE.test(host)) {
     const seg = parsed.pathname.split('/')[1] ?? '';
     return VIDEO_ID_RE.test(seg) ? seg : null;
   }
-  if (!YOUTUBE_HOSTS.has(host)) return null;
+  if (!YOUTUBE_HOST_RE.test(host)) return null;
 
   const path = parsed.pathname;
   if (path === '/watch' || path === '/watch/') {

@@ -1,16 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
+import { isProtectedSite, keepKey } from '../../src/core/scoring';
 import { DAY, MINUTE } from '../../src/core/time';
 import { NO_GROUP_ID, type TabInfo, type YouTubeDurationCache } from '../../src/core/types';
 import {
+  decodeLikeEntityVideoId,
+  eligibleLikedYouTubeTabs,
   extractYouTubeVideoId,
   formatVideoDuration,
   isYouTubeDurationFresh,
   parseIsoDurationSeconds,
   parseYouTubeDurationHtml,
+  parseYouTubeLikedPlaylistHtml,
+  parseYouTubeLikeStatusHtml,
+  parseYouTubeLoggedIn,
   planAnchorMoves,
   planYouTubeSlotMoves,
   pruneYouTubeCache,
+  selectLikedYouTubeTabsToClose,
   sortYouTubeTabIds,
   YOUTUBE_KNOWN_TTL_MS,
   YOUTUBE_UNKNOWN_TTL_MS,
@@ -382,5 +389,186 @@ describe('planYouTubeSlotMoves and planAnchorMoves', () => {
     expect(planAnchorMoves([1, 2], [99, 2, 1], new Set([99, 1, 2]), 0)).toEqual([
       { tabId: 2, index: 0 },
     ]);
+  });
+});
+
+/** Encodes a protobuf likeStatusEntity key containing field 2 (`0x12 0x0b <11-char-id>`). */
+function encodeLikeKey(videoId: string): string {
+  return encodeURIComponent(btoa(`\x12\x0b${videoId} >(\x01`));
+}
+
+describe('YouTube liked-video HTML parsing and tab selection', () => {
+  it('detects LOGGED_IN flag in YouTube HTML', () => {
+    expect(parseYouTubeLoggedIn('{"LOGGED_IN":true}')).toBe(true);
+    expect(parseYouTubeLoggedIn('{"LOGGED_IN" : false}')).toBe(false);
+    expect(parseYouTubeLoggedIn('<html><body>no config</body></html>')).toBeNull();
+  });
+
+  it('extracts liked video IDs from LL playlist HTML and stops when logged out', () => {
+    expect(
+      parseYouTubeLikedPlaylistHtml(
+        '{"LOGGED_IN":false,"playlistVideoRenderer":{"videoId":"dQw4w9WgXcQ"}}',
+      ),
+    ).toEqual({ loggedIn: false, likedIds: new Set() });
+
+    const parsed = parseYouTubeLikedPlaylistHtml(
+      '{"LOGGED_IN":true,"items":[' +
+        '{"playlistVideoRenderer":{"videoId":"dQw4w9WgXcQ"}},' +
+        '{"playlistVideoRenderer":{"videoId":"AbCdEf_1234"}},' +
+        '{"playlistVideoRenderer":{"videoId":"dQw4w9WgXcQ"}}]}',
+    );
+    expect(parsed.loggedIn).toBe(true);
+    expect([...parsed.likedIds]).toEqual(['dQw4w9WgXcQ', 'AbCdEf_1234']);
+
+    const unknownLogin = parseYouTubeLikedPlaylistHtml(
+      '{"playlistVideoRenderer":{"videoId":"ZyXwVu98765"}}',
+    );
+    expect(unknownLogin.loggedIn).toBeNull();
+    expect([...unknownLogin.likedIds]).toEqual(['ZyXwVu98765']);
+  });
+
+  it('decodes URL-encoded Base64 likeStatusEntity keys and rejects malformed keys', () => {
+    // Live key captured from YouTube watch page for dQw4w9WgXcQ (contains URL-safe `-` and `%3D`).
+    expect(decodeLikeEntityVideoId('EgtkUXc0dzlXZ1hjUSA-KAE%3D')).toBe('dQw4w9WgXcQ');
+    // Unpadded Base64 works too.
+    expect(decodeLikeEntityVideoId(btoa('\x12\x0bAbCdEf_1234').replace(/=+$/, ''))).toBe(
+      'AbCdEf_1234',
+    );
+    expect(decodeLikeEntityVideoId('')).toBeNull();
+    expect(decodeLikeEntityVideoId('%ZZinvalid')).toBeNull();
+    expect(decodeLikeEntityVideoId(btoa('no-proto-tag'))).toBeNull();
+    expect(decodeLikeEntityVideoId(btoa('\x12\x0bshort'))).toBeNull();
+    expect(decodeLikeEntityVideoId(btoa('\x12\x0bbad id!!!!!'))).toBeNull();
+  });
+
+  it('parses likeStatusEntity with videoId verification, logged-out detection, and legacy fallback', () => {
+    expect(parseYouTubeLikeStatusHtml('{"LOGGED_IN":false}')).toEqual({ kind: 'logged-out' });
+
+    const matchedKey = encodeLikeKey('dQw4w9WgXcQ');
+    const otherKey = encodeLikeKey('OtherVid001');
+
+    expect(
+      parseYouTubeLikeStatusHtml(
+        `{"LOGGED_IN":true,"likeStatusEntity":{"key":"${matchedKey}","likeStatus":"LIKE"}}`,
+        'dQw4w9WgXcQ',
+      ),
+    ).toEqual({ kind: 'liked' });
+
+    expect(
+      parseYouTubeLikeStatusHtml(
+        `{"LOGGED_IN":true,"likeStatusEntity":{"key":"${matchedKey}","likeStatus":"INDIFFERENT"}}`,
+        'dQw4w9WgXcQ',
+      ),
+    ).toEqual({ kind: 'not-liked' });
+
+    expect(
+      parseYouTubeLikeStatusHtml(
+        `{"LOGGED_IN":true,"likeStatusEntity":{"key":"${matchedKey}","likeStatus":"DISLIKE"}}`,
+        'dQw4w9WgXcQ',
+      ),
+    ).toEqual({ kind: 'not-liked' });
+
+    // Mismatched entity key is skipped until a matching entity is found.
+    expect(
+      parseYouTubeLikeStatusHtml(
+        `{"LOGGED_IN":true,"likeStatusEntity":{"key":"${otherKey}","likeStatus":"LIKE"},` +
+          `"likeStatusEntity":{"key":"${matchedKey}","likeStatus":"INDIFFERENT"}}`,
+        'dQw4w9WgXcQ',
+      ),
+    ).toEqual({ kind: 'not-liked' });
+
+    // Entity without status is skipped; entity without key still parses when no mismatch exists.
+    expect(
+      parseYouTubeLikeStatusHtml(
+        '{"LOGGED_IN":true,"likeStatusEntity":{"key":"abc"},"likeStatusEntity":{"likeStatus":"LIKE"}}',
+        'dQw4w9WgXcQ',
+      ),
+    ).toEqual({ kind: 'liked' });
+
+    // Fail-safe unknown on unrecognised markup.
+    expect(parseYouTubeLikeStatusHtml('<html><body>Consent</body></html>')).toEqual({
+      kind: 'unknown',
+    });
+  });
+
+  it('filters eligible and liked YouTube tabs (suspended, active/audible toggle, keeps, protected sites)', () => {
+    const keptUrl = 'https://www.youtube.com/watch?v=KeptVid0001';
+    const expiredKeepUrl = 'https://www.youtube.com/watch?v=ExpKeep0001';
+    const suspendedUrl =
+      'chrome-extension://bbomjaikkcabgmfaomdichgcodnaeecf/suspend.html?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DSuspLiked01';
+
+    const tabs: TabInfo[] = [
+      tab(1, 'https://www.youtube.com/watch?v=NormalLike1'),
+      tab(2, 'https://www.youtube.com/watch?v=ActiveLike1', { active: true }),
+      tab(3, 'https://www.youtube.com/watch?v=AudiblLike1', { audible: true }),
+      tab(4, 'https://www.youtube.com/watch?v=PinnedLike1', { pinned: true }),
+      tab(5, 'https://www.youtube.com/watch?v=HiddenLike1', { hidden: true }),
+      tab(6, 'https://www.youtube.com/watch?v=IncogLike01', { incognito: true }),
+      tab(7, suspendedUrl),
+      tab(8, 'https://youtu.be/DiscLiked01', { discarded: true }),
+      tab(9, keptUrl),
+      tab(10, expiredKeepUrl),
+      tab(11, 'https://www.youtube.com/results?search_query=music'),
+      tab(12, 'https://www.youtube.com/watch?v=WindowExcl1', { windowId: 2 }),
+      tab(13, 'https://www.youtube.com/watch?v=TabExcl0001'),
+    ];
+
+    const keeps = {
+      [keepKey(keptUrl)]: null,
+      [keepKey(expiredKeepUrl)]: NOW - 1000,
+    };
+
+    const safeEligible = eligibleLikedYouTubeTabs(tabs, {
+      includeActiveOrAudible: false,
+      keeps,
+      now: NOW,
+      excludeWindowIds: new Set([2]),
+      excludeTabIds: new Set([13]),
+    });
+    expect(safeEligible.map((t) => t.id)).toEqual([1, 7, 8, 10]);
+
+    const withActive = eligibleLikedYouTubeTabs(tabs, {
+      includeActiveOrAudible: true,
+      keeps,
+      now: NOW,
+      excludeWindowIds: new Set([2]),
+      excludeTabIds: new Set([13]),
+    });
+    expect(withActive.map((t) => t.id)).toEqual([1, 2, 3, 7, 8, 10]);
+
+    // Protected site excludes matching YouTube tabs (even when wrapped in a suspender).
+    expect(
+      eligibleLikedYouTubeTabs(tabs, {
+        includeActiveOrAudible: true,
+        protectedSites: ['*.youtube.com', 'youtu.be'],
+      }),
+    ).toEqual([]);
+
+    const likedIds = new Set(['NormalLike1', 'ActiveLike1', 'SuspLiked01', 'DiscLiked01']);
+    expect(
+      selectLikedYouTubeTabsToClose(tabs, likedIds, { includeActiveOrAudible: false }).map(
+        (t) => t.id,
+      ),
+    ).toEqual([1, 7, 8]);
+    expect(
+      selectLikedYouTubeTabsToClose(tabs, likedIds, { includeActiveOrAudible: true }).map(
+        (t) => t.id,
+      ),
+    ).toEqual([1, 2, 7, 8]);
+  });
+
+  it('checks protected sites directly and through suspended tab wrappers', () => {
+    expect(isProtectedSite('https://www.youtube.com/watch?v=dQw4w9WgXcQ', [])).toBe(false);
+    expect(isProtectedSite('https://www.youtube.com/watch?v=dQw4w9WgXcQ', ['*.youtube.com'])).toBe(
+      true,
+    );
+    expect(
+      isProtectedSite(
+        'chrome-extension://abc/suspend.html?url=https%3A%2F%2Fm.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ',
+        ['youtube.com'],
+      ),
+    ).toBe(true);
+    expect(isProtectedSite('https://github.com/a/b', ['youtube.com'])).toBe(false);
+    expect(isProtectedSite('not a url', ['youtube.com'])).toBe(false);
   });
 });

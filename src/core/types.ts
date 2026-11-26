@@ -218,6 +218,18 @@ export interface Settings {
   sortYouTubeByDuration: boolean;
   /** Sort direction when `sortYouTubeByDuration` is enabled (`'asc'` shortest first, `'desc'` longest first). */
   youTubeDurationOrder: YouTubeDurationOrder;
+  /**
+   * Close open (and suspended) YouTube video tabs that the signed-in user has already liked.
+   *
+   * Off by default; shares the optional `https://www.youtube.com/*` host permission with
+   * `sortYouTubeByDuration` and reads liked state directly from `www.youtube.com`.
+   */
+  closeLikedYouTube: boolean;
+  /**
+   * When `closeLikedYouTube` is enabled, also allow closing the active tab or a video currently
+   * playing audio. Off by default so watched-in-progress videos remain protected.
+   */
+  closeLikedYouTubeActive: boolean;
   archiveRetentionDays: number;
   language: LanguageSetting;
   guard: GuardSettings;
@@ -241,6 +253,8 @@ export const DEFAULT_SETTINGS: Settings = {
   useBookmarks: false,
   sortYouTubeByDuration: false,
   youTubeDurationOrder: 'asc',
+  closeLikedYouTube: false,
+  closeLikedYouTubeActive: false,
   archiveRetentionDays: 30,
   language: 'auto',
   guard: DEFAULT_GUARD_SETTINGS,

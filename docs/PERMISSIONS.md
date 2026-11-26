@@ -7,8 +7,9 @@ below with `build/manifest.ts`, and the `permissions docs` gate (`tools/check-pe
 
 Common to both browsers: **no required `host_permissions`, no content scripts, no `<all_urls>`**,
 the default extension CSP, no remote code, `incognito: not_allowed`. The only optional host
-permission is `https://www.youtube.com/*`, requested solely if the user enables YouTube video
-duration sorting in Settings and revoked immediately when disabled.
+permission is `https://www.youtube.com/*`, requested solely if the user enables an optional
+YouTube feature (video duration sorting or closing already-liked video tabs) in Settings and
+revoked immediately once both are disabled.
 
 Firefox warning texts are the ones in Firefox's own source
 ([extensionPermissions.ftl](https://github.com/mozilla/gecko-dev/blob/master/toolkit/locales/en-US/toolkit/global/extensionPermissions.ftl),
@@ -41,7 +42,7 @@ an install prompt. "None" means the browser shows no warning of its own for it.
 
 | Permission                  | Warning shown                                    | Justification                                                                                                                                                                                                                       |
 | --------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `https://www.youtube.com/*` | "Read and change your data on www.youtube.com"   | Requested only when the user enables "Sort YouTube tabs by video duration" in Settings. Used solely to read each open or suspended YouTube video's duration directly from its watch page without waking suspended tabs, and cached locally. Never injects scripts or modifies pages; revoked when turned off. |
+| `https://www.youtube.com/*` | "Read and change your data on www.youtube.com"   | Requested only when the user enables an optional YouTube feature in Settings ("Sort YouTube tabs by video duration" or "Close YouTube tabs for videos you already liked"). Used solely to read open or suspended YouTube video durations or liked status directly from `www.youtube.com` without waking suspended tabs. Never injects scripts or modifies pages; revoked once both YouTube features are turned off. |
 
 ## Firefox (required)
 
@@ -69,7 +70,7 @@ the tab already carries it as embedded data), so no icon is ever downloaded. The
 
 | Permission                  | Warning shown                                        | Justification                                                                                                                                                                                                                       |
 | --------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `https://www.youtube.com/*` | "Access your data for www.youtube.com"               | Requested only when the user enables "Sort YouTube tabs by video duration" in Settings. Used solely to read each open or suspended YouTube video's duration directly from its watch page without waking suspended tabs, and cached locally. Never injects scripts or modifies pages; revoked when turned off. |
+| `https://www.youtube.com/*` | "Access your data for www.youtube.com"               | Requested only when the user enables an optional YouTube feature in Settings ("Sort YouTube tabs by video duration" or "Close YouTube tabs for videos you already liked"). Used solely to read open or suspended YouTube video durations or liked status directly from `www.youtube.com` without waking suspended tabs. Never injects scripts or modifies pages; revoked once both YouTube features are turned off. |
 
 ## Not requested, on purpose
 

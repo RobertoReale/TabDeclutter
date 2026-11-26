@@ -1108,8 +1108,8 @@
     "description": "Toast shown after saving multiple clusters from Windows and topics as native browser tab groups. $1 is the formatted count."
   },
   "settingsGroupYouTube": {
-    "message": "YouTube video sorting",
-    "description": "Heading of the Settings card for optional YouTube duration sorting."
+    "message": "YouTube",
+    "description": "Heading of the Settings card for optional YouTube features (duration sorting and closing already-liked videos)."
   },
   "settingsYouTubeSort": {
     "message": "Sort YouTube tabs by video duration",
@@ -1131,9 +1131,57 @@
     "message": "Longest to shortest",
     "description": "YouTube duration sort order: longest videos first."
   },
+  "settingsYouTubeCloseLiked": {
+    "message": "Close YouTube tabs for videos you already liked",
+    "description": "Settings checkbox to enable closing open and suspended YouTube tabs whose videos the user has already liked."
+  },
+  "settingsYouTubeCloseLikedHint": {
+    "message": "Works with suspended tabs too without reloading them. Adds a 1-click button in Declutter and runs periodically when Autopilot is on. Every closed tab is saved in the Archive.",
+    "description": "Explanation under the Close liked YouTube videos checkbox."
+  },
+  "settingsYouTubeCloseLikedActive": {
+    "message": "Also close the active tab or tabs playing audio",
+    "description": "Settings checkbox choosing whether liked-video closing may also close active or audio-playing YouTube tabs."
+  },
+  "settingsYouTubeCloseLikedActiveHint": {
+    "message": "Off by default for safety. Pinned tabs, protected sites, and kept tabs are never closed.",
+    "description": "Explanation under the active/audible liked YouTube tab checkbox."
+  },
   "settingsYouTubeDenied": {
-    "message": "Without permission to access youtube.com, video durations cannot be read. You can turn this on again at any time.",
+    "message": "Without permission to access youtube.com, YouTube video details cannot be read. You can turn this on again at any time.",
     "description": "Warning shown when the user refuses the optional youtube.com host permission."
+  },
+  "youtubeLikedHeading": {
+    "message": "Liked YouTube videos",
+    "description": "Heading of the liked YouTube videos cleanup card in the Declutter view."
+  },
+  "youtubeLikedHint": {
+    "message": "Checks your open and suspended YouTube video tabs using your signed-in YouTube session and closes the ones you already liked (with Undo and Archive).",
+    "description": "Short explanation under the liked YouTube videos card in the Declutter view."
+  },
+  "youtubeLikedNow": {
+    "message": "Close liked videos now",
+    "description": "Primary action button in Declutter that closes YouTube tabs for videos the user has already liked."
+  },
+  "youtubeLikedNeedOne": {
+    "message": "No eligible YouTube video tabs open right now.",
+    "description": "Hint shown when no eligible YouTube video tab is open to check."
+  },
+  "youtubeLikedChecking": {
+    "message": "Checking liked videos ($1 / $2)…",
+    "description": "Live progress status while checking YouTube video like status. $1 is completed count, $2 is total count."
+  },
+  "youtubeLikedNone": {
+    "message": "None of your open YouTube videos are liked.",
+    "description": "Status shown when none of the checked YouTube video tabs are liked."
+  },
+  "youtubeLikedLoggedOut": {
+    "message": "Sign in to YouTube in this browser to check your liked videos.",
+    "description": "Warning shown when the browser is not signed in to YouTube."
+  },
+  "youtubeLikedUnavailable": {
+    "message": "Could not check liked videos. Check your connection or open YouTube once.",
+    "description": "Warning shown when YouTube like status could not be checked."
   },
   "youtubeSortHeading": {
     "message": "YouTube videos in this window",

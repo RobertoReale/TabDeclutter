@@ -43,7 +43,7 @@ Permissions:
 - sessions: restores a closed tab with its history on "Undo".
 - menus: right-click menu items.
 - bookmarks (optional): requested only if the user turns on the "already bookmarked" signal; read-only.
-- https://www.youtube.com/* (optional host permission): requested only if the user turns on "Sort YouTube tabs by video duration" in Settings; used solely to read video duration metadata directly from youtube.com (including for suspended tabs without waking them) and revoked when turned off.
+- https://www.youtube.com/* (optional host permission): requested only if the user turns on an optional YouTube feature in Settings ("Sort YouTube tabs by video duration" or "Close YouTube tabs for videos you already liked"); used solely to read video duration metadata or signed-in liked status directly from www.youtube.com (including for suspended tabs without waking them) and revoked once both YouTube features are turned off.
 
 No network requests by default, no analytics, no third-party servers, no remote code, no eval or new Function. data_collection_permissions is "none". Incognito is not allowed.
 

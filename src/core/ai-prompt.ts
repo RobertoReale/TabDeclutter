@@ -205,6 +205,13 @@ function sharesWord(left: ReadonlySet<string>, right: ReadonlySet<string>): bool
  * them cleanly. Leaves homogeneous clusters (e.g. 18 Corrado Augias tabs) and focused groups
  * untouched.
  */
+function tabWordSets(members: readonly number[], byId: ReadonlyMap<number, TabInfo>): Set<string>[] {
+  return members.map((id) => {
+    const tab = byId.get(id)!;
+    return new Set(wordTokens(stripSiteSuffix(tab.title, tab.url)));
+  });
+}
+
 function isIncoherentMegaDump(
   title: string,
   members: readonly number[],
@@ -217,10 +224,7 @@ function isIncoherentMegaDump(
     /\s(?:&|and|e)\s/iu.test(title) || wordTokens(title, 3).some((w) => UMBRELLA_WORDS.has(w));
   if (!swallowedBatch && !(members.length >= 14 && umbrellaTitle)) return false;
 
-  const sets = members.map((id) => {
-    const tab = byId.get(id)!;
-    return new Set(wordTokens(stripSiteSuffix(tab.title, tab.url)));
-  });
+  const sets = tabWordSets(members, byId);
   const hosts = new Set(members.map((id) => displayHost(byId.get(id)!.url)).filter(Boolean));
 
   const visited = new Uint8Array(members.length);
@@ -264,10 +268,7 @@ function pruneEntityOutliers(
   const needles = wordTokens(title);
   if (needles.length === 0) return members;
 
-  const sets = members.map((id) => {
-    const tab = byId.get(id)!;
-    return new Set(wordTokens(stripSiteSuffix(tab.title, tab.url)));
-  });
+  const sets = tabWordSets(members, byId);
   const anchors: ReadonlySet<string>[] = [];
   const vocab = new Set<string>();
   const flags = sets.map((set) => {
@@ -290,25 +291,13 @@ function pruneEntityOutliers(
   );
 }
 
-export function validateAiAnswer(
-  answer: string,
-  batch: readonly TabInfo[],
-  options: ValidateAiOptions,
-): AiValidation {
-  const decoded = parseModelJson(answer);
-  if (!decoded.ok) return UNPARSABLE;
-  const parsed = decoded.value;
-  if (parsed === null || typeof parsed !== 'object') return UNPARSABLE;
-  const groups = (parsed as { groups?: unknown }).groups;
-  if (!Array.isArray(groups)) return UNPARSABLE;
-
-  const byId = new Map(batch.map((tab) => [tab.id, tab]));
-  const windowId = (batch[0] as TabInfo).windowId;
-  const taken = new Set<number>();
-  const pruned = new Set<number>();
-  const drafts: AiDraft[] = [];
-
-  for (const rawGroup of groups) {
+/** Normalizes raw model group entries (including stringified `{...}` quirks) into `{ title, tabIds }`. */
+function extractNamedGroups(
+  rawGroups: readonly unknown[],
+  maxNameLength: number,
+): { readonly title: string; readonly tabIds: readonly unknown[] }[] {
+  const out: { readonly title: string; readonly tabIds: readonly unknown[] }[] = [];
+  for (const rawGroup of rawGroups) {
     let group: unknown = rawGroup;
     if (typeof rawGroup === 'string') {
       const inner = parseModelJson(rawGroup);
@@ -318,13 +307,36 @@ export function validateAiAnswer(
     if (group === null || typeof group !== 'object') continue;
     const { name, tabIds } = group as { name?: unknown; tabIds?: unknown };
     if (typeof name !== 'string' || !Array.isArray(tabIds)) continue;
-
-    const title = cleanGroupTitle(name, options.maxNameLength);
-    // "Other" is the model's way of saying "nowhere", and PLAN.md §7.2.4 does not group
-    // it; an unnamed group could not be applied either, and a group below
-    // `minClusterTabs` is not worth one. Their tabs fall through to "Altro" below.
+    const title = cleanGroupTitle(name, maxNameLength);
     if (title === '' || OTHER_NAMES.has(title.toLowerCase())) continue;
+    out.push({ title, tabIds });
+  }
+  return out;
+}
 
+function decodeRawGroups(answer: string): { readonly groups: readonly unknown[]; readonly truncated: boolean } | null {
+  const decoded = parseModelJson(answer);
+  if (!decoded.ok || decoded.value === null || typeof decoded.value !== 'object') return null;
+  const groups = (decoded.value as { groups?: unknown }).groups;
+  return Array.isArray(groups) ? { groups, truncated: decoded.truncated } : null;
+}
+
+export function validateAiAnswer(
+  answer: string,
+  batch: readonly TabInfo[],
+  options: ValidateAiOptions,
+): AiValidation {
+  const decoded = decodeRawGroups(answer);
+  if (decoded === null) return UNPARSABLE;
+  const { groups } = decoded;
+
+  const byId = new Map(batch.map((tab) => [tab.id, tab]));
+  const windowId = (batch[0] as TabInfo).windowId;
+  const taken = new Set<number>();
+  const pruned = new Set<number>();
+  const drafts: AiDraft[] = [];
+
+  for (const { title, tabIds } of extractNamedGroups(groups, options.maxNameLength)) {
     const seenInGroup = new Set<number>();
     const rawMembers: number[] = [];
     for (const id of tabIds) {
@@ -485,6 +497,14 @@ export interface IncrementalAiResult {
   readonly ungrouped: readonly number[];
 }
 
+function findTopicMatch<T extends { readonly key: string; readonly tokens: readonly string[] }>(
+  list: readonly T[],
+  key: string,
+  tokens: readonly string[],
+): T | undefined {
+  return list.find((entry) => sameTopicTitle(entry.key, entry.tokens, key, tokens));
+}
+
 /**
  * Applies a validated incremental micro-prompt answer onto `existingGroups` (which already carry
  * live real tab IDs) and `newTabs` (with compact 1..K IDs mapped via `realNewIds`). Matching an
@@ -498,55 +518,30 @@ export function applyIncrementalAiAnswer(
   options: ValidateAiOptions & { readonly maxGroups: number },
   colorOf: (key: string) => GroupColor = () => 'grey',
 ): IncrementalAiResult | { readonly ok: false } {
-  const decoded = parseModelJson(answer);
-  if (!decoded.ok || decoded.value === null || typeof decoded.value !== 'object') {
-    return { ok: false };
-  }
-  const rawGroups = (decoded.value as { groups?: unknown }).groups;
-  if (!Array.isArray(rawGroups)) return { ok: false };
+  const decoded = decodeRawGroups(answer);
+  if (decoded === null) return { ok: false };
 
-  const validCompact = new Map<number, number>();
-  newTabs.forEach((tab, index) => {
-    const realId = realNewIds[index];
-    if (realId !== undefined) validCompact.set(tab.id, realId);
-  });
-
+  const validCompact = new Map<number, number>(
+    newTabs.flatMap((tab, index) => (realNewIds[index] === undefined ? [] : [[tab.id, realNewIds[index]!]])),
+  );
   const merged = existingGroups.map((group) => ({
-    key: group.key,
-    title: group.title,
-    color: group.color,
-    windowId: group.windowId,
+    ...group,
     tokens: wordTokens(group.title, 3, true),
     tabIds: [...group.tabIds],
   }));
   const taken = new Set<number>();
 
-  for (const rawGroup of rawGroups) {
-    let group: unknown = rawGroup;
-    if (typeof rawGroup === 'string') {
-      const inner = parseModelJson(rawGroup);
-      if (!inner.ok) continue;
-      group = inner.value;
-    }
-    if (group === null || typeof group !== 'object') continue;
-    const { name, tabIds } = group as { name?: unknown; tabIds?: unknown };
-    if (typeof name !== 'string' || !Array.isArray(tabIds)) continue;
-
-    const title = cleanGroupTitle(name, options.maxNameLength);
-    if (title === '' || OTHER_NAMES.has(title.toLowerCase())) continue;
-
+  for (const { title, tabIds } of extractNamedGroups(decoded.groups, options.maxNameLength)) {
     const realIds: number[] = [];
     for (const id of tabIds) {
-      if (typeof id !== 'number' || !Number.isInteger(id)) continue;
-      const realId = validCompact.get(id);
-      if (realId === undefined || taken.has(realId)) continue;
-      realIds.push(realId);
+      const realId = typeof id === 'number' && Number.isInteger(id) ? validCompact.get(id) : undefined;
+      if (realId !== undefined && !taken.has(realId)) realIds.push(realId);
     }
     if (realIds.length === 0) continue;
 
     const key = title.toLowerCase();
     const tokens = wordTokens(title, 3, true);
-    const match = merged.find((entry) => sameTopicTitle(entry.key, entry.tokens, key, tokens));
+    const match = findTopicMatch(merged, key, tokens);
     if (match !== undefined) {
       for (const realId of realIds) {
         taken.add(realId);
@@ -570,8 +565,11 @@ export function applyIncrementalAiAnswer(
   const groups: ProposedGroup[] = merged
     .sort((a, b) => b.tabIds.length - a.tabIds.length)
     .map(({ key, title, color, windowId, tabIds }) => ({ key, title, color, windowId, tabIds }));
-  const ungrouped = realNewIds.filter((id) => !taken.has(id) && !placedExisting.has(id));
-  return { ok: true, groups, ungrouped };
+  return {
+    ok: true,
+    groups,
+    ungrouped: realNewIds.filter((id) => !taken.has(id) && !placedExisting.has(id)),
+  };
 }
 
 /**
@@ -601,7 +599,7 @@ export function assembleAiProposal(
       if (draft.windowId !== windowId || draft.tabIds.length === 0) continue;
       const key = draft.title.toLowerCase();
       const tokens = wordTokens(draft.title, 3, true);
-      const found = merged.find((entry) => sameTopicTitle(entry.key, entry.tokens, key, tokens));
+      const found = findTopicMatch(merged, key, tokens);
       if (found === undefined) {
         merged.push({ key, title: draft.title, tokens, tabIds: [...draft.tabIds] });
       } else {
@@ -610,24 +608,11 @@ export function assembleAiProposal(
     }
 
     for (const group of merged) group.tabIds.sort((a, b) => at(a) - at(b));
-    merged.sort((a, b) =>
-      a.tabIds.length !== b.tabIds.length
-        ? b.tabIds.length - a.tabIds.length
-        : at(a.tabIds[0]!) - at(b.tabIds[0]!),
-    );
+    merged.sort((a, b) => b.tabIds.length - a.tabIds.length || at(a.tabIds[0]!) - at(b.tabIds[0]!));
 
     merged.forEach((group, rank) => {
-      if (rank >= maxGroups) {
-        rest.push(...group.tabIds);
-        return;
-      }
-      groups.push({
-        key: group.key,
-        title: group.title,
-        color: colorOf(group.key),
-        windowId,
-        tabIds: group.tabIds,
-      });
+      if (rank >= maxGroups) rest.push(...group.tabIds);
+      else groups.push({ key: group.key, title: group.title, color: colorOf(group.key), windowId, tabIds: group.tabIds });
     });
   }
 

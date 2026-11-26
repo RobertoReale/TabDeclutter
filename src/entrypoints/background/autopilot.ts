@@ -11,9 +11,7 @@
 
 import {
   type AiDraft,
-  applyIncrementalAiAnswer,
   assembleAiProposal,
-  buildIncrementalPrompt,
   buildPrompt,
   errorName,
   extractCompleteGroupsJson,
@@ -24,11 +22,13 @@ import {
   validateAiAnswer,
 } from '@/core/ai-prompt';
 import { clusterTabIds, type GroupProposal } from '@/core/cluster';
+import { tabUrl } from '@/core/duplicates';
 import { compileMatcher } from '@/core/patterns';
 import { scoreTabs, type ScoredTab } from '@/core/scoring';
 import { DAY, HOUR, MINUTE } from '@/core/time';
 import { NO_GROUP_ID, STARTUP_GRACE_MS, type Settings, type TabInfo } from '@/core/types';
-import { unwrapSuspendedUrl } from '@/core/url';
+import { parseUrl, unwrapSuspendedUrl } from '@/core/url';
+import { eligibleLikedYouTubeTabs, extractYouTubeVideoId } from '@/core/youtube';
 import { caps, type Capabilities } from '@/platform/capabilities';
 import {
   aiBgCooldownUntilItem,
@@ -45,18 +45,22 @@ import {
   saveAiProposalState,
   settingsItem,
   withAiLock,
+  ytLikedCheckedAtItem,
 } from '@/platform/storage';
 import { activateTab, closeTabs, closeWindow, NO_WINDOW, queryTabs } from '@/platform/tabs';
 import {
   aiProposalFreshForAutoRefresh,
-  extractLiveProposal,
   isMovableTab,
   movableTabsSignature,
   ORGANIZE_CLUSTER_OPTIONS,
   organizeWindows,
   type YouTubeSortOptions,
 } from '@/platform/windows';
-import { resolveYouTubeDurations } from '@/platform/youtube';
+import {
+  resolveLikedYouTubeVideos,
+  resolveYouTubeDurations,
+  withAbortTimeout,
+} from '@/platform/youtube';
 
 import {
   alarmsApi,
@@ -81,7 +85,6 @@ const BG_AI_TIMEOUT_MS = 90_000;
 const BG_AI_COOLDOWN_MS = 2 * MINUTE;
 const BG_AI_MAX_BATCH_TABS = 20;
 const BG_AI_MAX_GROUPS = 10;
-const BG_AI_INCREMENTAL_MAX_NEW = 8;
 const BG_AI_MAX_NAME_LENGTH = 24;
 const SW_KEEPALIVE_MS = 20_000;
 
@@ -90,10 +93,6 @@ const EXPECTED_TEXT_OPTIONS = {
   expectedInputs: TEXT_EN,
   expectedOutputs: TEXT_EN,
 } as const;
-
-const unrefTimer = (timer: ReturnType<typeof setTimeout>): void => {
-  (timer as unknown as { unref?: () => void }).unref?.();
-};
 
 interface BackgroundLanguageModelSession {
   prompt(input: string, options?: { readonly signal?: AbortSignal }): Promise<string>;
@@ -142,16 +141,15 @@ const runOrganize = async (
   at: number,
   proposal?: GroupProposal,
   proposalSignature?: string,
+  knownTabs?: readonly TabInfo[],
 ) => {
   let youTubeSort: YouTubeSortOptions | undefined;
   if (s.sortYouTubeByDuration) {
-    const open = await queryTabs().catch(() => []);
+    const open = knownTabs ?? (await queryTabs().catch(() => []));
     const durations = await resolveYouTubeDurations(open, { now: at }).catch(
       () => new Map<string, number | null>(),
     );
-    if (durations.size > 0) {
-      youTubeSort = { durations, order: s.youTubeDurationOrder };
-    }
+    if (durations.size > 0) youTubeSort = { durations, order: s.youTubeDurationOrder };
   }
   return organizeWindows({
     windowMode: s.autoWindowMode,
@@ -250,7 +248,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
           .getPlatformInfo?.()
           .catch(ignore);
       }, SW_KEEPALIVE_MS);
-      unrefTimer(heartbeat);
+      (heartbeat as unknown as { unref?: () => void }).unref?.();
 
       const bgController = new AbortController();
       const unsubPreempt = onBackgroundAiPreempt(() => {
@@ -258,12 +256,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
       });
 
       try {
-        const result = await promptBackgroundProposal(
-          modelApi,
-          movable,
-          bgController.signal,
-          proposalState,
-        );
+        const result = await promptBackgroundProposal(modelApi, movable, bgController.signal);
         if (bgController.signal.aborted) return;
         if (result === null || result.groups.length === 0) {
           await setBgCooldown();
@@ -320,9 +313,11 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
     let closedWindows = 0;
     let groupedWindows = 0;
     const focusedId = await focusedWindow();
+    let queriedTabs: readonly TabInfo[] | undefined;
 
     if (settings.autoDeclutter) {
       const [tabs, inputs] = await Promise.all([queryTabs(), readScoringInputs(at)]);
+      queriedTabs = tabs;
 
       const scoring = scoreTabs(tabs, inputs.activity, settings, at, {
         isWhitelisted: compileMatcher(inputs.whitelist),
@@ -346,31 +341,57 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
 
       const byId = new Map(tabs.map((tab) => [tab.id, tab]));
       const staleMs = Math.max(1, settings.staleDays) * DAY;
-      const closeCandidates: ScoredTab[] = [];
-      const toClose: TabInfo[] = [];
-      for (const scored of scoring.tabs) {
-        if (forgottenIds.has(scored.windowId)) continue;
+      const closePairs = scoring.tabs.flatMap((scored) => {
+        if (forgottenIds.has(scored.windowId)) return [];
         const tab = byId.get(scored.tabId);
-        if (tab !== undefined && isSafeToAutoClose(tab, scored, settings, staleMs)) {
-          closeCandidates.push(scored);
-          toClose.push(tab);
-        }
-      }
+        return tab !== undefined && isSafeToAutoClose(tab, scored, settings, staleMs)
+          ? [[tab, scored] as const]
+          : [];
+      });
+      const toClose = closePairs.map(([tab]) => tab);
 
       if (toClose.length > 0) {
         const closingIds = new Set(toClose.map((tab) => tab.id));
         let keptToActivate: TabInfo | undefined;
-        for (const scored of closeCandidates) {
-          for (const reason of scored.reasons) {
-            if (reason.code === 'duplicate' && !closingIds.has(reason.keptTabId)) {
-              keptToActivate = byId.get(reason.keptTabId) ?? keptToActivate;
+        for (const [, scored] of closePairs) {
+          for (const r of scored.reasons) {
+            if (r.code === 'duplicate' && !closingIds.has(r.keptTabId)) {
+              keptToActivate = byId.get(r.keptTabId) ?? keptToActivate;
             }
           }
         }
-        const archived = await closeTabs(toClose, at, { reason: 'manual', capabilities });
-        closedTabs = archived.length;
+        closedTabs = (await closeTabs(toClose, at, { reason: 'manual', capabilities })).length;
         if (keptToActivate !== undefined) {
           await activateTab(keptToActivate.id, keptToActivate.windowId).catch(ignore);
+        }
+      }
+
+      // Optional periodic check for liked YouTube videos (at most once per 15-minute period).
+      if (settings.closeLikedYouTube) {
+        const lastChecked = await readZero(ytLikedCheckedAtItem);
+        if (at - lastChecked >= AUTOPILOT_PERIOD_MINUTES * MINUTE) {
+          const candidates = eligibleLikedYouTubeTabs(tabs, {
+            includeActiveOrAudible: settings.closeLikedYouTubeActive,
+            protectedSites: inputs.protectedSites,
+            keeps: inputs.keeps,
+            now: at,
+            excludeTabIds: new Set(toClose.map((tab) => tab.id)),
+            excludeWindowIds: forgottenIds,
+          });
+          if (candidates.length > 0) {
+            await ytLikedCheckedAtItem.setValue(at).catch(ignore);
+            const liked = await resolveLikedYouTubeVideos(candidates).catch(() => null);
+            const likedTabs =
+              liked?.status === 'ok' && liked.likedVideoIds.size > 0
+                ? candidates.filter((tab) =>
+                    liked.likedVideoIds.has(extractYouTubeVideoId(tabUrl(tab))!),
+                  )
+                : [];
+            if (likedTabs.length > 0) {
+              closedTabs += (await closeTabs(likedTabs, at, { reason: 'manual', capabilities }))
+                .length;
+            }
+          }
         }
       }
 
@@ -391,6 +412,7 @@ export function registerAutopilot(options: AutopilotOptions = {}): Autopilot {
         at,
         aiState.proposal ?? undefined,
         aiState.signature,
+        closedTabs === 0 && closedWindows === 0 ? queriedTabs : undefined,
       );
       groupedWindows = winResult.windowsCount;
       if (useAiWindows) {
@@ -466,7 +488,6 @@ async function promptBackgroundProposal(
   modelApi: BackgroundLanguageModelApi,
   movable: readonly TabInfo[],
   preemptSignal: AbortSignal,
-  cachedState: { readonly proposal: GroupProposal | null; readonly signature: string } = EMPTY_AI,
 ): Promise<GroupProposal | null> {
   if (preemptSignal.aborted) return null;
   const availability = await modelApi.availability(EXPECTED_TEXT_OPTIONS);
@@ -480,7 +501,7 @@ async function promptBackgroundProposal(
     groupId: NO_GROUP_ID,
   }));
 
-  const session = await withTimeout(BG_AI_WARMUP_TIMEOUT_MS, preemptSignal, async (s) => {
+  const session = await withAbortTimeout(BG_AI_WARMUP_TIMEOUT_MS, preemptSignal, async (s) => {
     const base = { ...EXPECTED_TEXT_OPTIONS, signal: s };
     try {
       return await modelApi.create({ ...base, temperature: 0, topK: 1 });
@@ -497,7 +518,7 @@ async function promptBackgroundProposal(
 
   const canClone = typeof session.clone === 'function';
   const runOnSession = (input: string, clone: boolean): Promise<string> =>
-    withTimeout(BG_AI_TIMEOUT_MS, preemptSignal, async (s) => {
+    withAbortTimeout(BG_AI_TIMEOUT_MS, preemptSignal, async (s) => {
       const cloned = clone && canClone ? await session.clone!({ signal: s }) : undefined;
       const stop = cloned === undefined ? destroySession : onceDestroy(cloned);
       if (cloned !== undefined) s.addEventListener('abort', stop, { once: true });
@@ -512,44 +533,6 @@ async function promptBackgroundProposal(
     });
 
   try {
-    // Incremental fast path: when a valid cached proposal covers >= 80% of live tabs and only
-    // 1..8 new tabs arrived, classify only the new tabs in one compact prompt.
-    const liveExisting = extractLiveProposal(movable, cachedState.proposal, cachedState.signature);
-    if (
-      liveExisting !== null &&
-      liveExisting.newTabs.length >= 1 &&
-      liveExisting.newTabs.length <= BG_AI_INCREMENTAL_MAX_NEW &&
-      (movable.length - liveExisting.newTabs.length) * 5 >= movable.length * 4
-    ) {
-      const compactNew = liveExisting.newTabs.map((tab, idx) => ({ ...tab, id: idx + 1 }));
-      const realNewIds = liveExisting.newTabs.map((tab) => tab.id);
-      const incInput = `${SYSTEM_PROMPT}\n\n${buildIncrementalPrompt(
-        liveExisting.groups.map((g) => g.title),
-        compactNew,
-      )}`;
-      try {
-        const raw = await runOnSession(incInput, true);
-        if (preemptSignal.aborted) return null;
-        const inc = applyIncrementalAiAnswer(raw, liveExisting.groups, compactNew, realNewIds, {
-          maxNameLength: BG_AI_MAX_NAME_LENGTH,
-          minClusterTabs: 2,
-          maxGroups: BG_AI_MAX_GROUPS,
-        });
-        if (inc.ok) {
-          const placedIds = new Set(inc.groups.flatMap((g) => g.tabIds));
-          return {
-            mode: 'topic',
-            groups: inc.groups,
-            ungrouped: movable.filter((tab) => !placedIds.has(tab.id)).map((tab) => tab.id),
-          };
-        }
-        // Without session cloning the ephemeral session was already consumed; avoid reusing it.
-        if (!canClone) return null;
-      } catch {
-        if (preemptSignal.aborted || !canClone) return null;
-      }
-    }
-
     const localClusters =
       compact.length > BG_AI_MAX_BATCH_TABS
         ? clusterTabIds(compact, 'topic', { ...ORGANIZE_CLUSTER_OPTIONS, maxGroups: 64 }).groups
@@ -649,29 +632,6 @@ async function runBgPrompt(
   }
 }
 
-async function withTimeout<T>(
-  timeoutMs: number,
-  outerSignal: AbortSignal,
-  action: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  const controller = new AbortController();
-  const onOuterAbort = (): void => {
-    controller.abort(outerSignal.reason);
-  };
-  if (outerSignal.aborted) onOuterAbort();
-  else outerSignal.addEventListener('abort', onOuterAbort, { once: true });
-  const timer = setTimeout(() => {
-    controller.abort(new DOMException('', 'TimeoutError'));
-  }, timeoutMs);
-  unrefTimer(timer);
-  try {
-    return await action(controller.signal);
-  } finally {
-    clearTimeout(timer);
-    outerSignal.removeEventListener('abort', onOuterAbort);
-  }
-}
-
 /**
  * Guardrails for background automatic tab closing (`autoDeclutter`):
  * ensures Autopilot never closes a tab the user may still be working on.
@@ -698,14 +658,8 @@ export function isSafeToAutoClose(
   if (rawUrl === '' || /^(?:file|chrome-extension|moz-extension):/i.test(rawUrl)) return false;
 
   // Never auto-close local development servers (localhost / 127.0.0.1 / [::1]).
-  try {
-    if (
-      /^(?:(?:.+\.)?localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(rawUrl).hostname.toLowerCase())
-    ) {
-      return false;
-    }
-  } catch {
-    // Non-standard URL (e.g. about:blank), handled below.
+  if (/^(?:(?:.+\.)?localhost|127\.0\.0\.1|\[::1\])$/i.test(parseUrl(rawUrl)?.hostname ?? '')) {
+    return false;
   }
 
   if (scored.primaryReason === 'blank') return scored.idleMs > HOUR;

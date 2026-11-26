@@ -259,11 +259,7 @@ async function ungroupIds(api: WindowsOrganizeApi, groupedIds: readonly number[]
 }
 
 function countPinned(allTabs: readonly TabInfo[], windowId: number): number {
-  let count = 0;
-  for (const tab of allTabs) {
-    if (tab.windowId === windowId && tab.pinned) count += 1;
-  }
-  return count;
+  return allTabs.filter((tab) => tab.windowId === windowId && tab.pinned).length;
 }
 
 /**
@@ -296,31 +292,22 @@ export async function organizeWindows(
   options: OrganizeWindowsOptions,
 ): Promise<OrganizeWindowsResult> {
   const api = options.api ?? defaultApi();
-  const ungroupedTabs = 0;
+  const empty = { movedTabs: 0, ungroupedTabs: 0, windowsCount: 0 };
 
   const queried = await attempt(() => api.tabs.query({}));
-  if (!queried.ok) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
+  if (!queried.ok) return empty;
 
   const allTabs = asTabInfos(queried.value).filter(
     (tab) => !tab.incognito && tab.windowId !== NO_WINDOW,
   );
-  if (allTabs.length === 0) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
-
   const movable = allTabs.filter(isUngroupedMovable);
-  if (movable.length === 0) return { movedTabs: 0, ungroupedTabs, windowsCount: 0 };
+  if (movable.length === 0) return empty;
   const snapshot: OrganizeWindowsSnapshot = {
     tabs: [...movable]
       .sort((a, b) => a.windowId - b.windowId || a.index - b.index)
-      .map((tab) => ({
-        tabId: tab.id,
-        windowId: tab.windowId,
-        index: tab.index,
-        active: tab.active,
-      })),
+      .map(({ id: tabId, windowId, index, active }) => ({ tabId, windowId, index, active })),
+    ...(options.focusedWindowId === undefined ? {} : { focusedWindowId: options.focusedWindowId }),
   };
-  if (options.focusedWindowId !== undefined) {
-    (snapshot as { focusedWindowId?: number }).focusedWindowId = options.focusedWindowId;
-  }
 
   const result =
     options.windowMode === 'merge-windows'
@@ -345,12 +332,7 @@ export async function organizeWindows(
           options.youTubeSort,
           api,
         );
-  const out: OrganizeWindowsResult & { undo?: OrganizeWindowsSnapshot } = {
-    ...result,
-    ungroupedTabs,
-  };
-  if (result.movedTabs > 0) out.undo = snapshot;
-  return out;
+  return { ...result, ungroupedTabs: 0, ...(result.movedTabs > 0 ? { undo: snapshot } : {}) };
 }
 
 export interface SortWindowYouTubeOptions {
@@ -756,15 +738,13 @@ async function splitIntoThematicWindows(
     usedWindows.add(focusedWindowId);
   }
 
-  // Assign each remaining bucket to the existing window that already holds most of its tabs,
-  // so tabs move as little as possible and windows stay stable.
   const assignments: { tabIds: readonly number[]; windowId: number | null }[] = buckets.map(
     (tabIds, index) => {
       if (index === focusedBucketIndex && focusedWindowId !== undefined) {
         return { tabIds, windowId: focusedWindowId };
       }
       const counts = new Map<number, number>();
-      let best: number | undefined;
+      let best: number | null = null;
       let bestCount = 0;
       for (const id of tabIds) {
         const w = byId.get(id)?.windowId;
@@ -776,11 +756,8 @@ async function splitIntoThematicWindows(
           best = w;
         }
       }
-      if (best !== undefined) {
-        usedWindows.add(best);
-        return { tabIds, windowId: best };
-      }
-      return { tabIds, windowId: null };
+      if (best !== null) usedWindows.add(best);
+      return { tabIds, windowId: best };
     },
   );
 

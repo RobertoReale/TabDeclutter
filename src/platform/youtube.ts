@@ -17,12 +17,18 @@ import {
   extractYouTubeVideoId,
   isYouTubeDurationFresh,
   parseYouTubeDurationHtml,
+  parseYouTubeLikedPlaylistHtml,
+  parseYouTubeLikeStatusHtml,
   type ParsedYouTubeDuration,
+  type ParsedYouTubeLikeStatus,
 } from '@/core/youtube';
 import { mergeYouTubeDurations, readYouTubeDurations } from './storage';
 
+const YT_BASE = 'https://www.youtube.com';
+const LOGGED_OUT_RE = /"LOGGED_IN"\s*:\s*false\b/;
+
 /** The single optional host pattern declared in both manifests. */
-export const YOUTUBE_ORIGIN = 'https://www.youtube.com/*';
+export const YOUTUBE_ORIGIN = `${YT_BASE}/*`;
 
 export interface OriginPermissionRequest {
   readonly origins: readonly string[];
@@ -42,6 +48,33 @@ const FETCH_TIMEOUT_MS = 10_000;
 const MAX_HTML_BYTES = 3 * 1024 * 1024;
 /** Max characters after `lengthSeconds` to wait for `isLiveContent` / `isLive` inside `videoDetails`. */
 const VIDEO_DETAILS_TAIL_CHARS = 12_288;
+
+function uniqueVideoIds(tabs: readonly TabInfo[]): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const tab of tabs) {
+    const id = extractYouTubeVideoId(tabUrl(tab));
+    if (id !== null && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+async function runPool(
+  items: readonly string[],
+  signal: AbortSignal | undefined,
+  task: (id: string) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length && !signal?.aborted) {
+      await task(items[cursor++]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(FETCH_CONCURRENCY, items.length) }, worker));
+}
 
 export interface YouTubePermissionApi {
   readonly permissions: {
@@ -86,46 +119,72 @@ export type YouTubeFetcher = (
   signal: AbortSignal,
 ) => Promise<ParsedYouTubeDuration | null>;
 
-/**
- * Reads `response` incrementally and cancels the stream as soon as `ytInitialPlayerResponse`'s
- * duration/live markers appear, avoiding downloading the full ~900 KB watch page.
- */
-async function readWatchHtml(response: Response): Promise<string> {
-  const reader = response.body?.getReader();
-  if (reader === undefined) return response.text();
-  const decoder = new TextDecoder('utf-8');
-  let html = '';
-  let bytes = 0;
-  let lenAt = -1;
+/** Runs `action` under an `AbortSignal` bounded by `timeoutMs` and linked to optional `outer`. */
+export async function withAbortTimeout<T>(
+  timeoutMs: number,
+  outer: AbortSignal | undefined,
+  action: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const onAbort = (): void => {
+    controller.abort(outer?.reason);
+  };
+  if (outer?.aborted) onAbort();
+  else outer?.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException('', 'TimeoutError'));
+  }, timeoutMs);
+  (timer as unknown as { unref?: () => void }).unref?.();
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      const chunk = decoder.decode(value, { stream: true });
-      const prevLen = html.length;
-      html += chunk;
-      // Scan only the newly appended region (+ small overlap) so streaming stays O(N).
-      const scanFrom = Math.max(0, prevLen - 64);
-      const recent = html.slice(scanFrom);
-      if (lenAt === -1) {
-        const lenMatch = /"lengthSeconds"\s*:\s*"\d+"/.exec(recent);
-        if (lenMatch !== null) lenAt = scanFrom + lenMatch.index;
+    return await action(controller.signal);
+  } finally {
+    clearTimeout(timer);
+    outer?.removeEventListener('abort', onAbort);
+  }
+}
+
+/**
+ * Fetches `url` with a bounded timeout and streams UTF-8 chunks, stopping early as soon as
+ * `shouldStop(html, recent, scanFrom)` returns `true` or `MAX_HTML_BYTES` is reached.
+ */
+async function fetchYouTubeHtml(
+  url: string,
+  credentials: RequestCredentials,
+  signal: AbortSignal | undefined,
+  shouldStop: (html: string, recent: string, scanFrom: number) => boolean,
+  fetchFn: typeof fetch = fetch,
+): Promise<string | null> {
+  if (signal?.aborted) return null;
+  try {
+    return await withAbortTimeout(FETCH_TIMEOUT_MS, signal, async (fetchSignal) => {
+      const response = await fetchFn(url, { credentials, signal: fetchSignal });
+      if (!response.ok) return null;
+      const reader = response.body?.getReader();
+      if (reader === undefined) return await response.text();
+      const decoder = new TextDecoder();
+      let html = '';
+      let bytes = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value.byteLength;
+          const prevLen = html.length;
+          html += decoder.decode(value, { stream: true });
+          const scanFrom = Math.max(0, prevLen - 64);
+          if (shouldStop(html, html.slice(scanFrom), scanFrom) || bytes >= MAX_HTML_BYTES) {
+            void reader.cancel().catch(() => undefined);
+            break;
+          }
+        }
+        html += decoder.decode();
+      } catch {
+        // Return any partial HTML collected before cancellation/abort.
       }
-      const hasLive = /"isLive"\s*:\s*true\b|"isLiveNow"\s*:\s*true\b/.test(recent);
-      const hasLengthWithContext =
-        lenAt !== -1 &&
-        (/"isLiveContent"\s*:\s*(?:true|false)\b/.test(html.slice(lenAt)) ||
-          html.length - lenAt >= VIDEO_DETAILS_TAIL_CHARS);
-      if (hasLive || hasLengthWithContext || bytes >= MAX_HTML_BYTES) {
-        void reader.cancel().catch(() => undefined);
-        break;
-      }
-    }
-    html += decoder.decode();
-    return html;
+      return html;
+    });
   } catch {
-    return html;
+    return null;
   }
 }
 
@@ -145,32 +204,26 @@ export async function fetchYouTubeVideoDuration(
   const attemptFetch = async (
     credentials: RequestCredentials,
   ): Promise<ParsedYouTubeDuration | null> => {
-    const controller = new AbortController();
-    const onAbort = (): void => {
-      controller.abort(signal?.reason);
-    };
-    if (signal?.aborted) return null;
-    signal?.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => {
-      controller.abort(new DOMException('YouTube fetch timed out', 'TimeoutError'));
-    }, FETCH_TIMEOUT_MS);
-    (timer as unknown as { unref?: () => void }).unref?.();
-
-    try {
-      const response = await fetchFn(`https://www.youtube.com/watch?v=${videoId}`, {
-        credentials,
-        redirect: 'follow',
-        signal: controller.signal,
-      });
-      if (!response.ok) return null;
-      const html = await readWatchHtml(response);
-      return parseYouTubeDurationHtml(html);
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-    }
+    let lenAt = -1;
+    const html = await fetchYouTubeHtml(
+      `${YT_BASE}/watch?v=${videoId}`,
+      credentials,
+      signal,
+      (full, recent, scanFrom) => {
+        if (lenAt === -1) {
+          const lenMatch = /"lengthSeconds"\s*:\s*"\d+"/.exec(recent);
+          if (lenMatch !== null) lenAt = scanFrom + lenMatch.index;
+        }
+        return (
+          /"isLive"\s*:\s*true\b|"isLiveNow"\s*:\s*true\b/.test(recent) ||
+          (lenAt !== -1 &&
+            (/"isLiveContent"\s*:\s*(?:true|false)\b/.test(full.slice(lenAt)) ||
+              full.length - lenAt >= VIDEO_DETAILS_TAIL_CHARS))
+        );
+      },
+      fetchFn,
+    );
+    return html === null ? null : parseYouTubeDurationHtml(html);
   };
 
   const anonymous = await attemptFetch('omit');
@@ -219,16 +272,7 @@ export async function resolveYouTubeDurations(
   options: ResolveYouTubeOptions = {},
 ): Promise<Map<string, number | null>> {
   const now = options.now ?? Date.now();
-  const videoIds: string[] = [];
-  const seen = new Set<string>();
-  for (const tab of tabs) {
-    const id = extractYouTubeVideoId(tabUrl(tab));
-    if (id !== null && !seen.has(id)) {
-      seen.add(id);
-      videoIds.push(id);
-    }
-  }
-
+  const videoIds = uniqueVideoIds(tabs);
   const resolved = new Map<string, number | null>();
   if (videoIds.length === 0) return resolved;
 
@@ -238,52 +282,28 @@ export async function resolveYouTubeDurations(
   const missing: string[] = [];
   for (const id of videoIds) {
     const entry = cached[id];
-    if (isYouTubeDurationFresh(entry, now)) {
-      resolved.set(id, entry!.seconds);
-    } else {
-      missing.push(id);
-    }
+    if (isYouTubeDurationFresh(entry, now)) resolved.set(id, entry!.seconds);
+    else missing.push(id);
   }
 
-  const allowNetwork = options.allowNetwork !== false;
-  if (missing.length === 0 || !allowNetwork) return resolved;
-
-  const permitted =
-    options.fetcher !== undefined || (await hasYouTubePermission(options.permissionApi));
-  if (!permitted) return resolved;
+  if (missing.length === 0 || options.allowNetwork === false) return resolved;
+  if (options.fetcher === undefined && !(await hasYouTubePermission(options.permissionApi))) {
+    return resolved;
+  }
 
   let done = videoIds.length - missing.length;
   const total = videoIds.length;
   options.onProgress?.(done, total);
 
   const updates: Record<string, YouTubeDurationEntry> = {};
-  let cursor = 0;
-
-  const worker = async (): Promise<void> => {
-    while (cursor < missing.length) {
-      if (options.signal?.aborted) return;
-      const id = missing[cursor]!;
-      cursor += 1;
-      const parsed = await fetchDeduped(id, options.signal, options.fetcher);
-      done += 1;
-      options.onProgress?.(done, total);
-      if (parsed === null) continue;
-      if (parsed.kind === 'duration') {
-        resolved.set(id, parsed.seconds);
-        updates[id] = { seconds: parsed.seconds, fetchedAt: now };
-      } else if (parsed.kind === 'live') {
-        resolved.set(id, null);
-        updates[id] = { seconds: null, fetchedAt: now };
-      }
-      // `parsed.kind === 'unknown'` (e.g. consent wall or unavailable) is left uncached so
-      // a retry after consenting or signing into YouTube succeeds immediately.
-    }
-  };
-
-  const workers = Array.from({ length: Math.min(FETCH_CONCURRENCY, missing.length) }, () =>
-    worker(),
-  );
-  await Promise.all(workers);
+  await runPool(missing, options.signal, async (id) => {
+    const parsed = await fetchDeduped(id, options.signal, options.fetcher);
+    options.onProgress?.(++done, total);
+    if (parsed === null || parsed.kind === 'unknown') return;
+    const seconds = parsed.kind === 'duration' ? parsed.seconds : null;
+    resolved.set(id, seconds);
+    updates[id] = { seconds, fetchedAt: now };
+  });
 
   if (Object.keys(updates).length > 0) {
     await mergeYouTubeDurations(updates, now).catch(() => undefined);
@@ -295,4 +315,151 @@ export async function resolveYouTubeDurations(
 /** Clears in-flight dedupe state (used by tests). */
 export function resetYouTubeFetcher(): void {
   inFlight.clear();
+}
+
+export type YouTubeLikedPlaylistFetcher = (
+  signal: AbortSignal,
+) => Promise<{ readonly loggedIn: boolean | null; readonly likedIds: ReadonlySet<string> } | null>;
+
+export type YouTubeLikeStatusFetcher = (
+  videoId: string,
+  signal: AbortSignal,
+) => Promise<ParsedYouTubeLikeStatus | null>;
+
+/**
+ * Tier 1 fast-path: fetches `https://www.youtube.com/playlist?list=LL` with the browser's
+ * YouTube session cookies, stopping early at ~63 KB if `"LOGGED_IN":false` appears.
+ */
+export async function fetchYouTubeLikedPlaylist(
+  signal?: AbortSignal,
+  fetchFn: typeof fetch = fetch,
+): Promise<{ readonly loggedIn: boolean | null; readonly likedIds: ReadonlySet<string> } | null> {
+  const html = await fetchYouTubeHtml(
+    `${YT_BASE}/playlist?list=LL`,
+    'include',
+    signal,
+    (_full, recent) => LOGGED_OUT_RE.test(recent),
+    fetchFn,
+  );
+  return html === null ? null : parseYouTubeLikedPlaylistHtml(html);
+}
+
+/**
+ * Tier 2 per-video check: streams `https://www.youtube.com/watch?v=<id>` with session cookies
+ * and stops as soon as `"LOGGED_IN":false` or `"likeStatusEntity":{...}` arrives.
+ */
+export async function fetchYouTubeVideoLikeStatus(
+  videoId: string,
+  signal?: AbortSignal,
+  fetchFn: typeof fetch = fetch,
+): Promise<ParsedYouTubeLikeStatus | null> {
+  const html = await fetchYouTubeHtml(
+    `${YT_BASE}/watch?v=${videoId}`,
+    'include',
+    signal,
+    (_full, recent) =>
+      LOGGED_OUT_RE.test(recent) ||
+      /"likeStatusEntity"\s*:\s*\{[^}]*"likeStatus"\s*:\s*"(?:LIKE|INDIFFERENT|DISLIKE)"/.test(
+        recent,
+      ),
+    fetchFn,
+  );
+  return html === null ? null : parseYouTubeLikeStatusHtml(html, videoId);
+}
+
+export interface ResolveLikedYouTubeOptions {
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (done: number, total: number) => void;
+  readonly permissionApi?: YouTubePermissionApi;
+  readonly playlistFetcher?: YouTubeLikedPlaylistFetcher;
+  readonly videoFetcher?: YouTubeLikeStatusFetcher;
+}
+
+export interface ResolveLikedYouTubeResult {
+  readonly status: 'ok' | 'logged-out' | 'no-permission' | 'unavailable';
+  readonly likedVideoIds: ReadonlySet<string>;
+  readonly checkedCount: number;
+}
+
+const emptyLiked = (
+  status: ResolveLikedYouTubeResult['status'],
+): ResolveLikedYouTubeResult => ({ status, likedVideoIds: new Set(), checkedCount: 0 });
+
+/**
+ * Resolves which YouTube video IDs among `tabs` (including suspended/discarded tabs without
+ * waking them) are currently liked by the signed-in YouTube user:
+ *
+ * 1. Fetches the `LL` ("Liked videos") playlist in 1 request to catch the ~100 most recent likes
+ *    and immediately detect signed-out browsers (`"LOGGED_IN":false`).
+ * 2. Checks remaining video IDs via streaming `/watch?v=<id>` requests (`likeStatusEntity`) so
+ *    older likes beyond the first 100 are detected accurately too.
+ */
+export async function resolveLikedYouTubeVideos(
+  tabs: readonly TabInfo[],
+  options: ResolveLikedYouTubeOptions = {},
+): Promise<ResolveLikedYouTubeResult> {
+  const videoIds = uniqueVideoIds(tabs);
+  if (videoIds.length === 0) return emptyLiked('ok');
+  if (
+    options.playlistFetcher === undefined &&
+    options.videoFetcher === undefined &&
+    !(await hasYouTubePermission(options.permissionApi))
+  ) {
+    return emptyLiked('no-permission');
+  }
+  if (options.signal?.aborted) return emptyLiked('unavailable');
+
+  const controller = new AbortController();
+  const onAbort = (): void => {
+    controller.abort(options.signal?.reason);
+  };
+  options.signal?.addEventListener('abort', onAbort, { once: true });
+
+  const likedVideoIds = new Set<string>();
+  const total = videoIds.length;
+  let done = 0;
+  let checkedCount = 0;
+  let loggedOut = false;
+
+  try {
+    options.onProgress?.(0, total);
+    const playlist = await (options.playlistFetcher ?? ((s) => fetchYouTubeLikedPlaylist(s)))(
+      controller.signal,
+    );
+    if (controller.signal.aborted) return { status: 'unavailable', likedVideoIds, checkedCount };
+    if (playlist !== null) {
+      if (playlist.loggedIn === false) return emptyLiked('logged-out');
+      for (const id of videoIds) {
+        if (playlist.likedIds.has(id)) {
+          likedVideoIds.add(id);
+          checkedCount += 1;
+          done += 1;
+        }
+      }
+      options.onProgress?.(done, total);
+    }
+
+    const remaining = videoIds.filter((id) => !likedVideoIds.has(id));
+    if (remaining.length > 0) {
+      const fetchOne = options.videoFetcher ?? ((id, s) => fetchYouTubeVideoLikeStatus(id, s));
+      await runPool(remaining, controller.signal, async (id) => {
+        const status = await fetchOne(id, controller.signal);
+        options.onProgress?.(++done, total);
+        if (status === null) return;
+        if (status.kind === 'logged-out') {
+          loggedOut = true;
+          controller.abort();
+        } else if (status.kind !== 'unknown') {
+          if (status.kind === 'liked') likedVideoIds.add(id);
+          checkedCount += 1;
+        }
+      });
+    }
+  } finally {
+    options.signal?.removeEventListener('abort', onAbort);
+  }
+
+  if (loggedOut) return emptyLiked('logged-out');
+  if (checkedCount === 0 && likedVideoIds.size === 0) return emptyLiked('unavailable');
+  return { status: 'ok', likedVideoIds, checkedCount };
 }

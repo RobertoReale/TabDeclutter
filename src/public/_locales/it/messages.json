@@ -1108,8 +1108,8 @@
     "description": "Toast shown after saving multiple clusters from Windows and topics as native browser tab groups. $1 is the formatted count."
   },
   "settingsGroupYouTube": {
-    "message": "Ordinamento video YouTube",
-    "description": "Heading of the Settings card for optional YouTube duration sorting."
+    "message": "YouTube",
+    "description": "Heading of the Settings card for optional YouTube features (duration sorting and closing already-liked videos)."
   },
   "settingsYouTubeSort": {
     "message": "Ordina le schede YouTube per durata del video",
@@ -1131,9 +1131,57 @@
     "message": "Dal più lungo al più breve",
     "description": "YouTube duration sort order: longest videos first."
   },
+  "settingsYouTubeCloseLiked": {
+    "message": "Chiudi le schede YouTube dei video a cui hai già messo Mi piace",
+    "description": "Settings checkbox to enable closing open and suspended YouTube tabs whose videos the user has already liked."
+  },
+  "settingsYouTubeCloseLikedHint": {
+    "message": "Funziona anche con le schede sospese senza ricaricarle. Aggiunge un pulsante 1-clic in Riordina ed esegue controlli periodici con il Pilota automatico attivo. Ogni scheda chiusa resta nell'Archivio.",
+    "description": "Explanation under the Close liked YouTube videos checkbox."
+  },
+  "settingsYouTubeCloseLikedActive": {
+    "message": "Chiudi anche la scheda attiva o che riproduce audio",
+    "description": "Settings checkbox choosing whether liked-video closing may also close active or audio-playing YouTube tabs."
+  },
+  "settingsYouTubeCloseLikedActiveHint": {
+    "message": "Disattivato di default per sicurezza. Le schede fissate, i siti protetti e le schede mantenute non vengono mai chiusi.",
+    "description": "Explanation under the active/audible liked YouTube tab checkbox."
+  },
   "settingsYouTubeDenied": {
-    "message": "Senza il permesso di accedere a youtube.com non è possibile leggere la durata dei video. Puoi riattivarlo quando vuoi.",
+    "message": "Senza il permesso di accedere a youtube.com non è possibile leggere i dettagli dei video YouTube. Puoi riattivarlo quando vuoi.",
     "description": "Warning shown when the user refuses the optional youtube.com host permission."
+  },
+  "youtubeLikedHeading": {
+    "message": "Video YouTube con Mi piace",
+    "description": "Heading of the liked YouTube videos cleanup card in the Declutter view."
+  },
+  "youtubeLikedHint": {
+    "message": "Controlla le schede video YouTube aperte e sospese usando la tua sessione YouTube attiva e chiude quelle a cui hai già messo Mi piace (con Annulla e Archivio).",
+    "description": "Short explanation under the liked YouTube videos card in the Declutter view."
+  },
+  "youtubeLikedNow": {
+    "message": "Chiudi video con Mi piace adesso",
+    "description": "Primary action button in Declutter that closes YouTube tabs for videos the user has already liked."
+  },
+  "youtubeLikedNeedOne": {
+    "message": "Nessuna scheda video YouTube idonea aperta al momento.",
+    "description": "Hint shown when no eligible YouTube video tab is open to check."
+  },
+  "youtubeLikedChecking": {
+    "message": "Controllo video con Mi piace ($1 / $2)…",
+    "description": "Live progress status while checking YouTube video like status. $1 is completed count, $2 is total count."
+  },
+  "youtubeLikedNone": {
+    "message": "Nessuno dei video YouTube aperti ha un Mi piace.",
+    "description": "Status shown when none of the checked YouTube video tabs are liked."
+  },
+  "youtubeLikedLoggedOut": {
+    "message": "Accedi a YouTube in questo browser per controllare i video con Mi piace.",
+    "description": "Warning shown when the browser is not signed in to YouTube."
+  },
+  "youtubeLikedUnavailable": {
+    "message": "Impossibile controllare i video con Mi piace. Controlla la connessione o apri YouTube una volta.",
+    "description": "Warning shown when YouTube like status could not be checked."
   },
   "youtubeSortHeading": {
     "message": "Video YouTube in questa finestra",

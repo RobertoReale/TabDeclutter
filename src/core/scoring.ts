@@ -39,7 +39,7 @@ import {
   type Settings,
   type TabInfo,
 } from './types';
-import { isSuspendedUrl, normalizeUrl } from './url';
+import { isSuspendedUrl, normalizeUrl, parseUrl, unwrapSuspendedUrl } from './url';
 
 /** Where a score puts a tab in Declutter (PLAN.md §4.2). */
 export type Bucket = 'close' | 'review' | 'keep';
@@ -189,11 +189,7 @@ export function keepKey(url: string): string {
 
 /** The host of `url`, lower-case, or `''` when it has none (`about:blank`, a file). */
 function hostOf(url: string): string {
-  try {
-    return new URL(url.trim()).hostname.toLowerCase();
-  } catch {
-    return '';
-  }
+  return parseUrl(url)?.hostname.toLowerCase() ?? '';
 }
 
 /**
@@ -214,6 +210,14 @@ function normalizeProtectedSites(sites: readonly string[] | undefined): readonly
 /** A pre-normalized "Siti protetti" domain against a lower-cased host. */
 function matchesNormalizedSite(domain: string, host: string): boolean {
   return host === domain || host.endsWith(`.${domain}`);
+}
+
+/** Whether `url` (including a tab-suspender wrapper) belongs to any domain in `protectedSites`. */
+export function isProtectedSite(url: string, protectedSites: readonly string[]): boolean {
+  const sites = normalizeProtectedSites(protectedSites);
+  if (sites.length === 0) return false;
+  const host = hostOf(unwrapSuspendedUrl(url));
+  return host !== '' && sites.some((domain) => matchesNormalizedSite(domain, host));
 }
 
 /** Everything about one tab the rules need, read once. */

@@ -59,12 +59,6 @@ import {
 /** `<area>:<key>`, the two storage areas PLAN.md §10 uses. */
 export type StorageItemKey = `${'local' | 'session'}:${string}`;
 
-/** How an item declares a shape change. See the module comment. */
-export interface VersionedOptions {
-  readonly version: number;
-  readonly migrations: Record<number, (oldValue: unknown) => unknown>;
-}
-
 /** One typed storage key: its fallback-aware read/write and `onChanged` watcher. */
 export interface StorageItem<T> {
   readonly key: StorageItemKey;
@@ -75,58 +69,21 @@ export interface StorageItem<T> {
   watch(callback: (newValue: T) => void): () => void;
 }
 
-function defineVersioned<T>(
-  key: StorageItemKey,
-  fallback: T,
-  options?: VersionedOptions,
-): StorageItem<T> {
+function defineItem<T>(key: StorageItemKey, fallback: T): StorageItem<T> {
   const colon = key.indexOf(':');
   const areaName = key.slice(0, colon) as 'local' | 'session';
   const name = key.slice(colon + 1);
-  const metaKey = `${name}$`;
-  const version = options?.version ?? 1;
   const area = () => browser.storage[areaName];
-  let needsVersion = false;
-
-  const migrate = async (migrations: VersionedOptions['migrations']): Promise<void> => {
-    const stored = await area().get([name, metaKey]);
-    const value: unknown = stored[name];
-    const meta = (stored[metaKey] ?? {}) as { v?: number };
-    if (value == null) {
-      needsVersion = meta.v == null;
-      return;
-    }
-    const from = meta.v ?? 1;
-    if (from > version) throw new Error(`downgrade from v${String(from)} to v${String(version)}`);
-    let next = value;
-    for (let step = from + 1; step <= version; step += 1) next = migrations[step]?.(next) ?? next;
-    if (from < version) await area().set({ [name]: next, [metaKey]: { ...meta, v: version } });
-  };
-
-  const migrated =
-    options === undefined
-      ? Promise.resolve()
-      : migrate(options.migrations).catch((error: unknown) => {
-          console.error(`TabDeclutter: migration of ${key} failed`, error);
-        });
 
   return {
     key,
     name,
     fallback,
     async getValue() {
-      await migrated;
       return ((await area().get(name))[name] as T | undefined) ?? fallback;
     },
     async setValue(value) {
-      await migrated;
-      const write = value == null ? area().remove(name) : area().set({ [name]: value as unknown });
-      if (needsVersion) {
-        needsVersion = false;
-        await Promise.all([write, area().set({ [metaKey]: { v: version } })]);
-      } else {
-        await write;
-      }
+      await (value == null ? area().remove(name) : area().set({ [name]: value as unknown }));
     },
     watch(callback) {
       const listener = (
@@ -152,28 +109,25 @@ async function readLocalBatch(items: readonly StorageItem<unknown>[]): Promise<u
 }
 
 /** `Record<tabId, TabActivity>`, what the tracker remembers (PLAN.md §6.1). */
-export const activityItem = /*#__PURE__*/ defineVersioned<ActivityStore>('local:activity', {});
+export const activityItem = /*#__PURE__*/ defineItem<ActivityStore>('local:activity', {});
 
 /** Normalized URL → when the keep runs out, `null` for "Sempre". */
-export const keepsItem = /*#__PURE__*/ defineVersioned<Keeps>('local:keeps', {});
+export const keepsItem = /*#__PURE__*/ defineItem<Keeps>('local:keeps', {});
 
 /** "Siti protetti" (PLAN.md §4.6): domain patterns such as `*.atlassian.net`. */
-export const protectedDomainsItem = /*#__PURE__*/ defineVersioned<string[]>(
+export const protectedDomainsItem = /*#__PURE__*/ defineItem<string[]>(
   'local:protectedDomains',
   [],
 );
 
 /** The closed tabs, newest first, capped at `ARCHIVE_CAP`. Write with `addToArchive`. */
-export const archiveItem = /*#__PURE__*/ defineVersioned<ArchivedTab[]>('local:archive', []);
+export const archiveItem = /*#__PURE__*/ defineItem<ArchivedTab[]>('local:archive', []);
 
 /** Read with `readSettings`, which fills in the keys an older release did not store. */
-export const settingsItem = /*#__PURE__*/ defineVersioned<Settings>(
-  'local:settings',
-  DEFAULT_SETTINGS,
-);
+export const settingsItem = /*#__PURE__*/ defineItem<Settings>('local:settings', DEFAULT_SETTINGS);
 
 /** The duplicate whitelist, as raw patterns, exactly as the user wrote them. */
-export const duplicateWhitelistItem = /*#__PURE__*/ defineVersioned<string[]>(
+export const duplicateWhitelistItem = /*#__PURE__*/ defineItem<string[]>(
   'local:duplicateWhitelist',
   [],
 );
@@ -185,7 +139,7 @@ export const duplicateWhitelistItem = /*#__PURE__*/ defineVersioned<string[]>(
  * out of `Settings` leaves "the stored settings are the user's choices" true (docs/DECISIONS.md
  * M6.2). `false` for a profile that has never seen it, which is what a fresh install reads.
  */
-export const onboardedItem = /*#__PURE__*/ defineVersioned<boolean>('local:onboarded', false);
+export const onboardedItem = /*#__PURE__*/ defineItem<boolean>('local:onboarded', false);
 
 /**
  * Which tab the foreground clock is running for, `null` when no window has focus.
@@ -194,13 +148,13 @@ export const onboardedItem = /*#__PURE__*/ defineVersioned<boolean>('local:onboa
  * the service worker (invariant 6) and must not outlive the browser, or a restart would
  * charge a tab for the night.
  */
-export const foregroundItem = /*#__PURE__*/ defineVersioned<ForegroundPeriod | null>(
+export const foregroundItem = /*#__PURE__*/ defineItem<ForegroundPeriod | null>(
   'session:foreground',
   null,
 );
 
 /** The guard's volatile state. `storage.session` is cleared when the browser restarts. */
-export const guardStateItem = /*#__PURE__*/ defineVersioned<GuardState>('session:guardState', {
+export const guardStateItem = /*#__PURE__*/ defineItem<GuardState>('session:guardState', {
   ...DEFAULT_GUARD_STATE,
   exemptions: [],
 });
@@ -213,13 +167,13 @@ export const guardStateItem = /*#__PURE__*/ defineVersioned<GuardState>('session
  * Every consumer validates live tab IDs, site keys, and titles against `aiProposalSignatureItem`,
  * so stale plans from a previous browser restart are automatically ignored.
  */
-export const aiProposalItem = /*#__PURE__*/ defineVersioned<GroupProposal | null>(
+export const aiProposalItem = /*#__PURE__*/ defineItem<GroupProposal | null>(
   'local:aiProposal',
   null,
 );
 
 /** Per-tab content signature (tab IDs + hosts + titles) that `aiProposalItem` was generated for. */
-export const aiProposalSignatureItem = /*#__PURE__*/ defineVersioned<string>(
+export const aiProposalSignatureItem = /*#__PURE__*/ defineItem<string>(
   'local:aiProposalSignature',
   '',
 );
@@ -228,13 +182,13 @@ export const aiProposalSignatureItem = /*#__PURE__*/ defineVersioned<string>(
  * Timestamp (ms epoch) until which an on-device AI prompt is currently running in either the
  * side panel or background service worker, preventing both contexts from competing on the GPU.
  */
-export const aiBusyUntilItem = /*#__PURE__*/ defineVersioned<number>('session:aiBusyUntil', 0);
+export const aiBusyUntilItem = /*#__PURE__*/ defineItem<number>('session:aiBusyUntil', 0);
 
 /**
  * Timestamp (ms epoch) until which background AI refreshes cool down after a failure,
  * stored in `storage.session` so MV3 service worker restarts never trigger retry storms.
  */
-export const aiBgCooldownUntilItem = /*#__PURE__*/ defineVersioned<number>(
+export const aiBgCooldownUntilItem = /*#__PURE__*/ defineItem<number>(
   'session:aiBgCooldownUntil',
   0,
 );
@@ -243,16 +197,19 @@ export const aiBgCooldownUntilItem = /*#__PURE__*/ defineVersioned<number>(
  * Undo on a window organization, so autopilot does not immediately re-organize the tabs
  * without touching the user's persisted `autoOrganize` setting.
  */
-export const organizeSnoozeUntilItem = /*#__PURE__*/ defineVersioned<number>(
+export const organizeSnoozeUntilItem = /*#__PURE__*/ defineItem<number>(
   'session:organizeSnoozeUntil',
   0,
 );
+
+/** Timestamp (ms epoch) of the last periodic Autopilot check for liked YouTube videos. */
+export const ytLikedCheckedAtItem = /*#__PURE__*/ defineItem<number>('session:ytLikedCheckedAt', 0);
 
 /**
  * Local cache of YouTube video durations (`videoId` → `{ seconds, fetchedAt }`), populated
  * only when the user opts into YouTube duration sorting so each video is fetched at most once.
  */
-export const ytDurationsItem = /*#__PURE__*/ defineVersioned<YouTubeDurationCache>(
+export const ytDurationsItem = /*#__PURE__*/ defineItem<YouTubeDurationCache>(
   'local:ytDurations',
   {},
 );
@@ -295,12 +252,32 @@ function serializeLocal<T>(key: StorageItemKey, action: () => Promise<T>): Promi
   return next;
 }
 
-function serialize<T>(key: StorageItemKey, action: () => Promise<T>): Promise<T> {
-  const locks = webLocks();
-  if (locks !== undefined) {
-    return locks.request(`td:storage:${key}`, () => action());
-  }
-  return serializeLocal(key, action);
+function serialize<T>(
+  key: StorageItemKey,
+  action: () => Promise<T>,
+  localOnly = false,
+): Promise<T> {
+  const locks = localOnly ? undefined : webLocks();
+  return locks !== undefined
+    ? locks.request(`td:storage:${key}`, () => action())
+    : serializeLocal(key, action);
+}
+
+function editItem<T, R = void>(
+  item: StorageItem<T>,
+  fn: (current: T) => { readonly next?: T; readonly result: R } | undefined,
+  localOnly = false,
+): Promise<R> {
+  return serialize(
+    item.key,
+    async () => {
+      const outcome = fn(await item.getValue());
+      if (outcome === undefined) return undefined as R;
+      if (outcome.next !== undefined) await item.setValue(outcome.next);
+      return outcome.result;
+    },
+    localOnly,
+  );
 }
 
 const AI_LOCK_NAME = 'td:on-device-ai';
@@ -481,26 +458,20 @@ export function mergeYouTubeDurations(
   updates: Readonly<Record<string, YouTubeDurationEntry>>,
   now: number,
 ): Promise<YouTubeDurationCache> {
-  return serialize(ytDurationsItem.key, async () => {
-    const stored = await ytDurationsItem.getValue();
+  return editItem(ytDurationsItem, (stored) => {
     const next = pruneYouTubeCache({ ...stored, ...updates }, now);
-    await ytDurationsItem.setValue(next);
-    return next;
+    return { next, result: next };
   });
 }
 
 /** Clears the local YouTube duration cache (e.g. when the user disables the feature). */
 export function clearYouTubeDurations(): Promise<void> {
-  return serialize(ytDurationsItem.key, async () => {
-    await ytDurationsItem.setValue({});
-  });
+  return serialize(ytDurationsItem.key, () => ytDurationsItem.setValue({}));
 }
 
 /** Stores the settings as one value, serialized so rapid updates never clobber each other. */
 export function saveSettings(next: Settings): Promise<void> {
-  return serialize(settingsItem.key, async () => {
-    await settingsItem.setValue(next);
-  });
+  return serialize(settingsItem.key, () => settingsItem.setValue(next));
 }
 
 /**
@@ -508,11 +479,10 @@ export function saveSettings(next: Settings): Promise<void> {
  * (e.g. "By topic" and "Use the on-device AI") always observe each other's write.
  */
 export function updateSettings(change: (current: Settings) => Settings): Promise<Settings> {
-  return serialize(settingsItem.key, async () => {
-    const current = await readSettings();
+  return editItem(settingsItem, (raw) => {
+    const current = mergeSettings(raw);
     const next = change(current);
-    if (next !== current) await settingsItem.setValue(next);
-    return next;
+    return { next: next === current ? undefined : next, result: next };
   });
 }
 
@@ -523,11 +493,11 @@ export function updateSettings(change: (current: Settings) => Settings): Promise
  * `ARCHIVE_CAP` the oldest entries are dropped, which is the FIFO cap of §10.
  */
 export function addToArchive(entries: readonly ArchivedTab[]): Promise<void> {
-  return serialize(archiveItem.key, async () => {
-    if (entries.length === 0) return;
-    const stored = await archiveItem.getValue();
-    await archiveItem.setValue([...entries, ...stored].slice(0, ARCHIVE_CAP));
-  });
+  return editItem(archiveItem, (stored) =>
+    entries.length === 0
+      ? undefined
+      : { next: [...entries, ...stored].slice(0, ARCHIVE_CAP), result: undefined },
+  );
 }
 
 /** The whole archive, newest first: what the Archive view lists (PLAN.md §4.5). */
@@ -537,14 +507,11 @@ export function readArchive(): Promise<readonly ArchivedTab[]> {
 
 /** Removes entries by `ArchivedTab.id`, in one write: a restore ends here (PLAN.md §9). */
 export function removeFromArchive(ids: readonly string[]): Promise<void> {
-  return serialize(archiveItem.key, async () => {
-    if (ids.length === 0) return;
+  return editItem(archiveItem, (stored) => {
+    if (ids.length === 0) return undefined;
     const wanted = new Set(ids);
-    const stored = await archiveItem.getValue();
     const kept = stored.filter((entry) => !wanted.has(entry.id));
-    // Nothing matched: do not rewrite the same array.
-    if (kept.length === stored.length) return;
-    await archiveItem.setValue(kept);
+    return kept.length === stored.length ? undefined : { next: kept, result: undefined };
   });
 }
 
@@ -556,9 +523,7 @@ export function removeFromArchive(ids: readonly string[]): Promise<void> {
  * panel the answer was carried out.
  */
 export function emptyArchive(): Promise<void> {
-  return serialize(archiveItem.key, async () => {
-    await archiveItem.setValue([]);
-  });
+  return serialize(archiveItem.key, () => archiveItem.setValue([]));
 }
 
 /**
@@ -569,11 +534,9 @@ export function emptyArchive(): Promise<void> {
  * `pruneArchiveEntries`' answer: this only reads, writes and counts.
  */
 export function pruneArchive(now: number, retentionDays: number): Promise<number> {
-  return serialize(archiveItem.key, async () => {
-    const stored = await archiveItem.getValue();
+  return editItem(archiveItem, (stored) => {
     const { kept, dropped } = pruneArchiveEntries(stored, { now, retentionDays });
-    if (dropped > 0) await archiveItem.setValue([...kept]);
-    return dropped;
+    return { next: dropped > 0 ? [...kept] : undefined, result: dropped };
   });
 }
 
@@ -588,12 +551,14 @@ export function pruneArchive(now: number, retentionDays: number): Promise<number
 export function pruneActivity(openTabIds: readonly number[]): Promise<number> {
   // `local:activity` is written exclusively by the background worker (`tracker.ts` + `cleanup.ts`),
   // so in-process serialization avoids `navigator.locks` Mojo IPC contention on high-frequency tab events.
-  return serializeLocal(activityItem.key, async () => {
-    const stored = await activityItem.getValue();
-    const { kept, dropped } = sweepActivity(stored, openTabIds);
-    if (dropped > 0) await activityItem.setValue(kept);
-    return dropped;
-  });
+  return editItem(
+    activityItem,
+    (stored) => {
+      const { kept, dropped } = sweepActivity(stored, openTabIds);
+      return { next: dropped > 0 ? kept : undefined, result: dropped };
+    },
+    true,
+  );
 }
 
 /**
@@ -604,22 +569,23 @@ export function pruneActivity(openTabIds: readonly number[]): Promise<number> {
 export function patchActivity(
   changes: ReadonlyMap<number, TabActivity | undefined>,
 ): Promise<ActivityStore> {
-  return serializeLocal(activityItem.key, async () => {
-    const next: ActivityStore = { ...(await activityItem.getValue()) };
-    for (const [tabId, record] of changes) {
-      if (record === undefined) delete next[tabId];
-      else next[tabId] = record;
-    }
-    await activityItem.setValue(next);
-    return next;
-  });
+  return editItem(
+    activityItem,
+    (stored) => {
+      const next: ActivityStore = { ...stored };
+      for (const [tabId, record] of changes) {
+        if (record === undefined) delete next[tabId];
+        else next[tabId] = record;
+      }
+      return { next, result: next };
+    },
+    true,
+  );
 }
 
 /** Replaces `local:activity` atomically under the activity queue (startup / install rebuild). */
 export function replaceActivity(next: ActivityStore): Promise<void> {
-  return serializeLocal(activityItem.key, async () => {
-    await activityItem.setValue(next);
-  });
+  return serialize(activityItem.key, () => activityItem.setValue(next), true);
 }
 
 /** A keep is over when its moment has come: the scoring reads it the same way. */
@@ -638,22 +604,20 @@ export function addKeep(
   now: number,
   durationMs: number | null = DEFAULT_KEEP_MS,
 ): Promise<void> {
-  return serialize(keepsItem.key, async () => {
-    const stored = await keepsItem.getValue();
-    const until = durationMs === null ? null : now + durationMs;
-    await keepsItem.setValue({ ...stored, [keepKey(url)]: until });
-  });
+  return editItem(keepsItem, (stored) => ({
+    next: { ...stored, [keepKey(url)]: durationMs === null ? null : now + durationMs },
+    result: undefined,
+  }));
 }
 
 /** Forgets a keep, whether it had expired or not. */
 export function removeKeep(url: string): Promise<void> {
-  return serialize(keepsItem.key, async () => {
+  return editItem(keepsItem, (stored) => {
     const key = keepKey(url);
-    const stored = await keepsItem.getValue();
-    if (!(key in stored)) return;
+    if (!(key in stored)) return undefined;
     const next = { ...stored };
     delete next[key];
-    await keepsItem.setValue(next);
+    return { next, result: undefined };
   });
 }
 
@@ -675,19 +639,15 @@ export async function isKept(url: string, now: number): Promise<boolean> {
  * `pruneActivity` — from `entrypoints/background/cleanup.ts`.
  */
 export function pruneKeeps(now: number): Promise<number> {
-  return serialize(keepsItem.key, async () => {
-    const stored = await keepsItem.getValue();
+  return editItem(keepsItem, (stored) => {
     const next = filterActiveKeeps(stored, now);
     const dropped = Object.keys(stored).length - Object.keys(next).length;
-    if (dropped > 0) await keepsItem.setValue(next);
-    return dropped;
+    return { next: dropped > 0 ? next : undefined, result: dropped };
   });
 }
 
 function updateGuardState(change: (state: GuardState) => GuardState): Promise<void> {
-  return serialize(guardStateItem.key, async () => {
-    await guardStateItem.setValue(change(await guardStateItem.getValue()));
-  });
+  return editItem(guardStateItem, (state) => ({ next: change(state), result: undefined }));
 }
 
 /** A tab the guard must leave alone, by id or by URL (PLAN.md §8.6). */
@@ -730,13 +690,13 @@ function appendUnique(
   raw: string,
   ignoreCase: boolean,
 ): Promise<void> {
-  return serialize(item.key, async () => {
-    const wanted = ignoreCase ? raw.trim().toLowerCase() : raw.trim();
-    if (wanted === '') return;
-    const stored = await item.getValue();
-    if (stored.some((e) => (ignoreCase ? e.trim().toLowerCase() : e.trim()) === wanted)) return;
-    await item.setValue([...stored, wanted]);
-  });
+  const norm = (s: string) => (ignoreCase ? s.trim().toLowerCase() : s.trim());
+  const wanted = norm(raw);
+  return editItem(item, (stored) =>
+    wanted === '' || stored.some((e) => norm(e) === wanted)
+      ? undefined
+      : { next: [...stored, wanted], result: undefined },
+  );
 }
 
 /**

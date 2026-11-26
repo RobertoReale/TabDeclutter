@@ -23,7 +23,7 @@ import {
   SEARCH_QUERY_PARAMS,
   SITE_SEARCH_RULES,
 } from './rules';
-import { registrableDomain } from './url';
+import { parseUrl, registrableDomain } from './url';
 
 /**
  * The classes of PLAN.md §6.3, plus `own`.
@@ -66,14 +66,6 @@ export function canonicalUrl(url: string): string {
 function scheme(url: string): string {
   const match = /^[a-z][a-z0-9+.-]*:/i.exec(url.trim());
   return match === null ? '' : match[0].toLowerCase();
-}
-
-function parse(url: string): URL | null {
-  try {
-    return new URL(url.trim());
-  } catch {
-    return null;
-  }
 }
 
 /** A new tab, an empty tab, or a tab whose URL we were not given (PLAN.md §6.3). */
@@ -156,7 +148,7 @@ function isAuthParsed(parsed: URL, domainOf: () => string | null): boolean {
 
 /** A sign-in, sign-out or redirection page (PLAN.md §6.3 "auth"). */
 export function isAuthUrl(url: string): boolean {
-  const parsed = parse(url);
+  const parsed = parseUrl(url);
   if (parsed === null) return false;
   return isAuthParsed(parsed, cachedDomainOf(parsed.hostname));
 }
@@ -229,7 +221,7 @@ export function classify(tab: ClassifiableTab, context: ClassifyContext = {}): P
   if (INTERNAL_SCHEMES.includes(protocol)) return 'browser-internal';
   if (protocol === 'file:') return 'file';
 
-  const parsed = parse(url);
+  const parsed = parseUrl(url);
   // Not a URL the platform could have loaded (an empty-ish string is already `blank`):
   // there is nothing to read, and a class we cannot justify would only mislead.
   if (parsed === null) return 'content';

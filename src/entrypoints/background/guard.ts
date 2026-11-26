@@ -125,78 +125,58 @@ function createIndex(tabs: readonly TabInfo[], keyOptions: DuplicateOptions): Gu
   const urls = new Map<number, string>();
   const navigated = new Set<number>();
   const awaiting = new Set<number>();
+  const keyOf = (tab: TabInfo): string => duplicateKey(tabUrl(tab), keyOptions, tab.cookieStoreId);
 
-  /** §8.2: "key computed on `url || pendingUrl`", through the one definition (invariant 9). */
-  function keyOf(tab: TabInfo): string {
-    return duplicateKey(tabUrl(tab), keyOptions, tab.cookieStoreId);
-  }
-
-  function unlink(tabId: number): void {
+  const unlink = (tabId: number): void => {
     const key = keys.get(tabId);
     if (key === undefined) return;
     keys.delete(tabId);
     const bucket = byKey.get(key);
-    if (bucket === undefined) return;
-    bucket.delete(tabId);
-    if (bucket.size === 0) byKey.delete(key);
-  }
+    if (bucket !== undefined) {
+      bucket.delete(tabId);
+      if (bucket.size === 0) byKey.delete(key);
+    }
+  };
 
-  function link(tabId: number, key: string): void {
+  const link = (tabId: number, key: string): void => {
+    unlink(tabId);
     keys.set(tabId, key);
     const bucket = byKey.get(key);
     if (bucket === undefined) byKey.set(key, new Set([tabId]));
     else bucket.add(tabId);
-  }
+  };
 
-  function put(tab: TabInfo): void {
-    unlink(tab.id);
-    link(tab.id, keyOf(tab));
-    urls.set(tab.id, tabUrl(tab));
-  }
-
-  function drop(tabId: number): void {
+  const drop = (tabId: number): void => {
     unlink(tabId);
     urls.delete(tabId);
     navigated.delete(tabId);
     awaiting.delete(tabId);
-  }
-
-  function rename(from: number, to: number): void {
-    const key = keys.get(from);
-    const url = urls.get(from);
-    const wasNavigated = navigated.has(from);
-    drop(from);
-    if (key === undefined) return;
-    unlink(to);
-    link(to, key);
-    if (url !== undefined) urls.set(to, url);
-    if (wasNavigated) navigated.add(to);
-  }
-
-  function bucket(tab: TabInfo): readonly number[] {
-    const found = byKey.get(keyOf(tab));
-    if (found === undefined) return [];
-    return [...found].filter((tabId) => tabId !== tab.id);
-  }
+  };
 
   const index: GuardIndex = {
-    bucket,
-    put,
+    bucket: (tab) => [...(byKey.get(keyOf(tab)) ?? [])].filter((id) => id !== tab.id),
+    put: (tab) => {
+      link(tab.id, keyOf(tab));
+      urls.set(tab.id, tabUrl(tab));
+    },
     drop,
-    rename,
+    rename: (from, to) => {
+      const key = keys.get(from);
+      const url = urls.get(from);
+      const wasNav = navigated.has(from);
+      drop(from);
+      if (key === undefined) return;
+      link(to, key);
+      if (url !== undefined) urls.set(to, url);
+      if (wasNav) navigated.add(to);
+    },
     navigated,
     awaiting,
     knownUrl: (tabId) => urls.get(tabId),
   };
   for (const tab of tabs) {
     index.put(tab);
-    // A tab found by `tabs.query` rather than watched into existence has had its URL for as
-    // long as this worker knows anything, unless it is still on a blank / new-tab page.
-    if (isBlankUrl(tabUrl(tab))) {
-      awaiting.add(tab.id);
-    } else {
-      navigated.add(tab.id);
-    }
+    (isBlankUrl(tabUrl(tab)) ? awaiting : navigated).add(tab.id);
   }
   return index;
 }

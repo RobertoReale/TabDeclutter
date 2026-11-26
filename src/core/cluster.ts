@@ -21,7 +21,7 @@
 
 import type { TabInfo } from './types';
 import { NO_GROUP_ID } from './types';
-import { registrableDomain, stripWww, unwrapSuspendedUrl } from './url';
+import { parseUrl, registrableDomain, stripWww, unwrapSuspendedUrl } from './url';
 
 /** The tab group colours Chrome accepts (`chrome.tabGroups.ColorEnum`, PLAN.md §7.1). */
 export type GroupColor =
@@ -245,15 +245,12 @@ export function foldAccents(word: string): string {
  * `6c9f4e2b8a1d`) that would otherwise add high-IDF noise to TF-IDF vectors.
  */
 function isOpaquePathToken(token: string): boolean {
-  let digits = 0;
-  for (let i = 0; i < token.length; i += 1) {
-    const code = token.charCodeAt(i);
-    if (code >= 48 && code <= 57) digits += 1;
-  }
-  if (digits === token.length) return true;
-  if (token.length >= 8 && digits >= 2) return true;
-  if (token.length >= 5 && digits === token.length - 1 && /^[a-z]\d{4,}$/.test(token)) return true;
-  return false;
+  const digits = token.replace(/\D/g, '').length;
+  return (
+    digits === token.length ||
+    (token.length >= 8 && digits >= 2) ||
+    (token.length >= 5 && digits === token.length - 1 && /^[a-z]\d{4,}$/.test(token))
+  );
 }
 
 /**
@@ -371,12 +368,7 @@ interface ParsedTabUrl {
  */
 function parseTabUrl(url: string, withPath = true): ParsedTabUrl {
   const trimmed = unwrapSuspendedUrl(url).trim();
-  let parsed: URL | null;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    parsed = null;
-  }
+  const parsed = parseUrl(trimmed);
   if (parsed === null) {
     const domain = registrableDomain(trimmed) ?? '';
     return { key: domain, host: '', domain, path: '' };
@@ -556,14 +548,38 @@ interface Window {
   readonly tabs: readonly TabInfo[];
 }
 
+function pushMap<K, V>(map: Map<K, V[]>, key: K, item: V): void {
+  const list = map.get(key);
+  if (list === undefined) map.set(key, [item]);
+  else list.push(item);
+}
+
+/** Builds an L2-normalised sparse vector from `id -> weight` entries, returning both vector and norm. */
+function buildVector(weights: Map<number, number>): {
+  readonly vector: Vector;
+  readonly norm: number;
+} {
+  const sorted = [...weights.keys()].sort((a, b) => a - b);
+  const ids = new Int32Array(sorted.length);
+  const values = new Float64Array(sorted.length);
+  let normSq = 0;
+  for (const [at, id] of sorted.entries()) {
+    const weight = weights.get(id) as number;
+    ids[at] = id;
+    values[at] = weight;
+    normSq += weight * weight;
+  }
+  const norm = Math.sqrt(normSq);
+  if (norm > 0) {
+    for (let at = 0; at < values.length; at += 1) values[at] = (values[at] as number) / norm;
+  }
+  return { vector: { ids, values }, norm };
+}
+
 /** The windows of `tabs`, in the order their first tab appears, with their own tabs. */
 function byWindow(tabs: readonly TabInfo[]): readonly Window[] {
   const windows = new Map<number, TabInfo[]>();
-  for (const tab of tabs) {
-    const found = windows.get(tab.windowId);
-    if (found === undefined) windows.set(tab.windowId, [tab]);
-    else found.push(tab);
-  }
+  for (const tab of tabs) pushMap(windows, tab.windowId, tab);
   return [...windows].map(([windowId, own]) => ({ windowId, tabs: own }));
 }
 
@@ -831,11 +847,8 @@ function vectorize(
   const total = tabs.length;
   const vectors: Vector[] = [];
   for (const perTab of counts) {
-    const sorted = [...perTab.keys()].sort((a, b) => a - b);
-    const vectorIds = new Int32Array(sorted.length);
-    const values = new Float64Array(sorted.length);
-    let norm = 0;
-    for (const [at, id] of sorted.entries()) {
+    const weighted = new Map<number, number>();
+    for (const [id, rawTf] of perTab) {
       const df = documentFrequency[id] as number;
       const isDomain = (vocabulary[id] as string).startsWith(DOMAIN_PREFIX);
       // Smooth IDF prevents a large dominant topic (e.g. 10+ tabs on one subject) from being
@@ -843,20 +856,10 @@ function vectorize(
       // content words so long titles still merge cleanly with their topic.
       const baseIdf = 1 + 0.25 * Math.log(1 + total / df);
       const idf = df === 1 && !isDomain ? 0.7 * baseIdf : baseIdf;
-      const rawTf = perTab.get(id) as number;
       const tf = rawTf > 1 ? 1 + Math.log(rawTf) : rawTf;
-      const weight = tf * idf * (isDomain ? options.domainWeight : 1);
-      vectorIds[at] = id;
-      values[at] = weight;
-      norm += weight * weight;
+      weighted.set(id, tf * idf * (isDomain ? options.domainWeight : 1));
     }
-    // A tab whose every token was a stopword has no vector at all; it is similar to
-    // nothing and ends up in "Altro" on its own.
-    const length = Math.sqrt(norm);
-    if (length > 0) {
-      for (let at = 0; at < values.length; at += 1) values[at] = (values[at] as number) / length;
-    }
-    vectors.push({ ids: vectorIds, values });
+    vectors.push(buildVector(weighted).vector);
   }
 
   return { vectors, vocabulary, siteKeys, surfacePairs };
@@ -910,23 +913,18 @@ function agglomerate(
     }
   }
 
-  const active: number[] = [];
+  const active = Array.from({ length: count }, (_, i) => i);
   const size = new Int32Array(count).fill(1);
-  const members: number[][] = [];
-  for (let i = 0; i < count; i += 1) {
-    active.push(i);
-    members.push([i]);
-  }
+  const members = active.map((i) => [i]);
   const nearest = new Int32Array(count).fill(-1);
   const nearestSim = new Float64Array(count);
 
   /** The live cluster most similar to `i`, ties going to the lower index (`active` is sorted). */
   const refresh = (i: number): void => {
     let best = -1;
-    let bestSim = Number.NEGATIVE_INFINITY;
+    let bestSim = -Infinity;
     const row = i * count;
-    for (let k = 0; k < active.length; k += 1) {
-      const j = active[k] as number;
+    for (const j of active) {
       if (j === i) continue;
       const value = sim[row + j] as number;
       if (value > bestSim) {
@@ -935,27 +933,22 @@ function agglomerate(
       }
     }
     nearest[i] = best;
-    nearestSim[i] = best === -1 ? Number.NEGATIVE_INFINITY : bestSim;
+    nearestSim[i] = bestSim;
   };
   for (let i = 0; i < count; i += 1) refresh(i);
 
   for (;;) {
     let from = -1;
-    let bestSim = Number.NEGATIVE_INFINITY;
-    for (let k = 0; k < active.length; k += 1) {
-      const i = active[k] as number;
-      if (nearest[i] === -1) continue;
-      const value = nearestSim[i] as number;
-      if (value > bestSim) {
-        bestSim = value;
+    let bestSim = -Infinity;
+    for (const i of active) {
+      if (nearest[i] !== -1 && (nearestSim[i] as number) > bestSim) {
+        bestSim = nearestSim[i] as number;
         from = i;
       }
     }
     if (from === -1 || bestSim < threshold) break;
 
     const other = nearest[from] as number;
-    // The survivor is the lower index, so a cluster's position never depends on which of
-    // the two the scan happened to reach first.
     const kept = Math.min(from, other);
     const gone = Math.max(from, other);
     const keptSize = size[kept] as number;
@@ -963,38 +956,28 @@ function agglomerate(
     const invTotal = 1 / (keptSize + goneSize);
     const keptRow = kept * count;
     const goneRow = gone * count;
-    for (let k = 0; k < active.length; k += 1) {
-      const c = active[k] as number;
+    for (const c of active) {
       if (c === kept || c === gone) continue;
       const merged =
         ((sim[keptRow + c] as number) * keptSize + (sim[goneRow + c] as number) * goneSize) *
         invTotal;
-      sim[keptRow + c] = merged;
-      sim[c * count + kept] = merged;
+      sim[keptRow + c] = sim[c * count + kept] = merged;
     }
     size[kept] = keptSize + goneSize;
     const keptMembers = members[kept] as number[];
-    const goneMembers = members[gone] as number[];
-    keptMembers.push(...goneMembers);
+    keptMembers.push(...(members[gone] as number[]));
     keptMembers.sort((a, b) => a - b);
-    goneMembers.length = 0;
+    (members[gone] as number[]).length = 0;
     active.splice(active.indexOf(gone), 1);
     nearest[gone] = -1;
 
     refresh(kept);
-    // Only the clusters whose nearest neighbour has just disappeared or changed.
-    for (let k = 0; k < active.length; k += 1) {
-      const c = active[k] as number;
-      if (c === kept) continue;
-      if (nearest[c] === kept || nearest[c] === gone) refresh(c);
+    for (const c of active) {
+      if (c !== kept && (nearest[c] === kept || nearest[c] === gone)) refresh(c);
     }
   }
 
-  const clusters: number[][] = [];
-  for (let k = 0; k < active.length; k += 1) {
-    clusters.push(members[active[k] as number] as number[]);
-  }
-  return clusters;
+  return active.map((i) => members[i] as number[]);
 }
 
 /** L2-normalised centroid of a cluster's sparse vectors together with its unnormalised norm. */
@@ -1010,21 +993,8 @@ function centroidOf(
       sum.set(id, (sum.get(id) ?? 0) + (vector.values[at] as number));
     }
   }
-  const sorted = [...sum.keys()].sort((a, b) => a - b);
-  const ids = new Int32Array(sorted.length);
-  const values = new Float64Array(sorted.length);
-  let normSq = 0;
-  for (const [at, id] of sorted.entries()) {
-    const weight = sum.get(id) as number;
-    ids[at] = id;
-    values[at] = weight;
-    normSq += weight * weight;
-  }
-  const norm = Math.sqrt(normSq);
-  if (norm > 0) {
-    for (let at = 0; at < values.length; at += 1) values[at] = (values[at] as number) / norm;
-  }
-  return { centroid: { ids, values }, norm };
+  const { vector: centroid, norm } = buildVector(sum);
+  return { centroid, norm };
 }
 
 /** Total cosine similarity and non-domain (content-only) cosine similarity in one linear pass. */
@@ -1130,12 +1100,7 @@ function refineClusters(
 
     if (!moved) break;
     const grouped = new Map<number, number[]>();
-    for (let i = 0; i < vectors.length; i += 1) {
-      const clusterId = nextOwner[i] as number;
-      const list = grouped.get(clusterId);
-      if (list === undefined) grouped.set(clusterId, [i]);
-      else list.push(i);
-    }
+    for (let i = 0; i < vectors.length; i += 1) pushMap(grouped, nextOwner[i] as number, i);
     current = [...grouped.values()].sort((a, b) => (a[0] as number) - (b[0] as number));
   }
 

@@ -50,14 +50,14 @@ Suggerisce quali schede chiudere, organizza le altre in gruppi nativi e blocca l
 Too many open tabs? TabDeclutter tells you which ones you can close, sorts the rest into tab groups and stops duplicates from piling up. Everything happens on your device.
 
 WHAT IT DOES
-• Declutter: a list of the tabs you probably no longer need, each with a plain reason ("You have not opened it in 12 days", "Duplicate of another open tab"). Close them one by one or in bulk, keep the ones you want, or discard them to free memory.
+• Declutter: a list of the tabs you probably no longer need, each with a plain reason ("You have not opened it in 12 days", "Duplicate of another open tab"). Close them one by one or in bulk, keep the ones you want, discard them to free memory, or optionally close open and suspended YouTube video tabs you have already liked.
 • Organize: put your tabs into native browser tab groups, by site or by topic. With Chrome's built-in on-device AI, group names can be improved, optionally and without leaving your computer. Optionally sort YouTube video tabs by duration (including suspended tabs without reloading them).
 • Duplicate protection: as soon as a tab becomes a duplicate of another, warn you or close it automatically, as you choose. Whitelist, URL comparison rules, pause, and the same pattern syntax as Duplicate Tabs Closer.
 • Archive and undo: every close is saved for a while and can be restored, with its history.
 • Badge with the number of suggested tabs, keyboard shortcuts, light and dark theme, Italian and English.
 
 PRIVATE BY DESIGN
-No account, no servers, no analytics, no network requests by default, no remote code. Tab information is read and stored only in your browser. Optional YouTube duration sorting is off by default and requests an optional host permission strictly for www.youtube.com only if you enable it, caching durations locally and revoking access when turned off. Automatic cleanup and duplicate closing only run after setup when enabled, obey strict safety guardrails, and archive every closed tab locally so nothing is ever lost.
+No account, no servers, no analytics, no network requests by default, no remote code. Tab information is read and stored only in your browser. Optional YouTube features (duration sorting and closing already-liked video tabs) are off by default and request an optional host permission strictly for www.youtube.com only if you enable them, revoking access once both are turned off. Automatic cleanup and duplicate closing only run after setup when enabled, obey strict safety guardrails, and archive every closed tab locally so nothing is ever lost.
 
 WHY THE "READ YOUR BROWSING HISTORY ON ALL YOUR SIGNED-IN DEVICES" WARNING
 It is how Chrome words the permissions to see the address and title of your open tabs and to restore a tab you closed with Undo. The extension only uses the tabs of this browser, and needs both to work. The extension reads nothing from the pages themselves.
@@ -71,14 +71,14 @@ If you still use Duplicate Tabs Closer, turn it off to avoid conflicts.
 Troppe schede aperte? TabDeclutter ti dice quali puoi chiudere, mette le altre in gruppi e impedisce ai duplicati di accumularsi. Tutto avviene sul tuo dispositivo.
 
 COSA FA
-• Riordina: l'elenco delle schede che probabilmente non ti servono più, ognuna con un motivo chiaro ("Non la apri da 12 giorni", "Duplicato di un'altra scheda aperta"). Chiudile una per una o in blocco, mantieni quelle che vuoi, oppure sospendile per liberare memoria.
+• Riordina: l'elenco delle schede che probabilmente non ti servono più, ognuna con un motivo chiaro ("Non la apri da 12 giorni", "Duplicato di un'altra scheda aperta"). Chiudile una per una o in blocco, mantieni quelle che vuoi, sospendile per liberare memoria o opzionalmente chiudi le schede video YouTube (anche sospese) a cui hai già messo Mi piace.
 • Organizza: raggruppa le schede nei gruppi nativi del browser, per sito o per argomento. Con l'IA integrata di Chrome, in locale, i nomi dei gruppi possono migliorare, in modo facoltativo e senza uscire dal computer. Opzionalmente ordina le schede video YouTube per durata (anche quelle sospese senza ricaricarle).
 • Protezione duplicati: appena una scheda diventa duplicata di un'altra, ti avvisa o la chiude da sola, come preferisci. Eccezioni, regole di confronto degli indirizzi, pausa e la stessa sintassi di Duplicate Tabs Closer.
 • Archivio e annulla: ogni chiusura viene conservata per un po' e può essere ripristinata, con la sua cronologia.
 • Badge con il numero di schede suggerite, scorciatoie da tastiera, tema chiaro e scuro, italiano e inglese.
 
 PRIVATO PER SCELTA
-Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete di default, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. L'ordinamento per durata di YouTube è spento di default e chiede un permesso opzionale solo per www.youtube.com se lo attivi, salvando le durate in cache locale e revocando il permesso quando lo disattivi. Pulizia automatica e protezione duplicati agiscono solo dopo la configurazione quando attive, rispettano rigide protezioni e salvano ogni scheda chiusa nell'Archivio locale così puoi sempre ripristinarla.
+Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete di default, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. Le funzioni YouTube opzionali (ordinamento per durata e chiusura dei video con Mi piace) sono spente di default e chiedono un permesso opzionale solo per www.youtube.com se le attivi, revocandolo appena le disattivi entrambe. Pulizia automatica e protezione duplicati agiscono solo dopo la configurazione quando attive, rispettano rigide protezioni e salvano ogni scheda chiusa nell'Archivio locale così puoi sempre ripristinarla.
 
 PERCHÉ L'AVVISO "LEGGERE LA CRONOLOGIA DI NAVIGAZIONE SU TUTTI I DISPOSITIVI SU CUI VIENE ESEGUITO L'ACCESSO"
 È il modo in cui Chrome descrive i permessi di vedere indirizzo e titolo delle schede aperte e di ripristinare una scheda chiusa con Annulla. L'estensione usa solo le schede di questo browser e ha bisogno di entrambi. Dalle pagine stesse non legge nulla.
@@ -124,7 +124,7 @@ Too many open tabs? TabDeclutter tells you which ones you can close, sorts the r
 
 <b>What it does</b>
 <ul>
-<li>Declutter: a list of the tabs you probably no longer need, each with a plain reason. Close them one by one or in bulk, keep the ones you want, or discard them to free memory.</li>
+<li>Declutter: a list of the tabs you probably no longer need, each with a plain reason. Close them one by one or in bulk, keep the ones you want, discard them to free memory, or optionally close open and suspended YouTube video tabs you have already liked.</li>
 <li>Organize: put your tabs into native tab groups, by site or by topic, and optionally sort YouTube video tabs by duration (including suspended tabs without reloading them).</li>
 <li>Duplicate protection: as soon as a tab becomes a duplicate of another, warn you or close it automatically, as you choose. Whitelist, URL comparison rules, pause, and the same pattern syntax as Duplicate Tabs Closer.</li>
 <li>Archive and undo: every close is saved for a while and can be restored.</li>
@@ -132,7 +132,7 @@ Too many open tabs? TabDeclutter tells you which ones you can close, sorts the r
 </ul>
 
 <b>Private by design</b>
-No account, no servers, no analytics, no network requests by default, no remote code. Tab information is read and stored only in your browser. Optional YouTube duration sorting is off by default and asks for optional host access strictly to www.youtube.com only if you turn it on (revoked when turned off). Automatic cleanup and duplicate closing only run after setup when enabled, obey strict safety guardrails, and archive every closed tab locally so it can always be restored. The "Access browser tabs" permission is needed to see the address and title of your open tabs, and "Access recently closed tabs" to restore a tab you closed with Undo; the extension injects no content scripts.
+No account, no servers, no analytics, no network requests by default, no remote code. Tab information is read and stored only in your browser. Optional YouTube features (duration sorting and closing already-liked video tabs) are off by default and ask for optional host access strictly to www.youtube.com only if you turn them on (revoked once both are turned off). Automatic cleanup and duplicate closing only run after setup when enabled, obey strict safety guardrails, and archive every closed tab locally so it can always be restored. The "Access browser tabs" permission is needed to see the address and title of your open tabs, and "Access recently closed tabs" to restore a tab you closed with Undo; the extension injects no content scripts.
 
 Requires Firefox 140 or later. If you still use Duplicate Tabs Closer, turn it off to avoid conflicts.
 ```
@@ -144,7 +144,7 @@ Troppe schede aperte? TabDeclutter ti dice quali puoi chiudere, mette le altre i
 
 <b>Cosa fa</b>
 <ul>
-<li>Riordina: l'elenco delle schede che probabilmente non ti servono più, ognuna con un motivo chiaro. Chiudile una per una o in blocco, mantieni quelle che vuoi, oppure sospendile per liberare memoria.</li>
+<li>Riordina: l'elenco delle schede che probabilmente non ti servono più, ognuna con un motivo chiaro. Chiudile una per una o in blocco, mantieni quelle che vuoi, sospendile per liberare memoria o opzionalmente chiudi le schede video YouTube (anche sospese) a cui hai già messo Mi piace.</li>
 <li>Organizza: raggruppa le schede nei gruppi nativi, per sito o per argomento, e opzionalmente ordina le schede video YouTube per durata (anche quelle sospese senza ricaricarle).</li>
 <li>Protezione duplicati: appena una scheda diventa duplicata di un'altra, ti avvisa o la chiude da sola, come preferisci. Eccezioni, regole di confronto degli indirizzi, pausa e la stessa sintassi di Duplicate Tabs Closer.</li>
 <li>Archivio e annulla: ogni chiusura viene conservata per un po' e può essere ripristinata.</li>
@@ -152,7 +152,7 @@ Troppe schede aperte? TabDeclutter ti dice quali puoi chiudere, mette le altre i
 </ul>
 
 <b>Privato per scelta</b>
-Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete di default, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. L'ordinamento per durata di YouTube è spento di default e chiede il permesso host opzionale solo per www.youtube.com se lo attivi (revocato quando lo disattivi). Pulizia automatica e protezione duplicati agiscono solo dopo la configurazione quando attive, rispettano rigide protezioni e salvano ogni scheda chiusa nell'Archivio locale così puoi sempre ripristinarla. Il permesso "Accedere alle schede del browser" serve a vedere indirizzo e titolo delle schede aperte, e "Accedere alle schede chiuse di recente" a ripristinare con Annulla una scheda chiusa; l'estensione non inietta alcun content script.
+Nessun account, nessun server, nessuna analisi d'uso, nessuna richiesta di rete di default, nessun codice remoto. Le informazioni sulle schede sono lette e salvate solo nel tuo browser. Le funzioni YouTube opzionali (ordinamento per durata e chiusura dei video con Mi piace) sono spente di default e chiedono il permesso host opzionale solo per www.youtube.com se le attivi (revocato appena le disattivi entrambe). Pulizia automatica e protezione duplicati agiscono solo dopo la configurazione quando attive, rispettano rigide protezioni e salvano ogni scheda chiusa nell'Archivio locale così puoi sempre ripristinarla. Il permesso "Accedere alle schede del browser" serve a vedere indirizzo e titolo delle schede aperte, e "Accedere alle schede chiuse di recente" a ripristinare con Annulla una scheda chiusa; l'estensione non inietta alcun content script.
 
 Richiede Firefox 140 o successivo. Se usi ancora Duplicate Tabs Closer, disattivalo per evitare conflitti.
 ```

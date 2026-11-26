@@ -79,10 +79,10 @@ export function createDebouncer(ms: number, fn: () => void): () => void {
 }
 
 export function watchLocalKeys(
-  items: readonly { readonly key: string }[],
+  items: readonly { readonly name: string }[],
   onMatch: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>) => void,
 ): void {
-  const watched = items.map((item) => item.key.slice(6));
+  const watched = items.map((item) => item.name);
   browser.storage.onChanged.addListener(
     (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
       if (area === 'local' && watched.some((key) => key in changes)) onMatch(changes);

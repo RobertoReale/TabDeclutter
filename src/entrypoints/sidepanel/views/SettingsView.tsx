@@ -44,6 +44,7 @@ import {
   checkYouTubePermission,
   protectedSites,
   saveProtectedSites,
+  setCloseLikedYouTube,
   setSetting,
   setSortYouTubeByDuration,
   setUseBookmarks,
@@ -133,6 +134,22 @@ function MainSettings({ language }: { language: string }) {
             value={current.youTubeDurationOrder}
             onPick={(value: YouTubeDurationOrder) => {
               setSetting('youTubeDurationOrder', value);
+            }}
+          />
+        )}
+        <CheckField
+          label="settingsYouTubeCloseLiked"
+          hint="settingsYouTubeCloseLikedHint"
+          value={current.closeLikedYouTube && youTubeGranted.value}
+          onPick={setCloseLikedYouTube}
+        />
+        {current.closeLikedYouTube && youTubeGranted.value && (
+          <CheckField
+            label="settingsYouTubeCloseLikedActive"
+            hint="settingsYouTubeCloseLikedActiveHint"
+            value={current.closeLikedYouTubeActive}
+            onPick={(value) => {
+              setSetting('closeLikedYouTubeActive', value);
             }}
           />
         )}
